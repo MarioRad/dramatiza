@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Administración</title>
+  <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+  <header class="encabezado">
+    <img src="/logo.png" alt="Logo" class="logo">
+    <div class="encabezado-texto">
+      <h1>Panel de Administración</h1>
+      <p class="subtitulo">Inscripciones a talleres</p>
+    </div>
+  </header>
+
+  <main class="contenedor contenedor-panel">
+    <section id="vistaLogin" class="tarjeta">
+      <h2>Ingresar</h2>
+      <div id="mensajeLogin" class="mensaje" role="alert"></div>
+      <form id="formLogin">
+        <div class="campo">
+          <label for="username">Usuario</label>
+          <input type="text" id="username" name="username" required autocomplete="username" maxlength="50">
+        </div>
+        <div class="campo">
+          <label for="password">Contraseña</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="boton">Ingresar</button>
+      </form>
+    </section>
+
+    <div id="vistaPanel" hidden>
+      <section class="tarjeta">
+        <div class="cabecera-panel">
+          <h2 id="tituloPanel">Inscripciones</h2>
+          <div class="cabecera-sesion">
+            <span id="usuarioActual" class="usuario-actual"></span>
+            <button id="botonSalir" class="boton boton-secundario" type="button">Salir</button>
+          </div>
+        </div>
+
+        <nav id="tabsPanel" class="tabs" aria-label="Secciones">
+          <button type="button" class="tab" data-vista="inscripciones">Inscripciones</button>
+          <button type="button" class="tab" data-vista="talleres">Talleres</button>
+          <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
+          <button type="button" class="tab tab-admin" data-vista="eventos" hidden>Eventos</button>
+          <button type="button" class="tab tab-admin" data-vista="usuarios" hidden>Usuarios</button>
+        </nav>
+
+        <div id="mensajePanel" class="mensaje" role="alert"></div>
+      </section>
+
+      <div id="vistaTalleres" class="tab-contenido" hidden>
+        <h3>Talleres y cupos</h3>
+        <div class="tabla-envoltura">
+          <table id="tablaTalleres">
+            <thead>
+              <tr>
+                <th>Turno</th>
+                <th>Nombre</th>
+                <th>Descripción</th>
+                <th>Inscriptos</th>
+                <th>Cupo</th>
+                <th>Duración</th>
+                <th>Fecha inicio</th>
+                <th>Hora</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button id="botonAgregar" class="boton boton-secundario" type="button">+ Agregar taller</button>
+      </div>
+
+      <div id="vistaEncuentro" class="tab-contenido" hidden>
+        <div class="cabecera-panel">
+          <h3>Listado del encuentro</h3>
+          <button id="botonVaciarEncuentro" class="boton boton-peligro boton-chico" type="button">Vaciar listado</button>
+        </div>
+        <p class="ayuda">Importá el archivo CSV o Excel (por ejemplo, la exportación de Google Forms). Las columnas de DNI, apellido/nombre y correo se detectan automáticamente por su encabezado; si el archivo no tiene encabezado, el DNI debe ir en la primera columna.</p>
+        <div id="mensajeEncuentro" class="mensaje" role="alert"></div>
+        <form id="formImportarEncuentro">
+          <div class="campo">
+            <label for="archivoEncuentro">Archivo CSV o Excel</label>
+            <input type="file" id="archivoEncuentro" accept=".csv,.txt,.xlsx,.xls" required>
+          </div>
+          <button type="submit" class="boton boton-secundario" id="botonImportar">Importar listado</button>
+        </form>
+        <p class="ayuda" id="resumenEncuentro"></p>
+      </div>
+
+      <div id="vistaInscripciones" class="tab-contenido" hidden>
+        <h3>Inscripciones</h3>
+        <p class="ayuda" id="resumenInscripciones"></p>
+        <div class="filtros-barra">
+          <div class="campo">
+            <label for="buscarDni">Buscar por DNI</label>
+            <input type="text" id="buscarDni" inputmode="numeric" maxlength="8" placeholder="Ej: 30123456">
+          </div>
+          <div class="campo">
+            <label for="filtroPago">Estado de pago</label>
+            <select id="filtroPago">
+              <option value="">Todos</option>
+              <option value="pago_completo">Pago completo</option>
+              <option value="pago_parcial">Pago parcial</option>
+              <option value="no_pagado">No pagado</option>
+            </select>
+          </div>
+        </div>
+        <div class="tabla-envoltura">
+          <table id="tablaInscripciones">
+            <thead>
+              <tr>
+                <th>DNI</th>
+                <th>Nombre y apellido</th>
+                <th>Correo</th>
+                <th>Teléfono</th>
+                <th>Alimentación</th>
+                <th>Taller</th>
+                <th>Turno</th>
+                <th>Encuentro</th>
+                <th>Pago</th>
+                <th>Fecha</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="vistaEventos" class="tab-contenido" hidden>
+        <h3>Registro de eventos</h3>
+        <p class="ayuda">Auditoría: acciones registradas por los usuarios del sistema.</p>
+        <p class="ayuda" id="resumenEventos"></p>
+        <div class="tabla-envoltura">
+          <table id="tablaEventos">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Detalle</th>
+                <th>Usuario</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="vistaUsuarios" class="tab-contenido" hidden>
+        <h3>Usuarios</h3>
+        <div id="mensajeUsuarios" class="mensaje" role="alert"></div>
+        <div class="tabla-envoltura">
+          <table id="tablaUsuarios">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Nombre</th>
+                <th>Rol</th>
+                <th>Estado</th>
+                <th>Creado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button id="botonAgregarUsuario" class="boton boton-secundario" type="button">+ Agregar usuario</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="modalEditarInscripcion" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalEditarTitulo">
+      <h3 id="modalEditarTitulo">Editar inscripción</h3>
+      <p id="modalEditarInfo" class="ayuda"></p>
+      <div class="campo">
+        <label for="modalEditarTaller">Taller</label>
+        <select id="modalEditarTaller"></select>
+        <p class="ayuda-campo">Solo se pueden elegir talleres del mismo turno.</p>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarEdicion">Guardar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEdicion">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalUsuario" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalUsuarioTitulo">
+      <h3 id="modalUsuarioTitulo">Nuevo usuario</h3>
+      <div class="campos">
+        <div class="campo">
+          <label for="modalUsuarioUsername">Usuario</label>
+          <input type="text" id="modalUsuarioUsername" maxlength="50" autocomplete="off">
+        </div>
+        <div class="campo">
+          <label for="modalUsuarioNombre">Nombre</label>
+          <input type="text" id="modalUsuarioNombre" maxlength="120">
+        </div>
+        <div class="campo">
+          <label for="modalUsuarioPassword">Contraseña</label>
+          <input type="password" id="modalUsuarioPassword" autocomplete="new-password">
+          <p class="ayuda-campo">Dejalo vacío para no cambiarla (solo al editar).</p>
+        </div>
+        <div class="campo">
+          <label for="modalUsuarioRol">Rol</label>
+          <select id="modalUsuarioRol">
+            <option value="operador">Operador</option>
+            <option value="admin">Administrador</option>
+          </select>
+          <p class="ayuda-campo">Operador: gestión operativa. Administrador: además, eventos y usuarios.</p>
+        </div>
+        <div class="campo">
+          <label><input type="checkbox" id="modalUsuarioActivo" checked> Usuario activo</label>
+        </div>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarUsuario">Guardar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarUsuario">Cancelar</button>
+      </div>
+    </div>
+  </div>
+<footer class="pie">
+    <a href="/">Panel Registro</a>
+  </footer>
+  <div id="modalQr" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalQrTitulo">
+      <h3 id="modalQrTitulo">Acreditación</h3>
+      <p id="qrInfo" class="ayuda"></p>
+      <div style="text-align:center;">
+        <img id="qrImagen" alt="Código QR" width="300" height="300" style="width:300px;height:300px;image-rendering:pixelated;border:1px solid var(--color-borde);border-radius:8px;">
+        <p class="ayuda-campo">Mostrá este código al ingresar para confirmar la asistencia.</p>
+      </div>
+      <div class="modal-acciones">
+        <a id="qrPdfLink" class="boton boton-modal" target="_blank" rel="noopener" href="#">Descargar PDF</a>
+        <button type="button" class="boton boton-modal" id="botonReenviarQr">Reenviar email</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCerrarQr">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

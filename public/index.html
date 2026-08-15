@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Encuentro Nacional Dramatiza Salta 2026 - Inscripción a Talleres</title>
+  <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+  <header class="encabezado">
+    <img src="/logo.png" alt="Logo" class="logo">
+    <div class="encabezado-texto">
+      <h1>Encuentro Nacional Dramatiza Salta 2026</h1>
+      <h2>Inscripción a Talleres</h2>
+      <p class="subtitulo">9 - 10 - 11 Octubre &middot; Talleres con cupos limitados</p>
+      <p></p>
+      <p></p>
+    </div>
+  </header>
+
+  <main class="contenedor">
+    <section class="tarjeta">
+      <h2>Formulario de registro</h2>
+      <p class="ayuda">Podés inscribirte a un taller de la mañana y a otro de la tarde. Los cupos se otorgan por orden de llegada.</p>
+
+      <div id="mensaje" class="mensaje" role="alert"></div>
+
+      <form id="formInscripcion" novalidate>
+        <div id="pasoDni">
+          <div class="campo">
+            <label for="dni">Número de documento</label>
+            <input type="text" id="dni" name="dni" required inputmode="numeric" pattern="\d{7,8}" maxlength="8" placeholder="12345678" autocomplete="off">
+            <p class="ayuda-campo">Primero ingresá tu DNI para verificar tu inscripción al encuentro.</p>
+          </div>
+          <button type="button" class="boton" id="botonContinuar">Continuar</button>
+        </div>
+
+        <div id="pasoDatos" hidden>
+          <div class="campos">
+            <div class="campo">
+              <label for="nombre">Nombre</label>
+              <input type="text" id="nombre" name="nombre" required minlength="2" maxlength="100" autocomplete="given-name">
+            </div>
+            <div class="campo">
+              <label for="apellido">Apellido</label>
+              <input type="text" id="apellido" name="apellido" required minlength="2" maxlength="100" autocomplete="family-name">
+            </div>
+            <div class="campo">
+              <label for="email">Correo electrónico</label>
+              <input type="email" id="email" name="email" required maxlength="255" autocomplete="email">
+            </div>
+            <div class="campo">
+              <label for="telefono">Teléfono</label>
+              <input type="tel" id="telefono" name="telefono" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="351 1234567">
+            </div>
+            <div class="campo">
+              <label for="tallerManana">Talleres turno mañana</label>
+              <select id="tallerManana" name="tallerManana">
+                <option value="">— Sin taller —</option>
+              </select>
+            </div>
+            <div class="campo">
+              <label for="tallerTarde">Talleres turno tarde</label>
+              <select id="tallerTarde" name="tallerTarde">
+                <option value="">— Sin taller —</option>
+              </select>
+            </div>
+            <div class="campo campo-destacado">
+              <label for="alimentacion">Tipo de alimentación</label>
+              <select id="alimentacion" name="alimentacion" required>
+                <option value="sin_restriccion" selected>Sin restricción</option>
+                <option value="vegano">Vegano</option>
+                <option value="sin_tacc">Sin TACC</option>
+                <option value="sin_lactosa">Sin lactosa</option>
+                <option value="otro">Otro</option>
+              </select>
+              <p class="ayuda-campo">Importante: indicá si tienes algún tipo de restriccion en tu alimentación.</p>
+            </div>
+          </div>
+
+          <button type="submit" class="boton" id="botonEnviar">Inscribirme</button>
+          <p class="enlace-vuelta"><a href="#" id="cambiarDni">¿Equivocaste el DNI?</a></p>
+        </div>
+      </form>
+    </section>
+
+    <section class="tarjeta tarjeta-lista">
+      <h2>Talleres disponibles</h2>
+
+      <div id="listaTalleres" class="lista-talleres">
+        <p class="cargando">Cargando talleres…</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="modalEncuentro" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalEncuentroTitulo">
+      <h3 id="modalEncuentroTitulo">No estás inscripto al encuentro</h3>
+      <p>El DNI ingresado no figura en el listado de asistentes al encuentro. Para poder inscribirte a los talleres, primero debés inscribirte al encuentro.</p>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonInscribirse">Inscribirse</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalYaInscripto" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalYaInscriptoTitulo">
+      <h3 id="modalYaInscriptoTitulo">Ya estás inscripto a los talleres</h3>
+      <div id="yaInscriptoContenido"></div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonYaInscripto">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalInscripcionPrevia" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalInscripcionPreviaTitulo">
+      <h3 id="modalInscripcionPreviaTitulo">Tenés una inscripción previa</h3>
+      <div id="inscripcionPreviaContenido"></div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonInscripcionPreviaContinuar">Continuar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonInscripcionPreviaCancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalConfirmacion" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-amplio" role="dialog" aria-modal="true" aria-labelledby="modalConfirmacionTitulo">
+      <h3 id="modalConfirmacionTitulo">¡Inscripción registrada!</h3>
+      <div id="confirmacionContenido"></div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonConfirmacion">Finalizar</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="pie">
+    <a href="/admin.html">Panel de administración</a>
+  </footer>
+
+  <script src="/js/inscripcion.js"></script>
+</body>
+</html>
