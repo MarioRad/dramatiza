@@ -69,8 +69,12 @@ function construirMensajeInscripcion({ nombre, apellido, email, telefono, alimen
   lineas.push('Tu inscripción al encuentro fue registrada. Este es el detalle de los talleres:');
   lineas.push('');
   for (const t of talleres) {
-    lineas.push(`• ${t.nombre} (Turno ${ETIQUETAS_TURNO[t.turno] || t.turno})`);
-    lineas.push(`  Duración: ${t.duracion_hs === 6 ? '6 horas (se realiza en 2 días consecutivos)' : '3 horas (se realiza en un solo día)'}`);
+    const nombreTaller = t.taller || t.nombre || 'Taller';
+    lineas.push(`• ${nombreTaller} (Turno ${ETIQUETAS_TURNO[t.turno] || t.turno})`);
+    const duracionHs = t.duracion_hs ?? t.duracionHs;
+    if (duracionHs) {
+      lineas.push(`  Duración: ${Number(duracionHs) === 6 ? '6 horas (se realiza en 2 días consecutivos)' : '3 horas (se realiza en un solo día)'}`);
+    }
     if (t.descripcion) lineas.push(`  Descripción: ${t.descripcion}`);
   }
   lineas.push('');

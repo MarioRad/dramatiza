@@ -197,6 +197,14 @@ function filaTaller(t, esNuevo = false) {
   inputHora.value = t.hora || '';
   tdHora.appendChild(inputHora);
 
+  const tdLugar = document.createElement('td');
+  const inputLugar = document.createElement('input');
+  inputLugar.type = 'text';
+  inputLugar.value = t.lugar || '';
+  inputLugar.placeholder = 'Lugar (opcional)';
+  inputLugar.maxLength = 255;
+  tdLugar.appendChild(inputLugar);
+
   const tdAcciones = document.createElement('td');
   const botonGuardar = document.createElement('button');
   botonGuardar.type = 'button';
@@ -211,6 +219,7 @@ function filaTaller(t, esNuevo = false) {
       duracion_hs: selectDuracion.value,
       fecha: inputFecha.value || '',
       hora: inputHora.value || '',
+      lugar: inputLugar.value || '',
     };
     if (!payload.nombre) {
       mostrarMensaje(mensajePanel, 'El nombre del taller es obligatorio.', 'error');
@@ -254,7 +263,7 @@ function filaTaller(t, esNuevo = false) {
     tdAcciones.appendChild(botonEliminar);
   }
 
-  tr.append(tdTurno, tdNombre, tdDescripcion, tdInscriptos, tdCupo, tdDuracion, tdFecha, tdHora, tdAcciones);
+  tr.append(tdTurno, tdNombre, tdDescripcion, tdInscriptos, tdCupo, tdDuracion, tdFecha, tdHora, tdLugar, tdAcciones);
   return tr;
 }
 

@@ -235,6 +235,28 @@ function validarTaller(body) {
   return { nombre, descripcion, turno, cupo, duracionHs, fecha, hora, lugar };
 }
 
+async function regenerarAcreditacion(dni) {
+  const inscripciones = await db.listarInscripcionesPorDni(dni);
+  if (inscripciones.length === 0) return;
+  const sesiones = inscripciones.map((i) => ({
+    turno: i.turno,
+    taller: i.taller,
+    fecha: i.fecha || '',
+    hora: i.hora || '',
+    lugar: i.lugar || '',
+  }));
+  const qrCode = (inscripciones.find((i) => i.qr_code) || {}).qr_code || acreditacion.generarCodigo();
+  const qrPayload = acreditacion.construirPayload({
+    id: qrCode,
+    dni,
+    nombre: inscripciones[0].nombre,
+    apellido: inscripciones[0].apellido,
+    email: inscripciones[0].email,
+    sesiones,
+  });
+  await db.guardarQrInscripcion(dni, qrCode, qrPayload);
+}
+
 app.get('/api/talleres', async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
@@ -433,6 +455,7 @@ app.post('/api/admin/login', async (req, res, next) => {
     res.cookie('admin_token', token, {
       httpOnly: true,
       sameSite: 'lax',
+      secure: String(process.env.COOKIE_SECURE || '').toLowerCase() === 'true',
       maxAge: DURACION_SESION_MS,
     });
     res.json({ ok: true, usuario: usuario.username, nombre: usuario.nombre, rol: usuario.rol });
@@ -495,7 +518,11 @@ app.put('/api/admin/usuarios/:id', requireAdmin, async (req, res, next) => {
     const body = req.body || {};
     const nombre = String(body.nombre || '').trim();
     const rol = String(body.rol || 'operador').trim();
-    const activo = Boolean(body.activo);
+    const activoRaw = body.activo;
+    const activo =
+      activoRaw === undefined || activoRaw === null
+        ? true
+        : activoRaw === true || activoRaw === 1 || activoRaw === '1' || String(activoRaw).toLowerCase() === 'true';
     const password = String(body.password || '');
 
     if (!ROLES_VALIDOS.includes(rol)) throw new db.HttpError(400, 'Rol inválido.');
@@ -608,6 +635,7 @@ app.put('/api/admin/inscripciones/:id', requireAuth, async (req, res, next) => {
       if (!esIdValido(nuevoTallerId)) throw new db.HttpError(400, 'Taller inválido.');
       resultado = await db.cambiarTallerInscripcion(id, nuevoTallerId);
       detalleCambios.push(`taller: ${resultado.anterior} → ${resultado.nuevo}`);
+      await regenerarAcreditacion(resultado.dni);
     }
 
     if (estadoPago) {

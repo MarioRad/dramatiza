@@ -602,7 +602,7 @@ async function cambiarTallerInscripcion(id, nuevoTallerId) {
   if (Number(inscripcion.taller_id) === Number(nuevoTallerId)) {
     throw new HttpError(400, 'El participante ya está inscripto en ese taller.');
   }
-  const taller = await queryOne('SELECT id, nombre, turno, cupo FROM talleres WHERE id = ?', [nuevoTallerId]);
+  const taller = await queryOne('SELECT id, nombre, turno, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [nuevoTallerId]);
   if (!taller) throw new HttpError(400, 'El taller seleccionado no existe.');
   if (taller.turno !== inscripcion.turno) {
     throw new HttpError(400, `El taller "${taller.nombre}" no pertenece al turno ${inscripcion.turno}.`);
