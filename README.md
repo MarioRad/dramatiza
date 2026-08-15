@@ -58,7 +58,7 @@ Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 t
    ADMIN_PASSWORD=una-clave-segura
    ```
 
-5. (Opcional) Si querés arrancar con 10 talleres de ejemplo en vez de cargarlos a mano-->:
+5. (Opcional) Si querés arrancar con 10 talleres de ejemplo en vez de cargarlos a mano:
 
    ```
    SEED_ON_START=true
