@@ -77,7 +77,7 @@ Luego abrir:
 
 En desarrollo se puede usar `npm run dev` (reinicia automáticamente al guardar).
 
-## Estructura del proyecto
+## Estructura del proyecto - 
 
 ```
 public/            Frontend (HTML/CSS/JS plano)
@@ -129,4 +129,3 @@ Los campos `tallerManana` y `tallerTarde` son opcionales (puede elegirse uno sol
 - Si un taller llega a su cupo, deja de aceptar inscripciones (respuesta `409`).
 - No se puede bajar el cupo de un taller por debajo de su cantidad de inscriptos actuales.
 - Los talleres de ejemplo y sus cupos iniciales (20) se pueden cambiar directamente en la base de datos o desde el panel.
-# inscripciones
