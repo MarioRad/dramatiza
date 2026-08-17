@@ -77,7 +77,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-
 function validarEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -259,39 +258,21 @@ async function regenerarAcreditacion(dni) {
   await db.guardarQrInscripcion(dni, qrCode, qrPayload);
 }
 
-
+// ==========================================
+// ENDPOINT DEL WEBHOOK DE GITHUB (ARRIBA)
+// ==========================================
 app.post('/api/webhook/github', express.raw({ type: 'application/json' }), (req, res) => {
-  req.body = JSON.parse(req.body.toString());
-  webhook.manejarWebhook(req, res);
-});
-
-app.use((err, req, res, next) => {
-  if (err instanceof db.HttpError) {
-    return res.status(err.status).json({ error: err.message });
-  }
-  console.error(err);
-  res.status(500).json({ error: 'Error interno del servidor.' });
-});
-
-const PORT = Number(process.env.PORT || 3000);
-
-db.init()
-  .then(async () => {
-    if (!(await db.hayUsuarios())) {
-      const username = (process.env.ADMIN_USER || 'admin').trim().toLowerCase();
-      const password = process.env.ADMIN_PASSWORD || 'admin';
-      await db.crearUsuario({ username, passwordHash: hashPassword(password), nombre: 'Administrador', rol: 'admin' });
-      console.log(`Usuario administrador creado: ${username}`);
+  try {
+    if (!req.body || req.body.length === 0) {
+      return res.status(400).json({ error: 'Firma ausente o cuerpo vacio. Acceso denegado.' });
     }
-    whatsapp.iniciar().catch((e) => console.error('[WhatsApp] Error al iniciar:', e.message));
-    app.listen(PORT, () => {
-      console.log(`Sistema de inscripciones disponible en http://localhost:${PORT}`);
-    });
-  })
-  .catch((e) => {
-    console.error('No se pudo inicializar la base de datos:', e.message);
-    process.exit(1);
-  });
+    req.body = JSON.parse(req.body.toString());
+    webhook.manejarWebhook(req, res);
+  } catch (error) {
+    console.error('[Webhook] Error al procesar el JSON entrante:', error.message);
+    return res.status(400).json({ error: 'Formato JSON invalido.' });
+  }
+});
 
 app.get('/api/talleres', async (req, res, next) => {
   try {
@@ -857,3 +838,24 @@ app.delete('/api/admin/encuentro', requireAuth, async (req, res, next) => {
     next(e);
   }
 });
+
+
+const PORT = Number(process.env.PORT || 3000);
+
+db.init()
+  .then(async () => {
+    if (!(await db.hayUsuarios())) {
+      const username = (process.env.ADMIN_USER || 'admin').trim().toLowerCase();
+      const password = process.env.ADMIN_PASSWORD || 'admin';
+      await db.crearUsuario({ username, passwordHash: hashPassword(password), nombre: 'Administrador', rol: 'admin' });
+      console.log(`Usuario administrador creado: ${username}`);
+    }
+    whatsapp.iniciar().catch((e) => console.error('[WhatsApp] Error al iniciar:', e.message));
+    app.listen(PORT, () => {
+      console.log(`Sistema de inscripciones disponible en http://localhost:${PORT}`);
+    });
+  })
+  .catch((e) => {
+    console.error('No se pudo inicializar la base de datos:', e.message);
+    process.exit(1);
+  });
