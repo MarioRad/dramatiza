@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -16,25 +16,23 @@ function verificarFirma(payload, firma) {
   }
 }
 
-function ejecutarDeploy(callback) {
+function ejecutarDeploy() {
   const script = path.join(__dirname, '..', 'scripts', 'deploy.sh');
   const logPath = path.join(__dirname, '..', 'logs', 'deploy.log');
 
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  const logStream = fs.appendFileSync(logPath, `\n--- Deploy iniciado: ${new Date().toISOString()} ---\n`);
+  fs.appendFileSync(logPath, `\n--- Deploy iniciado: ${new Date().toISOString()} ---\n`);
 
-  execFile('bash', [script], { timeout: 120_000 }, (err, stdout, stderr) => {
-    const resultado = `\n[STDOUT]\n${stdout || ''}\n[STDERR]\n${stderr || ''}\n`;
-    try {
-      fs.appendFileSync(logPath, resultado);
-    } catch { /* noop */ }
-    if (err) {
-      console.error('[Webhook] Deploy falló:', err.message);
-      return callback(err, resultado);
-    }
-    console.log('[Webhook] Deploy completado');
-    callback(null, resultado);
+  const child = spawn('bash', [script], {
+    stdio: 'ignore',
+    detached: true,
+    env: { ...process.env, PROJECT_DIR: path.join(__dirname, '..') },
   });
+  child.unref();
+
+  console.log('[Webhook] Deploy lanzado, reiniciando servidor...');
+
+  setTimeout(() => process.exit(0), 500);
 }
 
 function construirMensajePush(data) {
@@ -85,15 +83,11 @@ function manejarWebhook(req, res) {
 
     res.json({ ok: true, mensaje: 'Deploy en curso.' });
 
-    ejecutarDeploy((err) => {
-      if (err) {
-        console.error('[Webhook] Deploy falló:', err.message);
-      }
-    });
+    ejecutarDeploy();
     return;
   }
 
   res.json({ ok: true, mensaje: `Evento ${evento} recibido.` });
 }
 
-module.exports = { manejarWebhook, verificarFirma, ejecutarDeploy };
+module.exports = { manejarWebhook, verificarFirma };
