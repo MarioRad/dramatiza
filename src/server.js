@@ -258,16 +258,22 @@ async function regenerarAcreditacion(dni) {
   await db.guardarQrInscripcion(dni, qrCode, qrPayload);
 }
 
-// ==========================================
-// ENDPOINT DEL WEBHOOK DE GITHUB (ARRIBA)
-// ==========================================
 app.post('/api/webhook/github', express.raw({ type: 'application/json' }), (req, res) => {
   try {
     if (!req.body || req.body.length === 0) {
       return res.status(400).json({ error: 'Firma ausente o cuerpo vacio. Acceso denegado.' });
     }
+
+    // SI YA ES UN OBJETO: Evitamos transformarlo y evitamos el error
+    if (typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+      // El cuerpo ya está parseado, pasamos directo al manejador
+      return webhook.manejarWebhook(req, res);
+    }
+
+    // SI VIENE COMO BUFFER CRUDO (Nativo de GitHub/Curl): Lo parseamos de forma segura
     req.body = JSON.parse(req.body.toString());
     webhook.manejarWebhook(req, res);
+
   } catch (error) {
     console.error('[Webhook] Error al procesar el JSON entrante:', error.message);
     return res.status(400).json({ error: 'Formato JSON invalido.' });
