@@ -8,4 +8,4 @@ cd "$PROJECT_DIR"
 
 git pull origin "$BRANCH"
 npm install --omit=dev --silent
-pm2 restart dramatiza
+pm2 restart inscripciones

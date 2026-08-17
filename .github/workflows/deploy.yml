@@ -18,4 +18,4 @@ jobs:
             cd /var/dramatiza
             git pull origin main
             npm install --omit=dev --silent
-            pm2 restart dramatiza || (pm2 start src/server.js --name dramatiza)
+            pm2 restart inscripciones || (pm2 start src/server.js --name inscripciones)
