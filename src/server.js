@@ -8,6 +8,7 @@ const db = require('./db');
 const notificaciones = require('./notificaciones');
 const acreditacion = require('./acreditacion');
 const whatsapp = require('./whatsapp');
+const webhook = require('./webhook');
 
 const app = express();
 
@@ -820,6 +821,11 @@ app.delete('/api/admin/encuentro', requireAuth, async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+app.post('/api/webhook/github', express.raw({ type: 'application/json' }), (req, res) => {
+  req.body = JSON.parse(req.body.toString());
+  webhook.manejarWebhook(req, res);
 });
 
 app.use((err, req, res, next) => {

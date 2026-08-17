@@ -27,6 +27,11 @@ services:
       - ./public:/app/public
       - app-logs:/app/logs
       - wa-session:/app/.whatsapp-session
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.git:/app/.git
+      - ./docker-compose.yml:/app/docker-compose.yml
+      - ./Dockerfile:/app/Dockerfile
+      - ./scripts:/app/scripts
     depends_on:
       db:
         condition: service_healthy
