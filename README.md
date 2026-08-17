@@ -1,7 +1,5 @@
 # Sistema de Inscripciones a Talleres
 
-APPS
-
 Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 talleres (5 de mañana y 5 de tarde), cada uno se dicta durante 3 días consecutivos. Una persona puede inscribirse a un taller de mañana **y** a otro de tarde.
 
 ## Características
@@ -131,3 +129,5 @@ Los campos `tallerManana` y `tallerTarde` son opcionales (puede elegirse uno sol
 - Si un taller llega a su cupo, deja de aceptar inscripciones (respuesta `409`).
 - No se puede bajar el cupo de un taller por debajo de su cantidad de inscriptos actuales.
 - Los talleres de ejemplo y sus cupos iniciales (20) se pueden cambiar directamente en la base de datos o desde el panel.
+
+APPS
