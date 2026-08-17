@@ -1,5 +1,6 @@
 # Sistema de Inscripciones a Talleres
 
+APPS
 
 Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 talleres (5 de mañana y 5 de tarde), cada uno se dicta durante 3 días consecutivos. Una persona puede inscribirse a un taller de mañana **y** a otro de tarde.
 
