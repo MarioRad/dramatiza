@@ -74,7 +74,14 @@ async function transaction(fn) {
   const conn = isPg ? await p.connect() : await p.getConnection();
   const run = async (sql, params = []) => {
     const res = await conn.query(isPg ? toPgSql(sql) : sql, params);
-    return filas(res);
+    if (isPg) {
+      const rows = filas(res);
+      rows.filasAfectadas = res.rowCount || 0;
+      return rows;
+    }
+    const rows = Array.isArray(res[0]) ? res[0] : [];
+    rows.filasAfectadas = res[0]?.affectedRows || 0;
+    return rows;
   };
   try {
     if (isPg) {
@@ -100,36 +107,122 @@ async function transaction(fn) {
   }
 }
 
-const TALLERES_SEMILLA = {
-  manana: [
-    ['Robótica y Programación', 'Introducción a la robótica y la programación por bloques.'],
-    ['Fotografía Digital', 'Taller de fotografía con celular y cámara.'],
-    ['Teatro y Expresión Corporal', 'Juegos teatrales y herramientas de expresión escénica.'],
-    ['Ajedrez', 'Reglas, estrategias básicas y práctica en partidas.'],
-    ['Huerta y Jardinería', 'Cultivá tus propias hortalizas en macetas.'],
-  ],
-  tarde: [
-    ['Desarrollo de Videojuegos', 'Creá tu primer videojuego desde cero.'],
-    ['Cerámica y Alfarería', 'Modelado manual y técnicas de cerámica.'],
-    ['Danza Urbana', 'Coreografías y ritmos urbanos en grupo.'],
-    ['Música y Guitarra', 'Acordes básicos y práctica en conjunto.'],
-    ['Diseño 3D e Impresión', 'Modelado 3D y fabricación de piezas.'],
-  ],
-};
+const TALLERES_SEMILLA = [
+  { nombre: 'Aprender a Producir (1° Parte)', descripcion: 'Taller de producción teatral.', fecha: '2026-10-09', hora: '15:00', lugar: 'A definir', disertante: 'Ester Trozzo', cupo: 25 },
+  { nombre: 'El Cuerpo y La Palabra', descripcion: 'Exploración de la relación entre cuerpo y palabra en escena.', fecha: '2026-10-09', hora: '15:00', lugar: 'A definir', disertante: 'Lezcano', cupo: 25 },
+  { nombre: 'Las llaves del aprendizaje: Dramaterapia (1° parte)', descripcion: 'Introducción a la dramaterapia como herramienta pedagógica.', fecha: '2026-10-09', hora: '15:00', lugar: 'A definir', disertante: 'Guerrero - Cartofiel', cupo: 25 },
+  { nombre: 'Gaga Teatral', descripcion: 'Taller de expresión teatral gaga.', fecha: '2026-10-09', hora: '15:00', lugar: 'A definir', disertante: 'Saavedra', cupo: 25 },
+  { nombre: 'El Juego de Improvisación Teatral (1º Parte)', descripcion: 'Juegos y técnicas de improvisación teatral.', fecha: '2026-10-09', hora: '15:00', lugar: 'A definir', disertante: 'Victor Galestok', cupo: 25 },
+
+  { nombre: 'Teatro Antropológico (1º Parte)', descripcion: 'Exploración del teatro antropológico.', fecha: '2026-10-10', hora: '09:30', lugar: 'A definir', disertante: 'Jorge Holovatuck', cupo: 25 },
+  { nombre: 'BUNRAKU: Marionetas (1º Parte)', descripcion: 'Técnicas de marionetas estilo bunraku.', fecha: '2026-10-10', hora: '09:30', lugar: 'A definir', disertante: 'Alberto Torres Sayas', cupo: 20 },
+  { nombre: 'Recursos con sentido (1º Parte)', descripcion: 'Recursos escénicos con sentido pedagógico.', fecha: '2026-10-10', hora: '09:30', lugar: 'A definir', disertante: 'Juliana Rososzka', cupo: 25 },
+  { nombre: 'Códigos del mimo y la pantomima', descripcion: 'Técnicas de mimo y pantomima.', fecha: '2026-10-10', hora: '09:30', lugar: 'A definir', disertante: 'Adrian Miguel Martinez', cupo: 25 },
+  { nombre: 'Escuelas porosas: ESI (1º Parte)', descripcion: 'Educación Sexual Integral a través del teatro.', fecha: '2026-10-10', hora: '09:30', lugar: 'A definir', disertante: 'Mariela Piedrabuena', cupo: 25 },
+
+  { nombre: 'Aprender a producir y apreciar (2º Parte)', descripcion: 'Segunda parte del taller de producción teatral.', fecha: '2026-10-10', hora: '15:30', lugar: 'A definir', disertante: 'Ester Trozzo', cupo: 25 },
+  { nombre: 'Musicoterapia comunicativa', descripcion: 'Musicoterapia aplicada a la comunicación.', fecha: '2026-10-10', hora: '15:30', lugar: 'A definir', disertante: 'Andrea Marcela Peralta', cupo: 25 },
+  { nombre: 'Dramaterapia (2º parte)', descripcion: 'Segunda parte del taller de dramaterapia.', fecha: '2026-10-10', hora: '15:30', lugar: 'A definir', disertante: 'Guerrero', cupo: 25 },
+  { nombre: 'La sensorialidad y el Teatro (1º Parte)', descripcion: 'Exploración sensorial en la práctica teatral.', fecha: '2026-10-10', hora: '15:30', lugar: 'A definir', disertante: 'Fabiola Pavetto', cupo: 25 },
+  { nombre: 'Improvisación teatral (2º Parte)', descripcion: 'Segunda parte del taller de improvisación.', fecha: '2026-10-10', hora: '15:30', lugar: 'A definir', disertante: 'Victor Galestok', cupo: 25 },
+
+  { nombre: 'Teatro Antropológico (2º Parte)', descripcion: 'Segunda parte del teatro antropológico.', fecha: '2026-10-11', hora: '10:00', lugar: 'A definir', disertante: 'Jorge Holovatuck', cupo: 25 },
+  { nombre: 'BUNRAKU: Marionetas (2º Parte)', descripcion: 'Segunda parte de marionetas bunraku.', fecha: '2026-10-11', hora: '10:00', lugar: 'A definir', disertante: 'Alberto Torres Zayas', cupo: 20 },
+  { nombre: 'Recursos con sentido (2º Parte)', descripcion: 'Segunda parte de recursos escénicos.', fecha: '2026-10-11', hora: '10:00', lugar: 'A definir', disertante: 'Juliana Rososzka', cupo: 25 },
+  { nombre: 'La sensorialidad y el Teatro (2º Parte)', descripcion: 'Segunda parte de exploración sensorial.', fecha: '2026-10-11', hora: '10:00', lugar: 'A definir', disertante: 'Fabiola Pavetto', cupo: 25 },
+  { nombre: 'Escuelas porosas: ESI (2º Parte)', descripcion: 'Segunda parte de ESI a través del teatro.', fecha: '2026-10-11', hora: '10:00', lugar: 'A definir', disertante: 'Mariela Piedrabuena', cupo: 25 },
+
+  { nombre: 'Dramaturgia de la inmersión', descripcion: 'Dramaturgia inmersiva.', fecha: '2026-10-11', hora: '15:30', lugar: 'A definir', disertante: 'Jorgelina Teyseyre', cupo: 25 },
+  { nombre: 'El Teatro como Dispositivo de Salud', descripcion: 'Teatro aplicado a la salud.', fecha: '2026-10-11', hora: '15:30', lugar: 'A definir', disertante: 'Claudio Pansera', cupo: 25 },
+  { nombre: 'Teatro con Inteligencia Artificial', descripcion: 'Uso de IA en la creación teatral.', fecha: '2026-10-11', hora: '15:30', lugar: 'A definir', disertante: 'José María Verón', cupo: 25 },
+  { nombre: 'La miseria corporal', descripcion: 'Exploración de la corporalidad en el teatro.', fecha: '2026-10-11', hora: '15:30', lugar: 'A definir', disertante: 'Juan Pablo Cabezas', cupo: 25 },
+  { nombre: 'Cuerpo ámbito de expresión y comunicación', descripcion: 'El cuerpo como medio de expresión y comunicación.', fecha: '2026-10-11', hora: '15:30', lugar: 'A definir', disertante: 'Macarena Salomé Robles', cupo: 25 },
+];
+
+const BLOQUES_SEMILLA = [
+  // DÍA 1 — 2026-10-09
+  { dia: '2026-10-09', hora_inicio: '08:00', hora_fin: '10:00', tipo: 'break', titulo: 'Desayuno y Acreditaciones', descripcion: 'Recepción de participantes, entrega de credenciales y material de bienvenida en el hall central.', icono: '☕', orden: 1 },
+  { dia: '2026-10-09', hora_inicio: '10:00', hora_fin: '12:00', tipo: 'inauguracion', titulo: 'Inauguración y Espectáculo de Apertura', descripcion: 'Apertura oficial del evento con autoridades e invitados especiales, seguido del espectáculo escénico inaugural.', icono: '🎭', orden: 2 },
+  { dia: '2026-10-09', hora_inicio: '12:00', hora_fin: '14:30', tipo: 'break', titulo: 'Almuerzo libre', descripcion: 'Espacio libre para almuerzo y vinculación entre participantes.', icono: '🍽️', orden: 3 },
+  { dia: '2026-10-09', hora_inicio: '14:30', hora_fin: '15:00', tipo: 'ponencia', titulo: 'Bloque de Ponencias Tarde Día 1', descripcion: '', icono: '🎤', orden: 4, datos: JSON.stringify([
+    { titulo: 'TEATRO Y Trastornos del Espectro Autista: Escenarios de empatía', ponente: 'Elisa Graciela Ochoa', hora: '14:30 a 14:45' },
+    { titulo: 'Barreras simbólicas: una experiencia para ampliar horizontes culturales', ponente: 'Noelia Canavesi', hora: '14:45 a 15:00' }
+  ]) },
+  { dia: '2026-10-09', hora_inicio: '15:00', hora_fin: '18:00', tipo: 'talleres', titulo: 'Bloque de Talleres en Paralelo', descripcion: '5 talleres a elección para docentes y teatristas', icono: '🛠️', orden: 5 },
+  { dia: '2026-10-09', hora_inicio: '18:00', hora_fin: '18:30', tipo: 'break', titulo: 'Merienda', descripcion: 'Corte para compartir una merienda entre participantes.', icono: '☕', orden: 6 },
+  { dia: '2026-10-09', hora_inicio: '18:30', hora_fin: '19:30', tipo: 'obra', titulo: 'Obra de Teatro - Función Día 1', descripcion: 'Presentación de obra teatral programada para el cierre de la jornada.', icono: '🎬', orden: 7 },
+
+  // DÍA 2 — 2026-10-10
+  { dia: '2026-10-10', hora_inicio: '08:00', hora_fin: '09:00', tipo: 'break', titulo: 'Desayuno', descripcion: 'Recepción con desayuno.', icono: '☕', orden: 1 },
+  { dia: '2026-10-10', hora_inicio: '09:00', hora_fin: '09:30', tipo: 'ponencia', titulo: 'Bloque de Ponencias Mañana', descripcion: '', icono: '🎤', orden: 2, datos: JSON.stringify([
+    { titulo: 'Mirar también es hacer: La devolución como dispositivo de pensamiento colectivo', ponente: 'Leandro Bres', hora: '09:00 a 09:15' },
+    { titulo: 'Teatro en la Escuela Técnica: la metáfora como estrategia de enseñanza', ponente: 'Daniela Guerci', hora: '09:15 a 09:30' }
+  ]) },
+  { dia: '2026-10-10', hora_inicio: '09:30', hora_fin: '12:30', tipo: 'talleres', titulo: 'Bloque de Talleres en Paralelo', descripcion: '', icono: '🛠️', orden: 3 },
+  { dia: '2026-10-10', hora_inicio: '12:30', hora_fin: '14:30', tipo: 'break', titulo: 'Almuerzo libre', descripcion: 'Tiempo de almuerzo.', icono: '🍽️', orden: 4 },
+  { dia: '2026-10-10', hora_inicio: '14:30', hora_fin: '15:30', tipo: 'conversatorio', titulo: 'Conversatorio con Jorge Dubatti', descripcion: 'Encuentro magistral e intercambio abierto de reflexiones pedagógicas y teatrales a cargo del renombrado crítico e investigador Jorge Dubatti.', icono: '💬', orden: 5 },
+  { dia: '2026-10-10', hora_inicio: '15:30', hora_fin: '18:30', tipo: 'talleres', titulo: 'Bloque de Talleres en Paralelo', descripcion: '', icono: '🛠️', orden: 6 },
+  { dia: '2026-10-10', hora_inicio: '18:30', hora_fin: '19:00', tipo: 'break', titulo: 'Merienda', descripcion: 'Corte para merienda.', icono: '☕', orden: 7 },
+  { dia: '2026-10-10', hora_inicio: '19:00', hora_fin: '20:00', tipo: 'obra', titulo: 'Obra de Teatro - Función Día 2', descripcion: 'Presentación escénica del Día 2.', icono: '🎬', orden: 8 },
+
+  // DÍA 3 — 2026-10-11
+  { dia: '2026-10-11', hora_inicio: '08:00', hora_fin: '09:00', tipo: 'break', titulo: 'Desayuno', descripcion: 'Apertura de la jornada final con desayuno.', icono: '☕', orden: 1 },
+  { dia: '2026-10-11', hora_inicio: '09:00', hora_fin: '10:00', tipo: 'conversatorio', titulo: 'Conversatorio con Jorge Dubatti (Continuación)', descripcion: 'Segunda parte del espacio de intercambio con Jorge Dubatti.', icono: '💬', orden: 2 },
+  { dia: '2026-10-11', hora_inicio: '10:00', hora_fin: '13:00', tipo: 'talleres', titulo: 'Bloque de Talleres en Paralelo', descripcion: '', icono: '🛠️', orden: 3 },
+  { dia: '2026-10-11', hora_inicio: '13:00', hora_fin: '15:00', tipo: 'break', titulo: 'Almuerzo libre', descripcion: 'Intervalo para almuerzo.', icono: '🍽️', orden: 4 },
+  { dia: '2026-10-11', hora_inicio: '15:00', hora_fin: '15:30', tipo: 'ponencia', titulo: 'Bloque de Ponencias Tarde', descripcion: '', icono: '🎤', orden: 5, datos: JSON.stringify([
+    { titulo: 'Proyecto Rutas Pedagógicas "De la Ruta al Escenario"', ponente: 'Silvana Elizabeth Castro', hora: '15:00 a 15:15' },
+    { titulo: 'Un día en la vida de 1810, una articulación de saberes', ponente: 'Noelia Mellea', hora: '15:15 a 15:30' }
+  ]) },
+  { dia: '2026-10-11', hora_inicio: '15:30', hora_fin: '18:30', tipo: 'talleres', titulo: 'Bloque de Talleres en Paralelo', descripcion: '', icono: '🛠️', orden: 6 },
+  { dia: '2026-10-11', hora_inicio: '18:30', hora_fin: '19:00', tipo: 'break', titulo: 'Merienda', descripcion: 'Pausa para merienda previa al cierre.', icono: '☕', orden: 7 },
+  { dia: '2026-10-11', hora_inicio: '19:00', hora_fin: '20:00', tipo: 'obra', titulo: 'Obra de Teatro y Acto de Cierre', descripcion: 'Función teatral de clausura y palabras finales de despedida del congreso/encuentro.', icono: '🎬', orden: 8 },
+];
+
+const CONFIG_SEMILLA = [
+  { clave: 'capacidad_locacion', valor: '500' },
+  { clave: 'fecha_inicio', valor: '2026-10-09' },
+  { clave: 'fecha_fin', valor: '2026-10-11' },
+  { clave: 'perm_inscripciones', valor: 'true' },
+  { clave: 'perm_talleres', valor: 'true' },
+  { clave: 'perm_programa', valor: 'true' },
+  { clave: 'perm_encuentro', valor: 'true' },
+  { clave: 'perm_acreditacion', valor: 'true' },
+];
 
 async function seed() {
   const filasRes = await query('SELECT COUNT(*) AS n FROM talleres');
-  if (Number(filasRes[0].n) > 0) return;
-  for (const turno of ['manana', 'tarde']) {
-    for (const [i, [nombre, descripcion]] of TALLERES_SEMILLA[turno].entries()) {
-      await query('INSERT INTO talleres (nombre, descripcion, turno, cupo, duracion_hs) VALUES (?, ?, ?, ?, ?)', [
-        nombre,
-        descripcion,
-        turno,
-        20,
-        i < 2 ? 6 : 3,
-      ]);
+  if (Number(filasRes[0].n) === 0) {
+    for (const t of TALLERES_SEMILLA) {
+      await query(
+        'INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [t.nombre, t.descripcion, t.cupo || 20, 3, t.fecha, t.hora, t.lugar || '', t.disertante || '']
+      );
     }
+    console.log(`Seed: ${TALLERES_SEMILLA.length} talleres insertados.`);
+  }
+}
+
+async function seedPrograma() {
+  const bloquesRes = await query('SELECT COUNT(*) AS n FROM programa_bloques');
+  if (Number(bloquesRes[0].n) === 0) {
+    for (const b of BLOQUES_SEMILLA) {
+      await query(
+        'INSERT INTO programa_bloques (dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [b.dia, b.hora_inicio, b.hora_fin, b.tipo, b.titulo, b.descripcion || '', b.icono || '', b.orden || 0, b.datos || null]
+      );
+    }
+    console.log(`Seed: ${BLOQUES_SEMILLA.length} bloques del programa insertados.`);
+  }
+}
+
+async function seedConfig() {
+  const configRes = await query('SELECT COUNT(*) AS n FROM configuracion_evento');
+  if (Number(configRes[0].n) === 0) {
+    for (const c of CONFIG_SEMILLA) {
+      await query('INSERT INTO configuracion_evento (clave, valor) VALUES (?, ?)', [c.clave, c.valor]);
+    }
+    console.log(`Seed: ${CONFIG_SEMILLA.length} configuraciones insertadas.`);
   }
 }
 
@@ -143,6 +236,12 @@ async function tieneColumna(tabla, columna) {
   return filasRes.length > 0;
 }
 
+async function safeAlter(sql) {
+  try {
+    await query(sql);
+  } catch (_) { /* noop - column may not exist */ }
+}
+
 async function init() {
   await initPool();
   const id = isPg ? 'SERIAL' : 'INT AUTO_INCREMENT';
@@ -151,7 +250,6 @@ async function init() {
     id ${id} PRIMARY KEY,
     nombre VARCHAR(120) NOT NULL,
     descripcion TEXT,
-    turno VARCHAR(20) NOT NULL,
     cupo INT NOT NULL DEFAULT 20,
     duracion_hs INT NOT NULL DEFAULT 3,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -166,12 +264,14 @@ async function init() {
     telefono VARCHAR(30) NOT NULL DEFAULT '',
     alimentacion VARCHAR(50) NOT NULL DEFAULT 'sin_restriccion',
     taller_id INT NOT NULL,
-    turno VARCHAR(20) NOT NULL,
     en_encuentro ${isPg ? 'BOOLEAN NOT NULL DEFAULT FALSE' : 'TINYINT(1) NOT NULL DEFAULT 0'},
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_dni_turno UNIQUE (dni, turno),
+    CONSTRAINT uq_dni_taller UNIQUE (dni, taller_id),
     CONSTRAINT fk_taller FOREIGN KEY (taller_id) REFERENCES talleres (id) ON DELETE CASCADE
   )`);
+
+  await safeAlter(`ALTER TABLE talleres DROP COLUMN IF EXISTS turno`);
+  await safeAlter(`ALTER TABLE inscripciones DROP COLUMN IF EXISTS turno`);
 
   await query(`CREATE TABLE IF NOT EXISTS encuentro_inscripciones (
     id ${id} PRIMARY KEY,
@@ -191,6 +291,44 @@ async function init() {
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await query(`CREATE TABLE IF NOT EXISTS programa_bloques (
+    id ${id} PRIMARY KEY,
+    dia VARCHAR(10) NOT NULL,
+    hora_inicio VARCHAR(10) NOT NULL,
+    hora_fin VARCHAR(10) NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    titulo VARCHAR(200) NOT NULL,
+    descripcion TEXT,
+    icono VARCHAR(10) NOT NULL DEFAULT '',
+    orden INT NOT NULL DEFAULT 0,
+    datos TEXT,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS configuracion_evento (
+    clave VARCHAR(50) NOT NULL PRIMARY KEY,
+    valor TEXT NOT NULL DEFAULT ''
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS acreditaciones (
+    id ${id} PRIMARY KEY,
+    dni VARCHAR(20) NOT NULL,
+    nombre VARCHAR(120) NOT NULL DEFAULT '',
+    apellido VARCHAR(120) NOT NULL DEFAULT '',
+    qr_code VARCHAR(50) NOT NULL DEFAULT '',
+    usuario VARCHAR(255) NOT NULL DEFAULT '',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS comidas_asistencias (
+    id ${id} PRIMARY KEY,
+    dni VARCHAR(20) NOT NULL,
+    bloque_id INT NOT NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_dni_bloque UNIQUE (dni, bloque_id),
+    CONSTRAINT fk_bloque_comida FOREIGN KEY (bloque_id) REFERENCES programa_bloques (id) ON DELETE CASCADE
+  )`);
+
   await query(`CREATE TABLE IF NOT EXISTS usuarios (
     id ${id} PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
@@ -198,6 +336,11 @@ async function init() {
     nombre VARCHAR(120) NOT NULL DEFAULT '',
     rol VARCHAR(20) NOT NULL DEFAULT 'operador',
     activo ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    perm_inscripciones ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    perm_talleres ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    perm_programa ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    perm_encuentro ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    perm_acreditacion ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
@@ -235,6 +378,14 @@ async function init() {
     await query(`ALTER TABLE talleres ADD COLUMN lugar VARCHAR(255) NOT NULL DEFAULT ''`);
   }
 
+  if (!(await tieneColumna('talleres', 'disertante'))) {
+    await query(`ALTER TABLE talleres ADD COLUMN disertante VARCHAR(200) NOT NULL DEFAULT ''`);
+  }
+
+  if (!(await tieneColumna('talleres', 'pareja_id'))) {
+    await query(`ALTER TABLE talleres ADD COLUMN pareja_id ${isPg ? 'INT REFERENCES talleres(id) ON DELETE SET NULL' : 'INT'}`);
+  }
+
   if (!(await tieneColumna('inscripciones', 'qr_code'))) {
     await query(`ALTER TABLE inscripciones ADD COLUMN qr_code VARCHAR(50) NOT NULL DEFAULT ''`);
   }
@@ -251,6 +402,12 @@ async function init() {
     await query(`ALTER TABLE encuentro_inscripciones ADD COLUMN pago VARCHAR(50) NOT NULL DEFAULT ''`);
   }
 
+  for (const perm of ['perm_inscripciones', 'perm_talleres', 'perm_programa', 'perm_encuentro', 'perm_acreditacion']) {
+    if (!(await tieneColumna('usuarios', perm))) {
+      await query(`ALTER TABLE usuarios ADD COLUMN ${perm} ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'}`);
+    }
+  }
+
   await query(
     `UPDATE inscripciones SET en_encuentro = TRUE WHERE en_encuentro = FALSE AND dni IN (SELECT dni FROM encuentro_inscripciones)`
   );
@@ -258,14 +415,17 @@ async function init() {
   if (String(process.env.SEED_ON_START || '').trim().toLowerCase() === 'true') {
     await seed();
   }
+
+  await seedPrograma();
+  await seedConfig();
 }
 
 async function listarTalleres() {
   return query(
-    `SELECT t.id, t.nombre, t.descripcion, t.turno, t.cupo, t.duracion_hs, t.fecha, t.hora, t.lugar,
+    `SELECT t.id, t.nombre, t.descripcion, t.cupo, t.duracion_hs, t.fecha, t.hora, t.lugar, t.disertante, t.pareja_id,
        (SELECT COUNT(*) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos
      FROM talleres t
-     ORDER BY t.turno, t.id`
+     ORDER BY t.fecha, t.hora, t.id`
   );
 }
 function bloquesHorario(t) {
@@ -304,23 +464,9 @@ function diasDelTaller(t) {
 function talleresSeSuperponen(a, b) {
   const ba = bloquesHorario(a);
   const bb = bloquesHorario(b);
-  if (ba.length > 0 && bb.length > 0) {
-    for (const x of ba) {
-      for (const y of bb) {
-        if (x[0] < y[1] && y[0] < x[1]) return true;
-      }
-    }
-    return false;
-  }
-  if (a.turno === b.turno) {
-    const da = diasDelTaller(a);
-    const db = diasDelTaller(b);
-    if (da.length > 0 && db.length > 0) {
-      for (const x of da) {
-        for (const y of db) {
-          if (x === y) return true;
-        }
-      }
+  for (const x of ba) {
+    for (const y of bb) {
+      if (x[0] < y[1] && y[0] < x[1]) return true;
     }
   }
   return false;
@@ -338,34 +484,24 @@ function buscarConflictoHorario(existentes, nuevos) {
   return null;
 }
 
-async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', alimentacion = 'sin_restriccion', tallerManana, tallerTarde, enEncuentro = false, estadoPago = 'no_pagado' }) {
-  const selecciones = [];
-  if (tallerManana) selecciones.push({ id: Number(tallerManana), turno: 'manana' });
-  if (tallerTarde) selecciones.push({ id: Number(tallerTarde), turno: 'tarde' });
-  if (selecciones.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', alimentacion = 'sin_restriccion', tallerIds = [], enEncuentro = false, estadoPago = 'no_pagado' }) {
+  const seleccionIds = Array.isArray(tallerIds) ? tallerIds.filter(n => Number.isInteger(n) && n > 0) : [];
+  if (seleccionIds.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
 
   return transaction(async (run) => {
     const existentes = await run(
-      `SELECT i.turno, t.nombre, t.fecha, t.hora, t.duracion_hs
+      `SELECT i.taller_id, t.nombre, t.fecha, t.hora, t.duracion_hs
        FROM inscripciones i JOIN talleres t ON t.id = i.taller_id
        WHERE i.dni = ?`,
       [dni]
     );
-    const turnosTomados = new Set(existentes.map((e) => e.turno));
-    if (selecciones.some((s) => turnosTomados.has(s.turno))) {
-      const turnoRepetido = selecciones.find((s) => turnosTomados.has(s.turno)).turno;
-      throw new HttpError(409, `El DNI ya tiene un taller en el turno ${turnoRepetido === 'manana' ? 'mañana' : 'tarde'}.`);
-    }
 
     const seleccionados = [];
-    for (const sel of selecciones) {
-      const res = await run('SELECT id, nombre, turno, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ? FOR UPDATE', [sel.id]);
+    for (const id of seleccionIds) {
+      const res = await run('SELECT id, nombre, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ? FOR UPDATE', [id]);
       const taller = res[0];
       if (!taller) throw new HttpError(400, 'Uno de los talleres seleccionados no existe.');
-      if (taller.turno !== sel.turno) {
-        throw new HttpError(400, `El taller "${taller.nombre}" no pertenece al turno ${sel.turno}.`);
-      }
-      const conteo = await run('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [sel.id]);
+      const conteo = await run('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [id]);
       if (Number(conteo[0].n) >= Number(taller.cupo)) {
         throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
       }
@@ -380,16 +516,16 @@ async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', a
       );
     }
 
-    for (const sel of selecciones) {
+    for (const id of seleccionIds) {
       try {
         await run(
-          'INSERT INTO inscripciones (nombre, apellido, dni, email, telefono, alimentacion, taller_id, turno, en_encuentro, estado_pago) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [nombre, apellido, dni, email, telefono, alimentacion, sel.id, sel.turno, enEncuentro, estadoPago]
+          'INSERT INTO inscripciones (nombre, apellido, dni, email, telefono, alimentacion, taller_id, en_encuentro, estado_pago) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [nombre, apellido, dni, email, telefono, alimentacion, id, enEncuentro, estadoPago]
         );
       } catch (e) {
         const duplicado = isPg ? e.code === '23505' : e.code === 'ER_DUP_ENTRY';
         if (duplicado) {
-          throw new HttpError(409, 'El DNI ingresado ya tiene una inscripción en el turno seleccionado.');
+          throw new HttpError(409, 'El DNI ingresado ya está inscripto en ese taller.');
         }
         throw e;
       }
@@ -399,11 +535,11 @@ async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', a
 
 async function listarInscripciones() {
   return query(
-    `SELECT i.id, i.nombre, i.apellido, i.dni, i.email, i.telefono, i.alimentacion, i.turno, i.en_encuentro, i.creado_en,
+    `SELECT i.id, i.nombre, i.apellido, i.dni, i.email, i.telefono, i.alimentacion, i.en_encuentro, i.creado_en,
        i.estado_pago, i.taller_id, t.nombre AS taller, t.duracion_hs
      FROM inscripciones i
      JOIN talleres t ON t.id = i.taller_id
-     ORDER BY t.turno, t.id, i.id`
+     ORDER BY t.fecha, t.hora, t.id, i.id`
   );
 }
 
@@ -425,12 +561,12 @@ async function buscarEncuentroPorDni(dni) {
 
 async function listarInscripcionesPorDni(dni) {
   return query(
-    `SELECT i.id, i.dni, i.nombre, i.apellido, i.email, i.telefono, i.alimentacion, i.turno,
+    `SELECT i.id, i.dni, i.nombre, i.apellido, i.email, i.telefono, i.alimentacion,
        i.estado_pago, i.qr_code, i.taller_id, t.nombre AS taller, t.descripcion, t.duracion_hs, t.fecha, t.hora, t.lugar
      FROM inscripciones i
      JOIN talleres t ON t.id = i.taller_id
      WHERE i.dni = ?
-     ORDER BY i.turno`,
+     ORDER BY t.fecha, t.hora`,
     [dni]
   );
 }
@@ -477,48 +613,128 @@ async function vaciarEncuentro() {
   return res.filasAfectadas;
 }
 
-async function crearTaller({ nombre, descripcion, turno, cupo, duracionHs = 3, fecha = '', hora = '', lugar = '' }) {
-  if (isPg) {
-    const filasRes = await query(
-      'INSERT INTO talleres (nombre, descripcion, turno, cupo, duracion_hs, fecha, hora, lugar) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
-      [nombre, descripcion, turno, cupo, duracionHs, fecha, hora, lugar]
-    );
-    return Number(filasRes[0].id);
-  }
-  const res = await mutation(
-    'INSERT INTO talleres (nombre, descripcion, turno, cupo, duracion_hs, fecha, hora, lugar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [nombre, descripcion, turno, cupo, duracionHs, fecha, hora, lugar]
-  );
-  return res.insertId;
+function limpiarNombreParte(nombre) {
+  return String(nombre || '').replace(/\s*\(\d+°\s*parte\)\s*/gi, '').trim();
 }
 
-async function actualizarTaller(id, { nombre, descripcion, turno, cupo, duracionHs = 3, fecha = '', hora = '', lugar = '' }) {
+function sufijoParte(n, total) {
+  if (total <= 1) return '';
+  return ` (${n + 1}° parte)`;
+}
+
+async function crearTaller({ nombre, descripcion, cupo, lugar, disertante, parts = [] }) {
+  const nombreBase = limpiarNombreParte(nombre);
+  const n = Number(cupo);
+  if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'El cupo debe ser un número entero mayor o igual a 0.');
+  if (!parts.length) parts = [{ fecha: '', hora: '', duracion_hs: 3 }];
+
+  const ids = [];
+  const fn = async (run) => {
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const duracionHs = Number(p.duracion_hs) || 3;
+      const fecha = String(p.fecha || '').trim();
+      const hora = String(p.hora || '').trim();
+      const nombreParte = nombreBase + sufijoParte(i, parts.length);
+      const parejaId = i > 0 ? ids[0] : null;
+
+      const filasRes = await run(
+        `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)${isPg ? ' RETURNING id' : ''}`,
+        [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, parejaId]
+      );
+      ids.push(isPg ? Number(filasRes[0].id) : filasRes.insertId);
+    }
+  };
+
+  if (parts.length > 1) {
+    await transaction(fn);
+  } else {
+    await fn(async (sql, params) => {
+      const p = await initPool();
+      const res = await p.query(isPg ? toPgSql(sql) : sql, params);
+      return filas(res);
+    });
+  }
+  return ids[0];
+}
+
+async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertante, parts = [] }) {
   const n = Number(cupo);
   if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'El cupo debe ser un número entero mayor o igual a 0.');
   const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [id]);
   if (Number(conteo[0].n) > n) {
     throw new HttpError(409, `No se puede reducir el cupo: ya hay ${conteo[0].n} inscriptos.`);
   }
-  const res = await mutation(
-    'UPDATE talleres SET nombre = ?, descripcion = ?, turno = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ? WHERE id = ?',
-    [nombre, descripcion, turno, n, duracionHs, fecha, hora, lugar, id]
-  );
-  if (!res.filasAfectadas) throw new HttpError(404, 'Taller no encontrado.');
+  if (!parts.length) parts = [{ id: null, fecha: '', hora: '', duracion_hs: 3 }];
+
+  const fn = async (run) => {
+    const mainRes = await run(
+      'UPDATE talleres SET descripcion = ?, cupo = ?, lugar = ?, disertante = ? WHERE id = ?',
+      [descripcion, n, lugar, disertante, id]
+    );
+    if (!mainRes.filasAfectadas) throw new HttpError(404, 'Taller no encontrado.');
+
+    const existentes = await run('SELECT id FROM talleres WHERE id = ? OR pareja_id = ?', [id, id]);
+    const existentesIds = new Set(existentes.map(r => Number(r.id)));
+    existentesIds.delete(id);
+
+    const incomingIds = new Set(parts.filter(p => p.id).map(p => Number(p.id)));
+
+    for (const eid of existentesIds) {
+      if (!incomingIds.has(eid)) {
+        await run('DELETE FROM talleres WHERE id = ?', [eid]);
+      }
+    }
+
+    const nombreBase = limpiarNombreParte(nombre);
+    const totalParts = parts.length;
+
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const duracionHs = Number(p.duracion_hs) || 3;
+      const fecha = String(p.fecha || '').trim();
+      const hora = String(p.hora || '').trim();
+      const nombreParte = nombreBase + sufijoParte(i, totalParts);
+
+      if (p.id) {
+        await run(
+          'UPDATE talleres SET nombre = ?, descripcion = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
+          [nombreParte, descripcion, duracionHs, fecha, hora, lugar, disertante, p.id]
+        );
+      } else {
+        const parejaId = i === 0 ? null : id;
+        await run(
+          `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)${isPg ? ' RETURNING id' : ''}`,
+          [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, parejaId]
+        );
+      }
+    }
+
+    const nombreFinal = nombreBase + sufijoParte(0, totalParts);
+    await run('UPDATE talleres SET nombre = ? WHERE id = ?', [nombreFinal, id]);
+  };
+
+  await transaction(fn);
   return true;
 }
 
 async function eliminarTaller(id) {
   const taller = await queryOne('SELECT nombre FROM talleres WHERE id = ?', [id]);
   if (!taller) throw new HttpError(404, 'Taller no encontrado.');
-  const conteo = await queryOne('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [id]);
+  const conteo = await queryOne('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id IN (SELECT id FROM talleres WHERE id = ? OR pareja_id = ?)', [id, id]);
   const inscriptos = Number(conteo.n);
-  await mutation('DELETE FROM talleres WHERE id = ?', [id]);
+  await mutation('DELETE FROM talleres WHERE id = ? OR pareja_id = ?', [id, id]);
   return { nombre: taller.nombre, inscriptosEliminados: inscriptos };
 }
 
 async function eliminarInscripcion(id) {
   const res = await mutation('DELETE FROM inscripciones WHERE id = ?', [id]);
   return res.filasAfectadas > 0;
+}
+
+async function eliminarInscripcionesPorDni(dni) {
+  const res = await mutation('DELETE FROM inscripciones WHERE dni = ?', [dni]);
+  return res.filasAfectadas;
 }
 
 async function registrarEvento(tipo, detalle, usuario = 'admin') {
@@ -552,25 +768,40 @@ async function crearUsuario({ username, passwordHash, nombre = '', rol = 'operad
 }
 
 async function buscarUsuario(username) {
-  return queryOne('SELECT id, username, password_hash, nombre, rol, activo FROM usuarios WHERE username = ?', [username]);
+  return queryOne('SELECT id, username, password_hash, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_programa, perm_encuentro, perm_acreditacion FROM usuarios WHERE username = ?', [username]);
 }
 
 async function listarUsuarios() {
-  const filasRes = await query('SELECT id, username, nombre, rol, activo, creado_en FROM usuarios ORDER BY id');
+  const filasRes = await query('SELECT id, username, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_programa, perm_encuentro, perm_acreditacion, creado_en FROM usuarios ORDER BY id');
   return filasRes.map((u) => ({ ...u, id: Number(u.id), activo: Boolean(u.activo) }));
 }
 
-async function actualizarUsuario(id, { nombre, rol, activo, passwordHash = null }) {
+async function actualizarUsuario(id, { nombre, rol, activo, passwordHash = null, permInscripciones = true, permTalleres = true, permPrograma = true, permEncuentro = true, permAcreditacion = true }) {
   if (passwordHash) {
-    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, password_hash = ? WHERE id = ?', [
+    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, password_hash = ?, perm_inscripciones = ?, perm_talleres = ?, perm_programa = ?, perm_encuentro = ?, perm_acreditacion = ? WHERE id = ?', [
       nombre,
       rol,
       activo,
       passwordHash,
+      permInscripciones,
+      permTalleres,
+      permPrograma,
+      permEncuentro,
+      permAcreditacion,
       id,
     ]);
   } else {
-    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ? WHERE id = ?', [nombre, rol, activo, id]);
+    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, perm_inscripciones = ?, perm_talleres = ?, perm_programa = ?, perm_encuentro = ?, perm_acreditacion = ? WHERE id = ?', [
+      nombre,
+      rol,
+      activo,
+      permInscripciones,
+      permTalleres,
+      permPrograma,
+      permEncuentro,
+      permAcreditacion,
+      id,
+    ]);
   }
 }
 
@@ -595,24 +826,21 @@ async function buscarAcreditacionPorDni(dni) {
 }
 
 async function cambiarTallerInscripcion(id, nuevoTallerId) {
-  const inscripcion = await queryOne('SELECT id, dni, nombre, apellido, turno, taller_id FROM inscripciones WHERE id = ?', [
+  const inscripcion = await queryOne('SELECT id, dni, nombre, apellido, taller_id FROM inscripciones WHERE id = ?', [
     id,
   ]);
   if (!inscripcion) throw new HttpError(404, 'Inscripción no encontrada.');
   if (Number(inscripcion.taller_id) === Number(nuevoTallerId)) {
     throw new HttpError(400, 'El participante ya está inscripto en ese taller.');
   }
-  const taller = await queryOne('SELECT id, nombre, turno, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [nuevoTallerId]);
+  const taller = await queryOne('SELECT id, nombre, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [nuevoTallerId]);
   if (!taller) throw new HttpError(400, 'El taller seleccionado no existe.');
-  if (taller.turno !== inscripcion.turno) {
-    throw new HttpError(400, `El taller "${taller.nombre}" no pertenece al turno ${inscripcion.turno}.`);
-  }
   const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND id <> ?', [nuevoTallerId, id]);
   if (Number(conteo[0].n) >= Number(taller.cupo)) {
     throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
   }
   const otros = await query(
-    `SELECT i.turno, t.nombre, t.fecha, t.hora, t.duracion_hs
+    `SELECT i.taller_id, t.nombre, t.fecha, t.hora, t.duracion_hs
      FROM inscripciones i JOIN talleres t ON t.id = i.taller_id
      WHERE i.dni = ? AND i.id <> ?`,
     [inscripcion.dni, id]
@@ -635,6 +863,215 @@ async function cambiarTallerInscripcion(id, nuevoTallerId) {
   };
 }
 
+// ── Programa ──────────────────────────────────────────────────────────
+
+async function listarPrograma() {
+  return query('SELECT * FROM programa_bloques ORDER BY dia, orden, hora_inicio');
+}
+
+async function listarDiasPrograma() {
+  return query('SELECT DISTINCT dia FROM programa_bloques ORDER BY dia');
+}
+
+async function obtenerBloque(id) {
+  return queryOne('SELECT * FROM programa_bloques WHERE id = ?', [id]);
+}
+
+async function crearBloque({ dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null }) {
+  if (isPg) {
+    const filasRes = await query(
+      'INSERT INTO programa_bloques (dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos]
+    );
+    return Number(filasRes[0].id);
+  }
+  const res = await mutation(
+    'INSERT INTO programa_bloques (dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos]
+  );
+  return res.insertId;
+}
+
+async function actualizarBloque(id, { dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null }) {
+  const res = await mutation(
+    'UPDATE programa_bloques SET dia = ?, hora_inicio = ?, hora_fin = ?, tipo = ?, titulo = ?, descripcion = ?, icono = ?, orden = ?, datos = ? WHERE id = ?',
+    [dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos, id]
+  );
+  if (!res.filasAfectadas) throw new HttpError(404, 'Bloque no encontrado.');
+  return true;
+}
+
+async function eliminarBloque(id) {
+  const res = await mutation('DELETE FROM programa_bloques WHERE id = ?', [id]);
+  if (!res.filasAfectadas) throw new HttpError(404, 'Bloque no encontrado.');
+  return true;
+}
+
+// ── Configuración ─────────────────────────────────────────────────────
+
+async function obtenerConfig(clave) {
+  const fila = await queryOne('SELECT valor FROM configuracion_evento WHERE clave = ?', [clave]);
+  return fila ? fila.valor : null;
+}
+
+async function obtenerTodaConfig() {
+  const filas = await query('SELECT clave, valor FROM configuracion_evento ORDER BY clave');
+  const config = {};
+  for (const f of filas) config[f.clave] = f.valor;
+  return config;
+}
+
+async function guardarConfig(clave, valor) {
+  if (isPg) {
+    await query(
+      `INSERT INTO configuracion_evento (clave, valor) VALUES (?, ?)
+       ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor`,
+      [clave, valor]
+    );
+  } else {
+    await query(
+      `INSERT INTO configuracion_evento (clave, valor) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+      [clave, valor]
+    );
+  }
+}
+
+async function guardarTodaConfig(obj) {
+  for (const [clave, valor] of Object.entries(obj)) {
+    await guardarConfig(clave, String(valor));
+  }
+}
+
+// ── Asistentes ────────────────────────────────────────────────────────
+
+async function contarAsistentesUnicos() {
+  const fila = await queryOne('SELECT COUNT(DISTINCT i.dni) AS n FROM inscripciones i');
+  return Number(fila.n);
+}
+
+// ── Acreditaciones y comidas ──────────────────────────────────────────
+
+async function registrarAcreditacion({ dni, nombre = '', apellido = '', qrCode = '', usuario = '' }) {
+  await query(
+    'INSERT INTO acreditaciones (dni, nombre, apellido, qr_code, usuario) VALUES (?, ?, ?, ?, ?)',
+    [dni, nombre || '', apellido || '', qrCode || '', usuario || '']
+  );
+}
+
+async function contarAcreditados() {
+  const fila = await queryOne('SELECT COUNT(DISTINCT dni) AS n FROM acreditaciones');
+  return Number(fila.n);
+}
+
+async function listarAcreditacionesPorTaller() {
+  const filasRes = await query(
+    `SELECT t.id AS taller_id, t.nombre AS taller, t.fecha, t.hora,
+       COUNT(DISTINCT i.id) AS inscriptos,
+       COUNT(DISTINCT CASE WHEN a.dni IS NOT NULL THEN i.dni END) AS acreditados
+     FROM talleres t
+     LEFT JOIN inscripciones i ON i.taller_id = t.id
+     LEFT JOIN acreditaciones a ON a.dni = i.dni
+     GROUP BY t.id, t.nombre, t.fecha, t.hora
+     ORDER BY t.fecha, t.hora, t.nombre`
+  );
+  return filasRes.map((f) => ({
+    ...f,
+    taller_id: Number(f.taller_id),
+    inscriptos: Number(f.inscriptos),
+    acreditados: Number(f.acreditados),
+  }));
+}
+
+async function listarBloquesBreak() {
+  return query(
+    `SELECT id, dia, titulo, hora_inicio, hora_fin FROM programa_bloques WHERE tipo = 'break' ORDER BY dia, hora_inicio`
+  );
+}
+
+async function obtenerServicioComidaActivo(margenMs = 20 * 60 * 1000) {
+  const bloques = await listarBloquesBreak();
+  const ahora = Date.now();
+  for (const b of bloques) {
+    const d = String(b.dia || '').split('-').map(Number);
+    if (d.length < 3 || d.some((n) => !Number.isFinite(n))) continue;
+    const hi = String(b.hora_inicio || '').split(':').map(Number);
+    const hf = String(b.hora_fin || '').split(':').map(Number);
+    const inicio = new Date(d[0], d[1] - 1, d[2], hi[0] || 0, hi[1] || 0).getTime();
+    const fin = new Date(d[0], d[1] - 1, d[2], hf[0] || 23, hf[1] || 59).getTime();
+    if (Number.isNaN(inicio) || Number.isNaN(fin)) continue;
+    if (ahora >= inicio - margenMs && ahora <= fin + margenMs) return b;
+  }
+  return null;
+}
+
+async function tieneAsistenciaComida(dni, bloqueId) {
+  const fila = await queryOne(
+    'SELECT id FROM comidas_asistencias WHERE dni = ? AND bloque_id = ?',
+    [dni, bloqueId]
+  );
+  return Boolean(fila);
+}
+
+async function registrarAsistenciaComida(dni, bloqueId) {
+  const sql = isPg
+    ? 'INSERT INTO comidas_asistencias (dni, bloque_id) VALUES ($1, $2) ON CONFLICT (dni, bloque_id) DO NOTHING'
+    : 'INSERT IGNORE INTO comidas_asistencias (dni, bloque_id) VALUES (?, ?)';
+  try {
+    await query(sql, [dni, bloqueId]);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function resumenComidas() {
+  const servicios = await query(
+    `SELECT b.id AS bloque_id, b.dia, b.titulo, b.hora_inicio, b.hora_fin,
+       COUNT(c.id) AS asistentes
+     FROM programa_bloques b
+     LEFT JOIN comidas_asistencias c ON c.bloque_id = b.id
+     WHERE b.tipo = 'break'
+     GROUP BY b.id, b.dia, b.titulo, b.hora_inicio, b.hora_fin
+     ORDER BY b.dia, b.hora_inicio`
+  );
+
+  const dietas = await query(
+    `SELECT c.bloque_id, COALESCE(NULLIF(x.alimentacion, ''), 'sin_restriccion') AS alimentacion,
+       COUNT(*) AS cantidad
+     FROM comidas_asistencias c
+     JOIN (
+       SELECT dni, MIN(alimentacion) AS alimentacion FROM inscripciones GROUP BY dni
+     ) x ON x.dni = c.dni
+     GROUP BY c.bloque_id, COALESCE(NULLIF(x.alimentacion, ''), 'sin_restriccion')`
+  );
+
+  const porAsistente = await query(
+    `SELECT c.dni,
+       MIN(a.primera_acreditacion) AS primera_acreditacion,
+       COALESCE(MIN(p.apellido), '') AS apellido,
+       COALESCE(MIN(p.nombre), '') AS nombre,
+       COALESCE(MIN(p.alimentacion), 'sin_restriccion') AS alimentacion,
+       SUM(CASE WHEN LOWER(b.titulo) LIKE '%desayuno%' THEN 1 ELSE 0 END) AS desayunos,
+       SUM(CASE WHEN LOWER(b.titulo) LIKE '%merienda%' THEN 1 ELSE 0 END) AS meriendas,
+       COUNT(*) AS total_servicios
+     FROM comidas_asistencias c
+     JOIN programa_bloques b ON b.id = c.bloque_id
+     LEFT JOIN (
+       SELECT dni, MIN(apellido) AS apellido, MIN(nombre) AS nombre, MIN(alimentacion) AS alimentacion
+       FROM inscripciones GROUP BY dni
+     ) p ON p.dni = c.dni
+     LEFT JOIN (
+       SELECT dni, MIN(registrado_en) AS primera_acreditacion
+       FROM acreditaciones GROUP BY dni
+     ) a ON a.dni = c.dni
+     GROUP BY c.dni
+     ORDER BY apellido, nombre`
+  );
+
+  return { servicios, dietas, porAsistente };
+}
+
 module.exports = {
   HttpError,
   init,
@@ -650,6 +1087,7 @@ module.exports = {
   listarInscripciones,
   cambiarEstadoPagoInscripcion,
   eliminarInscripcion,
+  eliminarInscripcionesPorDni,
   registrarEvento,
   listarEventos,
   cambiarTallerInscripcion,
@@ -667,4 +1105,23 @@ module.exports = {
   importarEncuentro,
   contarEncuentro,
   vaciarEncuentro,
+  listarPrograma,
+  listarDiasPrograma,
+  obtenerBloque,
+  crearBloque,
+  actualizarBloque,
+  eliminarBloque,
+  obtenerConfig,
+  obtenerTodaConfig,
+  guardarConfig,
+  guardarTodaConfig,
+  contarAsistentesUnicos,
+  registrarAcreditacion,
+  contarAcreditados,
+  listarAcreditacionesPorTaller,
+  listarBloquesBreak,
+  obtenerServicioComidaActivo,
+  tieneAsistenciaComida,
+  registrarAsistenciaComida,
+  resumenComidas,
 };

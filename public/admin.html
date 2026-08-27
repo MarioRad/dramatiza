@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel de Administración</title>
   <link rel="stylesheet" href="/css/estilos.css">
+  <link rel="stylesheet" href="/programa.css">
 </head>
 <body>
   <header class="encabezado">
@@ -13,6 +14,7 @@
       <h1>Panel de Administración</h1>
       <p class="subtitulo">Inscripciones a talleres</p>
     </div>
+    <button type="button" class="dark-toggle" id="darkToggle"></button>
   </header>
 
   <main class="contenedor contenedor-panel">
@@ -45,9 +47,13 @@
         <nav id="tabsPanel" class="tabs" aria-label="Secciones">
           <button type="button" class="tab" data-vista="inscripciones">Inscripciones</button>
           <button type="button" class="tab" data-vista="talleres">Talleres</button>
+          <button type="button" class="tab" data-vista="programa">Programa</button>
           <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
+          <button type="button" class="tab tab-acreditacion" data-vista="acreditaciones" hidden>Acreditaciones</button>
+          <button type="button" class="tab tab-acreditacion" data-vista="comidas" hidden>Desayunos y meriendas</button>
           <button type="button" class="tab tab-admin" data-vista="eventos" hidden>Eventos</button>
           <button type="button" class="tab tab-admin" data-vista="usuarios" hidden>Usuarios</button>
+          <button type="button" class="tab tab-admin" data-vista="permisos" hidden>Permisos</button>
         </nav>
 
         <div id="mensajePanel" class="mensaje" role="alert"></div>
@@ -55,25 +61,7 @@
 
       <div id="vistaTalleres" class="tab-contenido" hidden>
         <h3>Talleres y cupos</h3>
-        <div class="tabla-envoltura">
-          <table id="tablaTalleres">
-            <thead>
-              <tr>
-                <th>Turno</th>
-                <th>Nombre</th>
-                <th>Descripción</th>
-                <th>Inscriptos</th>
-                <th>Cupo</th>
-                <th>Duración</th>
-                <th>Fecha inicio</th>
-                <th>Hora</th>
-                <th>Lugar</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div id="listaTalleres" class="talleres-grid"></div>
         <button id="botonAgregar" class="boton boton-secundario" type="button">+ Agregar taller</button>
       </div>
 
@@ -122,11 +110,79 @@
                 <th>Teléfono</th>
                 <th>Alimentación</th>
                 <th>Taller</th>
-                <th>Turno</th>
                 <th>Encuentro</th>
                 <th>Pago</th>
                 <th>Fecha</th>
                 <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="vistaAcreditaciones" class="tab-contenido" hidden>
+        <h3>Acreditaciones</h3>
+        <div class="cabecera-panel">
+          <p class="ayuda" id="resumenAcreditaciones">Cargando…</p>
+          <button id="botonActualizarAcreditaciones" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+        </div>
+        <p class="ayuda">Asistentes acreditados con la app móvil (escaneo de QR), discriminados por taller.</p>
+        <div class="tabla-envoltura">
+          <table id="tablaAcreditacionesTalleres">
+            <thead>
+              <tr>
+                <th>Taller</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Acreditados</th>
+                <th>Inscriptos</th>
+                <th>Pendientes</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="vistaComidas" class="tab-contenido" hidden>
+        <h3>Desayunos y meriendas</h3>
+        <div class="cabecera-panel">
+          <p class="ayuda" id="resumenComidas">Cargando…</p>
+          <button id="botonActualizarComidas" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+        </div>
+        <p class="ayuda">Cada vez que un asistente acreditado escanea su QR dentro del horario de un desayuno o merienda, se cuenta para ese servicio.</p>
+        <h4>Cantidades por servicio y restricción alimentaria</h4>
+        <div class="tabla-envoltura">
+          <table id="tablaComidasServicios">
+            <thead>
+              <tr>
+                <th>Servicio</th>
+                <th>Día</th>
+                <th>Horario</th>
+                <th>Total</th>
+                <th>Sin restricción</th>
+                <th>Vegano</th>
+                <th>Sin TACC</th>
+                <th>Sin lactosa</th>
+                <th>Otro</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h4>Recuento por asistente acreditado</h4>
+        <div class="tabla-envoltura">
+          <table id="tablaComidasAsistentes">
+            <thead>
+              <tr>
+                <th>Fecha acreditación</th>
+                <th>DNI</th>
+                <th>Apellido y nombre</th>
+                <th>Alimentación</th>
+                <th>Desayunos</th>
+                <th>Meriendas</th>
+                <th>Total servicios</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -173,6 +229,33 @@
         </div>
         <button id="botonAgregarUsuario" class="boton boton-secundario" type="button">+ Agregar usuario</button>
       </div>
+
+      <div id="vistaPrograma" class="tab-contenido" hidden>
+        <div id="programaAdmin" class="programa-container"></div>
+      </div>
+
+      <div id="vistaPermisos" class="tab-contenido" hidden>
+        <h3>Permisos por usuario</h3>
+        <p class="ayuda">Los permisos de los operadores definen qué módulos puede usar cada usuario. Los administradores siempre tienen acceso completo.</p>
+        <div id="mensajePermisos" class="mensaje" role="alert"></div>
+        <form id="formPermisos">
+          <div class="tabla-responsive">
+            <table id="tablaPermisos">
+              <thead>
+                <tr>
+                  <th>Usuario</th>
+                  <th style="text-align:center;">Inscripciones</th>
+                  <th style="text-align:center;">Talleres</th>
+                  <th style="text-align:center;">Programa</th>
+                  <th style="text-align:center;">Encuentro</th>
+                  <th style="text-align:center;">Acreditación</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </form>
+      </div>
     </div>
   </main>
 
@@ -183,7 +266,7 @@
       <div class="campo">
         <label for="modalEditarTaller">Taller</label>
         <select id="modalEditarTaller"></select>
-        <p class="ayuda-campo">Solo se pueden elegir talleres del mismo turno.</p>
+        <p class="ayuda-campo">Solo se pueden elegir talleres disponibles (con cupo).</p>
       </div>
       <div class="modal-acciones">
         <button type="button" class="boton boton-modal" id="botonGuardarEdicion">Guardar</button>
@@ -220,6 +303,16 @@
         <div class="campo">
           <label><input type="checkbox" id="modalUsuarioActivo" checked> Usuario activo</label>
         </div>
+        <div class="campo" style="grid-column:1/-1;">
+          <label style="margin-bottom:0.5rem;display:block;">Permisos (solo para operadores)</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.35rem;">
+            <label><input type="checkbox" id="permUsuarioInscripciones" checked> Inscripciones</label>
+            <label><input type="checkbox" id="permUsuarioTalleres" checked> Talleres</label>
+            <label><input type="checkbox" id="permUsuarioPrograma" checked> Programa</label>
+            <label><input type="checkbox" id="permUsuarioEncuentro" checked> Encuentro</label>
+            <label><input type="checkbox" id="permUsuarioAcreditacion" checked> Acreditación</label>
+          </div>
+        </div>
       </div>
       <div class="modal-acciones">
         <button type="button" class="boton boton-modal" id="botonGuardarUsuario">Guardar</button>
@@ -246,6 +339,67 @@
     </div>
   </div>
 
-  <script src="/js/admin.js"></script>
+  <div id="modalBloquePrograma" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-amplio" role="dialog" aria-modal="true" aria-labelledby="modalBloqueTitulo">
+      <h3 id="modalBloqueTitulo">Nuevo bloque</h3>
+      <div id="mensajeBloque" class="mensaje" role="alert"></div>
+      <form id="formBloquePrograma">
+        <div class="campos">
+          <div class="campo">
+            <label for="bloqueDia">Día</label>
+            <input type="date" id="bloqueDia" required>
+          </div>
+          <div class="campo">
+            <label for="bloqueTipo">Tipo de bloque</label>
+            <select id="bloqueTipo" required>
+              <option value="break">Descanso / Comida</option>
+              <option value="inauguracion">Inauguración</option>
+              <option value="ponencia">Ponencia</option>
+              <option value="conversatorio">Conversatorio</option>
+              <option value="obra">Obra de teatro</option>
+              <option value="talleres">Talleres</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="bloqueTitulo">Título</label>
+            <input type="text" id="bloqueTitulo" maxlength="200" required>
+          </div>
+          <div class="campo">
+            <label for="bloqueIcono">Icono (emoji)</label>
+            <input type="text" id="bloqueIcono" maxlength="10" placeholder="☕ 🎤 💬 🎬 🛠️">
+          </div>
+          <div class="campo">
+            <label for="bloqueHoraInicio">Hora inicio</label>
+            <input type="time" id="bloqueHoraInicio" required>
+          </div>
+          <div class="campo">
+            <label for="bloqueHoraFin">Hora fin</label>
+            <input type="time" id="bloqueHoraFin" required>
+          </div>
+          <div class="campo" style="grid-column:1/-1;">
+            <label for="bloqueDescripcion">Descripción</label>
+            <textarea id="bloqueDescripcion" rows="3" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;"></textarea>
+          </div>
+          <div class="campo" style="grid-column:1/-1;">
+            <label for="bloqueOrden">Orden (posición en el día)</label>
+            <input type="number" id="bloqueOrden" min="0" value="0" style="width:80px;">
+          </div>
+          <div id="campoPonencias" class="campo" style="grid-column:1/-1;" hidden>
+            <label>Ponencias (una por línea: hora | título | ponente)</label>
+            <textarea id="bloquePonencias" rows="4" placeholder="14:30 a 14:45 | Título charla | Nombre Ponente" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;"></textarea>
+          </div>
+        </div>
+        <div class="modal-acciones">
+          <button type="submit" class="boton boton-modal" id="botonGuardarBloque">Guardar</button>
+          <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarBloque">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/darkmode.js"></script>
+  <script src="/js/programa.js"></script>
+  <script src="/js/admin.js?v=3"></script>
 </body>
 </html>

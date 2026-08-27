@@ -6,7 +6,12 @@ const nodemailer = require('nodemailer');
 const acreditacion = require('./acreditacion');
 const whatsapp = require('./whatsapp');
 
-const ETIQUETAS_TURNO = { manana: 'Mañana', tarde: 'Tarde' };
+function formatoFecha(fechaStr) {
+  const partes = String(fechaStr || '').trim().split('-');
+  if (partes.length < 3) return fechaStr || '';
+  return `${partes[2].padStart(2, '0')}/${partes[1].padStart(2, '0')}/${partes[0].slice(-2)}`;
+}
+
 const ETIQUETAS_ALIMENTACION = {
   sin_restriccion: 'Sin restricción',
   vegano: 'Vegano',
@@ -66,22 +71,25 @@ function imagenDataUrl(ruta, mime) {
 function construirMensajeInscripcion({ nombre, apellido, email, telefono, alimentacion, talleres }) {
   const lineas = [];
   lineas.push(`Hola ${nombre} ${apellido}!`);
-  lineas.push('Tu inscripción al encuentro fue registrada. Este es el detalle de los talleres:');
+  lineas.push('Tu inscripción al Encuentro Nacional Dramatiza Salta 2026 fue registrada. Este es el detalle de los talleres:');
   lineas.push('');
   for (const t of talleres) {
     const nombreTaller = t.taller || t.nombre || 'Taller';
-    lineas.push(`• ${nombreTaller} (Turno ${ETIQUETAS_TURNO[t.turno] || t.turno})`);
+    lineas.push(`• ${nombreTaller}`);
     const duracionHs = t.duracion_hs ?? t.duracionHs;
     if (duracionHs) {
       lineas.push(`  Duración: ${Number(duracionHs) === 6 ? '6 horas (se realiza en 2 días consecutivos)' : '3 horas (se realiza en un solo día)'}`);
     }
+    if (t.fecha) lineas.push(`  Fecha: ${formatoFecha(t.fecha)}`);
+    if (t.hora) lineas.push(`  Hora: ${t.hora}`);
+    if (t.lugar) lineas.push(`  Lugar: ${t.lugar}`);
     if (t.descripcion) lineas.push(`  Descripción: ${t.descripcion}`);
   }
   lineas.push('');
   lineas.push(`Tipo de alimentación registrado: ${ETIQUETAS_ALIMENTACION[alimentacion] || alimentacion}.`);
   if (telefono) lineas.push(`Teléfono de contacto: ${telefono}.`);
   lineas.push('');
-  lineas.push('¡Nos vemos en el encuentro!');
+  lineas.push('¡Nos vemos en el Encuentro Nacional Dramatiza Salta 2026!');
   return lineas.join('\n');
 }
 
@@ -97,11 +105,10 @@ function construirHtml({ datos, talleres, qrDataUrl, modoCid = false }) {
 
   const sesionesHtml = (datos.sesiones || [])
     .map((s) => {
-      const turno = ETIQUETAS_TURNO[s.turno] || s.turno;
       const lineas = [
-        `<li><strong>${escaparHtml(s.taller)}</strong> (Turno ${escaparHtml(turno)})`,
+        `<li><strong>${escaparHtml(s.taller)}</strong>`,
       ];
-      if (s.fecha) lineas.push(`<br>Fecha: ${escaparHtml(s.fecha)}`);
+      if (s.fecha) lineas.push(`<br>Fecha: ${escaparHtml(formatoFecha(s.fecha))}`);
       if (s.hora) lineas.push(` &middot; Hora: ${escaparHtml(s.hora)}`);
       if (s.lugar) lineas.push(` &middot; Lugar: ${escaparHtml(s.lugar)}`);
       lineas.push('</li>');
@@ -118,29 +125,30 @@ function construirHtml({ datos, talleres, qrDataUrl, modoCid = false }) {
       <td align="center">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;">
           <tr>
-            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:20px 24px;text-align:center;">
-              ${logoSrc ? `<img src="${logoSrc}" alt="Logo" style="max-height:56px;background:#fff;border-radius:8px;padding:4px;">` : ''}
+            <td style="background:linear-gradient(135deg,#565657,#181716);padding:20px 24px;text-align:center;">
+              ${logoSrc ? `<img src="${logoSrc}" alt="Logo" style="max-height:56px;background:#33333200;border-radius:8px;padding:4px;">` : ''}
               ${personajeSrc ? `<img src="${personajeSrc}" alt="Personaje" style="max-height:64px;margin-left:12px;">` : ''}
             </td>
           </tr>
           <tr>
             <td style="padding:24px;">
-              <h2 style="margin:0 0 12px;color:#4338ca;">Acreditación al Encuentro</h2>
-              <p style="margin:0 0 8px;"><strong>${escaparHtml(datos.nombre)} ${escaparHtml(datos.apellido)}</strong></p>
+              <h2 style="margin:0 0 12px;color:#272726;">Acreditación al Encuentro Nacional Dramatiza Salta 2026</h2>
+              <p style="margin:0 0 8px;">Nombre: <strong>${escaparHtml(datos.nombre)} ${escaparHtml(datos.apellido)}</strong></p>
               <p style="margin:0 0 8px;">DNI: <strong>${escaparHtml(datos.dni)}</strong></p>
-              <p style="margin:0 0 16px;color:#64748b;">Código único: <strong>${escaparHtml(datos.id)}</strong></p>
+              <p style="margin:0 0 16px;color:#64748b;">Código único de validación: <strong>${escaparHtml(datos.id)}</strong></p>
 
-              <p style="margin:0 0 6px;font-weight:bold;color:#4338ca;">Tus talleres:</p>
+              <p style="margin:0 0 6px;font-weight:bold;color:#050505;">Estos son los talleres que elegiste:</p>
               <ul style="margin:0 0 20px;padding-left:18px;">${sesionesHtml || '<li>Sin talleres</li>'}</ul>
 
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;">
                 <tr><td align="center">
                   ${qrSrc ? `<img src="${qrSrc}" alt="Código QR" width="300" height="300" style="width:300px;height:300px;">` : ''}
-                  <p style="margin:10px 0 0;font-size:13px;color:#64748b;">Mostrá este código QR al ingresar para confirmar tu asistencia.</p>
+                  <p style="margin:10px 0 0;font-size:13px;color:#64748b;">Mostrá este código QR para confirmar tu asistencia.</p>
                 </td></tr>
               </table>
 
-              <p style="margin:20px 0 0;font-size:14px;color:#334155;">También te adjuntamos tu acreditación en PDF. ¡Nos vemos en el encuentro!</p>
+              <p style="margin:20px 0 0;font-size:14px;color:#334155;">También te adjuntamos tu acreditación en PDF.</p>
+              <p style="margin:10px 0 0;font-size:14px;color:#334155;">¡Nos vemos en el Encuentro Nacional Dramatiza Salta 2026!</p>
             </td>
           </tr>
         </table>
@@ -178,8 +186,8 @@ async function notificarInscripcion(datos) {
       const pdf = await acreditacion.generarPdf(qrPayload);
       fs.writeFileSync(rutaPdf, pdf);
 
-      const datos = acreditacion.parsearPayload(qrPayload);
-      fs.writeFileSync(rutaHtml, construirHtml({ datos, talleres: datos.sesiones || [], qrDataUrl }));
+      const datosQr = acreditacion.parsearPayload(qrPayload);
+      fs.writeFileSync(rutaHtml, construirHtml({ datos: datosQr, talleres: datosQr.sesiones || [], qrDataUrl }));
     }
   } catch (e) {
     console.error('[Mail] Error al generar QR/PDF:', e.message);

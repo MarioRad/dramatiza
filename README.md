@@ -1,12 +1,12 @@
 # Sistema de Inscripciones a Talleres
 
-Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 talleres (5 de mañana y 5 de tarde), cada uno se dicta durante 3 días consecutivos. Una persona puede inscribirse a un taller de mañana **y** a otro de tarde.
+Aplicación web para inscribir personas a talleres con cupos limitados. Hay 25 talleres repartidos en 3 días. Una persona puede inscribirse a los talleres que desee, verificando que no se superpongan en horario.
 
 ## Características
 
-- Formulario público de registro: nombre, apellido, DNI, correo y selección de talleres (mañana y/o tarde).
+- Formulario público de registro: nombre, apellido, DNI, correo y selección de talleres.
 - Control de cupos por taller con protección ante inscripciones simultáneas (transacciones con bloqueo de fila).
-- Una inscripción por DNI por turno (no se puede repetir turno).
+- Validación de superposición de horarios al inscribir.
 - Panel de administración protegido con contraseña: **CRUD completo de talleres**, ver inscriptos y eliminar inscripciones.
 - Base de datos MySQL **o** PostgreSQL (configurable por variables de entorno).
 - Al primer arranque crea las tablas automáticamente. Los talleres se cargan desde el panel (opcionalmente, `SEED_ON_START=true` carga 10 talleres de ejemplo).
@@ -99,12 +99,12 @@ src/
 | POST | `/api/admin/logout` | Cierra la sesión |
 | GET | `/api/admin/talleres` | Lista talleres (requiere sesión) |
 | POST | `/api/admin/talleres` | Crea un taller (requiere sesión) |
-| PUT | `/api/admin/talleres/:id` | Actualiza nombre, descripción, turno o cupo (requiere sesión) |
+| PUT | `/api/admin/talleres/:id` | Actualiza nombre, descripción, fecha/hora o cupo (requiere sesión) |
 | DELETE | `/api/admin/talleres/:id` | Elimina un taller y sus inscripciones (requiere sesión) |
 | GET | `/api/admin/inscripciones` | Lista todas las inscripciones (requiere sesión) |
 | DELETE | `/api/admin/inscripciones/:id` | Elimina una inscripción (requiere sesión) |
 
-Los talleres se crean con `{ nombre, descripcion, turno: "manana"|"tarde", cupo }`. No se puede bajar el cupo por debajo de la cantidad de inscriptos actuales.
+Los talleres se crean con `{ nombre, descripcion, cupo, parts: [{ fecha, hora, duracion_hs }]`. No se puede bajar el cupo por debajo de la cantidad de inscriptos actuales.
 
 ### Ejemplo de inscripción
 
@@ -116,12 +116,11 @@ curl -X POST http://localhost:3000/api/inscripciones \
     "apellido": "Pérez",
     "dni": "30123456",
     "email": "juan@example.com",
-    "tallerManana": 1,
-    "tallerTarde": 6
+    "tallerIds": "1,6"
   }'
 ```
 
-Los campos `tallerManana` y `tallerTarde` son opcionales (puede elegirse uno solo), pero al menos uno es obligatorio.
+El campo `tallerIds` es obligatorio: una lista de IDs de talleres separados por comas.
 
 ## Notas
 

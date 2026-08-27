@@ -1,10 +1,10 @@
-const ETIQUETAS_TURNO = { manana: 'Mañana', tarde: 'Tarde' };
 const ETIQUETAS_ROL = { admin: 'Administrador', operador: 'Operador' };
 const ETIQUETAS_EVENTO = {
   inscripcion_creada: 'Inscripción creada',
   inscripcion_modificada: 'Inscripción modificada',
   inscripcion_eliminada: 'Inscripción eliminada',
   acreditacion_reenviada: 'Acreditación reenviada',
+  acreditacion_verificada: 'Acreditación verificada',
   usuario_creado: 'Usuario creado',
   usuario_modificado: 'Usuario modificado',
   usuario_eliminado: 'Usuario eliminado',
@@ -19,9 +19,13 @@ const ETIQUETAS_ALIMENTACION = {
 const TITULOS_VISTA = {
   inscripciones: 'Inscripciones',
   talleres: 'Talleres y cupos',
+  programa: 'Programa del evento',
   encuentro: 'Listado del encuentro',
+  acreditaciones: 'Acreditaciones',
+  comidas: 'Desayunos y meriendas',
   eventos: 'Registro de eventos',
   usuarios: 'Usuarios',
+  permisos: 'Permisos del sistema',
 };
 const ETIQUETAS_PAGO = {
   no_pagado: 'No pagado',
@@ -48,6 +52,8 @@ const botonVaciarEncuentro = el('botonVaciarEncuentro');
 const botonSalir = el('botonSalir');
 const resumenInscripciones = el('resumenInscripciones');
 const resumenEventos = el('resumenEventos');
+const resumenAcreditaciones = el('resumenAcreditaciones');
+const resumenComidas = el('resumenComidas');
 const modalEditar = el('modalEditarInscripcion');
 const modalEditarInfo = el('modalEditarInfo');
 const modalEditarTaller = el('modalEditarTaller');
@@ -70,6 +76,11 @@ const botonReenviarQr = el('botonReenviarQr');
 const botonCerrarQr = el('botonCerrarQr');
 const buscarDni = el('buscarDni');
 const filtroPago = el('filtroPago');
+const modalBloquePrograma = el('modalBloquePrograma');
+const modalBloqueTitulo = el('modalBloqueTitulo');
+const formBloquePrograma = el('formBloquePrograma');
+const mensajeBloque = el('mensajeBloque');
+const campoPonencias = el('campoPonencias');
 
 let talleresActuales = [];
 let inscripcionEditando = null;
@@ -77,6 +88,13 @@ let usuarioEditando = null;
 let miSesion = null;
 let vistaActiva = 'inscripciones';
 let dniQrActual = null;
+let bloqueEditandoId = null;
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text || '';
+  return div.innerHTML;
+}
 
 function mostrarMensaje(elNodo, texto, tipo) {
   elNodo.textContent = texto || '';
@@ -85,6 +103,7 @@ function mostrarMensaje(elNodo, texto, tipo) {
 
 async function api(uri, opciones = {}) {
   const res = await fetch(uri, {
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     ...opciones,
   });
@@ -94,9 +113,19 @@ async function api(uri, opciones = {}) {
 
 function formatearFecha(valor) {
   if (!valor) return '';
+  const partes = String(valor).split(/[/\-]/);
+  if (partes.length >= 3) {
+    const d = partes[0].padStart(2, '0');
+    const m = partes[1].padStart(2, '0');
+    const y = partes[2].slice(-2);
+    return `${d}/${m}/${y}`;
+  }
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return valor;
-  return fecha.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+  const dd = String(fecha.getDate()).padStart(2, '0');
+  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+  const yy = String(fecha.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
 }
 
 function mostrarLogin() {
@@ -110,7 +139,11 @@ function mostrarPanel() {
   vistaPanel.hidden = false;
   const esAdmin = miSesion && miSesion.rol === 'admin';
   for (const tab of document.querySelectorAll('.tab-admin')) tab.hidden = !esAdmin;
-  if (!esAdmin && (vistaActiva === 'eventos' || vistaActiva === 'usuarios')) {
+  const puedeAcreditar = esAdmin || Boolean(miSesion && miSesion.perm_acreditacion);
+  for (const tab of document.querySelectorAll('.tab-acreditacion')) tab.hidden = !puedeAcreditar;
+  const vistasSinPermiso = ['eventos', 'usuarios', 'permisos'];
+  if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas');
+  if (vistasSinPermiso.includes(vistaActiva)) {
     cambiarVista('inscripciones');
   } else {
     cambiarVista(vistaActiva);
@@ -129,103 +162,153 @@ function cambiarVista(vista) {
     if (contenedor) contenedor.hidden = nombre !== vista;
   }
   el('tituloPanel').textContent = TITULOS_VISTA[vista] || 'Panel';
+  if (vista === 'programa') {
+    initProgramaAdmin();
+  }
+  if (vista === 'acreditaciones') {
+    cargarAcreditaciones();
+  }
+  if (vista === 'comidas') {
+    cargarComidas();
+  }
 }
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => cambiarVista(tab.dataset.vista));
 }
 
-function filaTaller(t, esNuevo = false) {
-  const tr = document.createElement('tr');
+function filaTaller(t, partesExistentes, esNuevo = false) {
+  const card = document.createElement('div');
+  card.className = 'taller-card';
 
-  const tdTurno = document.createElement('td');
-  const selectTurno = document.createElement('select');
-  for (const [valor, etiqueta] of Object.entries(ETIQUETAS_TURNO)) {
-    const opcion = document.createElement('option');
-    opcion.value = valor;
-    opcion.textContent = etiqueta;
-    selectTurno.appendChild(opcion);
-  }
-  selectTurno.value = t.turno;
-  tdTurno.appendChild(selectTurno);
-
-  const tdNombre = document.createElement('td');
   const inputNombre = document.createElement('input');
   inputNombre.type = 'text';
-  inputNombre.value = t.nombre || '';
+  inputNombre.value = (t.nombre || '').replace(/\s*\(\d+°\s*parte\)\s*/gi, '').trim();
   inputNombre.placeholder = 'Nombre del taller';
-  tdNombre.appendChild(inputNombre);
 
-  const tdDescripcion = document.createElement('td');
   const inputDescripcion = document.createElement('input');
   inputDescripcion.type = 'text';
   inputDescripcion.value = t.descripcion || '';
   inputDescripcion.placeholder = 'Descripción (opcional)';
-  tdDescripcion.appendChild(inputDescripcion);
 
-  const tdInscriptos = document.createElement('td');
-  tdInscriptos.textContent = t.inscriptos ?? 0;
+  const inputDisertante = document.createElement('input');
+  inputDisertante.type = 'text';
+  inputDisertante.value = t.disertante || '';
+  inputDisertante.placeholder = 'Disertante';
 
-  const tdCupo = document.createElement('td');
-  const inputCupo = document.createElement('input');
-  inputCupo.type = 'number';
-  inputCupo.min = '0';
-  inputCupo.value = t.cupo ?? 20;
-  inputCupo.className = 'input-cupo';
-  tdCupo.appendChild(inputCupo);
-
-  const tdDuracion = document.createElement('td');
-  const selectDuracion = document.createElement('select');
-  for (const [valor, etiqueta] of [[3, '3hs · 1 día'], [6, '6hs · 2 días']]) {
-    const opcion = document.createElement('option');
-    opcion.value = valor;
-    opcion.textContent = etiqueta;
-    selectDuracion.appendChild(opcion);
-  }
-  selectDuracion.value = t.duracion_hs ?? 3;
-  tdDuracion.appendChild(selectDuracion);
-
-  const tdFecha = document.createElement('td');
-  const inputFecha = document.createElement('input');
-  inputFecha.type = 'date';
-  inputFecha.value = t.fecha || '';
-  tdFecha.appendChild(inputFecha);
-
-  const tdHora = document.createElement('td');
-  const inputHora = document.createElement('input');
-  inputHora.type = 'time';
-  inputHora.value = t.hora || '';
-  tdHora.appendChild(inputHora);
-
-  const tdLugar = document.createElement('td');
   const inputLugar = document.createElement('input');
   inputLugar.type = 'text';
   inputLugar.value = t.lugar || '';
   inputLugar.placeholder = 'Lugar (opcional)';
   inputLugar.maxLength = 255;
-  tdLugar.appendChild(inputLugar);
 
-  const tdAcciones = document.createElement('td');
-  const botonGuardar = document.createElement('button');
-  botonGuardar.type = 'button';
-  botonGuardar.className = 'boton boton-chico';
-  botonGuardar.textContent = esNuevo ? 'Crear' : 'Guardar';
-  botonGuardar.addEventListener('click', async () => {
+  const inputCupo = document.createElement('input');
+  inputCupo.type = 'number';
+  inputCupo.min = '0';
+  inputCupo.value = t.cupo ?? 20;
+
+  const partesContainer = document.createElement('div');
+  partesContainer.className = 'taller-card-parts';
+
+  function crearSeccionParte(parteIdx, datos) {
+    const section = document.createElement('div');
+    section.className = 'taller-part-section';
+
+    const group = document.createElement('div');
+    group.className = 'taller-card-row-group';
+
+    const colFecha = document.createElement('div');
+    colFecha.className = 'taller-card-col';
+    const lblFecha = document.createElement('label');
+    lblFecha.textContent = 'Fecha';
+    const inputFecha = document.createElement('input');
+    inputFecha.type = 'date';
+    inputFecha.value = datos.fecha || '';
+    colFecha.append(lblFecha, inputFecha);
+
+    const colHora = document.createElement('div');
+    colHora.className = 'taller-card-col';
+    const lblHora = document.createElement('label');
+    lblHora.textContent = 'Hora';
+    const inputHora = document.createElement('input');
+    inputHora.type = 'time';
+    inputHora.value = datos.hora || '';
+    colHora.append(lblHora, inputHora);
+
+    const colDuracion = document.createElement('div');
+    colDuracion.className = 'taller-card-col';
+    const lblDuracion = document.createElement('label');
+    lblDuracion.textContent = 'Horas';
+    const inputDuracion = document.createElement('input');
+    inputDuracion.type = 'number';
+    inputDuracion.min = '1';
+    inputDuracion.max = '10';
+    inputDuracion.value = datos.duracion_hs ?? 3;
+    colDuracion.append(lblDuracion, inputDuracion);
+
+    group.append(colFecha, colHora, colDuracion);
+    section.append(group);
+
+    section._datos = () => ({
+      id: datos.id || null,
+      fecha: inputFecha.value || '',
+      hora: inputHora.value || '',
+      duracion_hs: Number(inputDuracion.value) || 3,
+    });
+
+    return section;
+  }
+
+  function renderPartes() {
+    const cant = Number(inputPartes.value) || 1;
+    partesContainer.innerHTML = '';
+    for (let i = 0; i < cant; i++) {
+      const datos = partesExistentes[i] || { fecha: '', hora: '', duracion_hs: 3 };
+      partesContainer.appendChild(crearSeccionParte(i, datos));
+    }
+  }
+
+  const rowPartes = document.createElement('div');
+  rowPartes.className = 'taller-card-row-group';
+  const colPartes = document.createElement('div');
+  colPartes.className = 'taller-card-col';
+  const lblPartes = document.createElement('label');
+  lblPartes.textContent = 'Partes';
+  const inputPartes = document.createElement('input');
+  inputPartes.type = 'number';
+  inputPartes.min = '1';
+  inputPartes.max = '5';
+  inputPartes.value = partesExistentes.length || 1;
+  inputPartes.addEventListener('input', renderPartes);
+  colPartes.append(lblPartes, inputPartes);
+  rowPartes.append(colPartes);
+
+  renderPartes();
+
+  const btnGuardar = document.createElement('button');
+  btnGuardar.type = 'button';
+  btnGuardar.className = 'boton boton-chico';
+  btnGuardar.textContent = esNuevo ? 'Crear' : 'Guardar';
+  btnGuardar.addEventListener('click', async () => {
+    const cantPartes = Number(inputPartes.value) || 1;
+    const parts = [];
+    const sections = partesContainer.querySelectorAll('.taller-part-section');
+    sections.forEach(sec => { if (sec._datos) parts.push(sec._datos()); });
+    while (parts.length < cantPartes) parts.push({ fecha: '', hora: '', duracion_hs: 3 });
+
     const payload = {
       nombre: inputNombre.value.trim(),
       descripcion: inputDescripcion.value.trim(),
-      turno: selectTurno.value,
       cupo: inputCupo.value,
-      duracion_hs: selectDuracion.value,
-      fecha: inputFecha.value || '',
-      hora: inputHora.value || '',
       lugar: inputLugar.value || '',
+      disertante: inputDisertante.value || '',
+      parts: parts.slice(0, cantPartes),
     };
     if (!payload.nombre) {
       mostrarMensaje(mensajePanel, 'El nombre del taller es obligatorio.', 'error');
       return;
     }
-    botonGuardar.disabled = true;
+    btnGuardar.disabled = true;
     const res = esNuevo
       ? await api('/api/admin/talleres', { method: 'POST', body: JSON.stringify(payload) })
       : await api(`/api/admin/talleres/${t.id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -235,9 +318,67 @@ function filaTaller(t, esNuevo = false) {
       mostrarMensaje(mensajePanel, esNuevo ? 'Taller creado.' : 'Taller actualizado.', 'ok');
       await cargarDatos();
     }
-    botonGuardar.disabled = false;
+    btnGuardar.disabled = false;
   });
-  tdAcciones.appendChild(botonGuardar);
+
+  const header = document.createElement('div');
+  header.className = 'taller-card-header';
+
+  const badgePartes = document.createElement('span');
+  badgePartes.className = 'taller-badge taller-badge-partes';
+  badgePartes.textContent = 'Insc./Cupo';
+
+  const badgeInscriptos = document.createElement('span');
+  badgeInscriptos.className = 'taller-inscriptos';
+  const inscriptos = t.inscriptos ?? 0;
+  const cupo = t.cupo ?? 20;
+  const lleno = inscriptos >= cupo;
+  badgeInscriptos.textContent = `${inscriptos}/${cupo}`;
+  if (lleno) badgeInscriptos.classList.add('lleno');
+
+  header.append(badgePartes, badgeInscriptos);
+
+  const body = document.createElement('div');
+  body.className = 'taller-card-body';
+
+  const row1 = document.createElement('div');
+  row1.className = 'taller-card-row';
+  const lblNombre = document.createElement('label');
+  lblNombre.textContent = 'Nombre';
+  row1.append(lblNombre, inputNombre);
+
+  const row2 = document.createElement('div');
+  row2.className = 'taller-card-row';
+  const lblDisertante = document.createElement('label');
+  lblDisertante.textContent = 'Disertante';
+  row2.append(lblDisertante, inputDisertante);
+
+  const row3 = document.createElement('div');
+  row3.className = 'taller-card-row';
+  const lblDesc = document.createElement('label');
+  lblDesc.textContent = 'Descripción';
+  row3.append(lblDesc, inputDescripcion);
+
+  const row4 = document.createElement('div');
+  row4.className = 'taller-card-row';
+  const lblLugar = document.createElement('label');
+  lblLugar.textContent = 'Lugar';
+  row4.append(lblLugar, inputLugar);
+
+  const rowCupo = document.createElement('div');
+  rowCupo.className = 'taller-card-row-group';
+  const colCupo = document.createElement('div');
+  colCupo.className = 'taller-card-col';
+  const lblCupo = document.createElement('label');
+  lblCupo.textContent = 'Cupo';
+  inputCupo.className = 'input-cupo';
+  colCupo.append(lblCupo, inputCupo);
+  rowCupo.append(colCupo);
+
+  body.append(row1, row2, row3, row4, rowCupo, rowPartes, partesContainer);
+
+  const footer = document.createElement('div');
+  footer.className = 'taller-card-footer';
 
   if (!esNuevo) {
     const botonEliminar = document.createElement('button');
@@ -245,10 +386,13 @@ function filaTaller(t, esNuevo = false) {
     botonEliminar.className = 'boton boton-peligro boton-chico';
     botonEliminar.textContent = 'Eliminar';
     botonEliminar.addEventListener('click', async () => {
+      const totalPartes = partesExistentes.length || 1;
       const aviso =
         t.inscriptos > 0
-          ? `El taller "${t.nombre}" tiene ${t.inscriptos} inscriptos, que también se eliminarán. ¿Continuar?`
-          : `¿Eliminar el taller "${t.nombre}"?`;
+          ? `El taller "${t.nombre}" tiene ${t.inscriptos} inscriptos${totalPartes > 1 ? ` y ${totalPartes} partes` : ''}, que también se eliminarán. ¿Continuar?`
+          : totalPartes > 1
+            ? `¿Eliminar el taller "${t.nombre}" y sus ${totalPartes} partes?`
+            : `¿Eliminar el taller "${t.nombre}"?`;
       if (!window.confirm(aviso)) return;
       botonEliminar.disabled = true;
       const res = await api(`/api/admin/talleres/${t.id}`, { method: 'DELETE' });
@@ -260,32 +404,51 @@ function filaTaller(t, esNuevo = false) {
       }
       botonEliminar.disabled = false;
     });
-    tdAcciones.appendChild(botonEliminar);
+    footer.append(btnGuardar, botonEliminar);
+  } else {
+    footer.append(btnGuardar);
   }
 
-  tr.append(tdTurno, tdNombre, tdDescripcion, tdInscriptos, tdCupo, tdDuracion, tdFecha, tdHora, tdLugar, tdAcciones);
-  return tr;
+  card.append(header, body, footer);
+  return card;
 }
 
 function renderTalleres(talleres) {
-  const cuerpo = document.querySelector('#tablaTalleres tbody');
-  cuerpo.innerHTML = '';
-  for (const t of talleres) cuerpo.appendChild(filaTaller(t));
+  const contenedor = el('listaTalleres');
+  contenedor.innerHTML = '';
+  const mainMap = new Map();
+  const order = [];
+  for (const t of talleres) {
+    if (t.pareja_id) {
+      if (!mainMap.has(t.pareja_id)) mainMap.set(t.pareja_id, []);
+      mainMap.get(t.pareja_id).push(t);
+    } else {
+      if (!mainMap.has(t.id)) mainMap.set(t.id, []);
+      order.push(t);
+    }
+  }
+  for (const t of order) {
+    const hijos = (mainMap.get(t.id) || []).sort((a, b) => a.id - b.id);
+    const partes = [{ id: t.id, fecha: t.fecha || '', hora: t.hora || '', duracion_hs: t.duracion_hs ?? 3 }];
+    for (const h of hijos) {
+      partes.push({ id: h.id, fecha: h.fecha || '', hora: h.hora || '', duracion_hs: h.duracion_hs ?? 3 });
+    }
+    contenedor.appendChild(filaTaller(t, partes));
+  }
 }
 
 el('botonAgregar').addEventListener('click', () => {
-  const cuerpo = document.querySelector('#tablaTalleres tbody');
-  cuerpo.appendChild(filaTaller({ turno: 'manana', cupo: 20, duracion_hs: 3 }, true));
+  const contenedor = el('listaTalleres');
+  contenedor.insertBefore(filaTaller({ cupo: 20 }, [], true), contenedor.firstChild);
 });
 
 function abrirModalEdicion(inscripcion) {
   inscripcionEditando = inscripcion;
   modalEditarInfo.textContent =
-    `${inscripcion.nombre} ${inscripcion.apellido} (DNI ${inscripcion.dni}) · Turno ${ETIQUETAS_TURNO[inscripcion.turno] || inscripcion.turno}`;
+    `${inscripcion.nombre} ${inscripcion.apellido} (DNI ${inscripcion.dni})`;
 
   modalEditarTaller.innerHTML = '';
-  const talleresDelTurno = talleresActuales.filter((t) => t.turno === inscripcion.turno);
-  for (const t of talleresDelTurno) {
+  for (const t of talleresActuales) {
     const opcion = document.createElement('option');
     opcion.value = t.id;
     const lleno = t.inscriptos >= t.cupo;
@@ -350,7 +513,7 @@ function renderInscripciones(inscripciones) {
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 11;
+    td.colSpan = 10;
     td.textContent = dniFiltro || pagoFiltro ? 'Sin resultados para el filtro.' : 'No hay inscripciones.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -379,9 +542,6 @@ function renderInscripciones(inscripciones) {
 
     const tdTaller = document.createElement('td');
     tdTaller.textContent = i.taller;
-
-    const tdTurno = document.createElement('td');
-    tdTurno.textContent = ETIQUETAS_TURNO[i.turno] || i.turno;
 
     const tdEncuentro = document.createElement('td');
     tdEncuentro.textContent = i.en_encuentro ? 'Sí' : 'No';
@@ -454,7 +614,7 @@ function renderInscripciones(inscripciones) {
     contenedorAcciones.appendChild(botonEliminar);
     tdAccion.appendChild(contenedorAcciones);
 
-    tr.append(tdDni, tdNombre, tdEmail, tdTelefono, tdAlimentacion, tdTaller, tdTurno, tdEncuentro, tdPago, tdFecha, tdAccion);
+    tr.append(tdDni, tdNombre, tdEmail, tdTelefono, tdAlimentacion, tdTaller, tdEncuentro, tdPago, tdFecha, tdAccion);
     cuerpo.appendChild(tr);
   }
 }
@@ -489,6 +649,11 @@ function abrirModalUsuario(usuario) {
   modalUsuarioPassword.value = '';
   modalUsuarioRol.value = usuario ? usuario.rol : 'operador';
   modalUsuarioActivo.checked = usuario ? usuario.activo : true;
+  el('permUsuarioInscripciones').checked = usuario ? usuario.perm_inscripciones : true;
+  el('permUsuarioTalleres').checked = usuario ? usuario.perm_talleres : true;
+  el('permUsuarioPrograma').checked = usuario ? usuario.perm_programa : true;
+  el('permUsuarioEncuentro').checked = usuario ? usuario.perm_encuentro : true;
+  el('permUsuarioAcreditacion').checked = usuario ? usuario.perm_acreditacion : true;
   modalUsuario.hidden = false;
   modalUsuario.setAttribute('aria-hidden', 'false');
 }
@@ -509,6 +674,11 @@ botonGuardarUsuario.addEventListener('click', async () => {
     nombre: modalUsuarioNombre.value.trim(),
     rol: modalUsuarioRol.value,
     activo: modalUsuarioActivo.checked,
+    perm_inscripciones: el('permUsuarioInscripciones').checked,
+    perm_talleres: el('permUsuarioTalleres').checked,
+    perm_programa: el('permUsuarioPrograma').checked,
+    perm_encuentro: el('permUsuarioEncuentro').checked,
+    perm_acreditacion: el('permUsuarioAcreditacion').checked,
   };
   if (!esNuevo && !payload.username) delete payload.username;
   if (!esNuevo && !payload.password) delete payload.password;
@@ -615,7 +785,7 @@ async function abrirModalQr(dni) {
       return;
     }
     const d = res.data.datos || {};
-    const sesiones = (d.sesiones || []).map((s) => `${s.taller} (${ETIQUETAS_TURNO[s.turno] || s.turno})`).join(' · ');
+    const sesiones = (d.sesiones || []).map((s) => `${s.taller}`).join(' · ');
     qrInfo.textContent = `${d.apellido || ''} ${d.nombre || ''} · Código ${d.id}${sesiones ? ` · ${sesiones}` : ''}`;
   } catch (e) {
     qrInfo.textContent = `DNI ${dni} · No se pudo cargar la acreditación.`;
@@ -645,6 +815,169 @@ botonReenviarQr.addEventListener('click', async () => {
   botonReenviarQr.disabled = false;
 });
 
+function renderAcreditaciones(datos) {
+  const cuerpo = document.querySelector('#tablaAcreditacionesTalleres tbody');
+  cuerpo.innerHTML = '';
+  const total = Number(datos.total) || 0;
+  const inscriptosUnicos = Number(datos.inscriptosUnicos) || 0;
+  resumenAcreditaciones.textContent = `Total acreditados: ${total} de ${inscriptosUnicos} inscripto(s).`;
+
+  const porTaller = datos.porTaller || [];
+  if (porTaller.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.textContent = 'No hay talleres cargados.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpo.appendChild(tr);
+    return;
+  }
+
+  for (const t of porTaller) {
+    const tr = document.createElement('tr');
+
+    const tdTaller = document.createElement('td');
+    tdTaller.textContent = t.taller;
+
+    const tdFecha = document.createElement('td');
+    tdFecha.textContent = formatearFecha(t.fecha);
+
+    const tdHora = document.createElement('td');
+    tdHora.textContent = t.hora || '—';
+
+    const tdAcreditados = document.createElement('td');
+    tdAcreditados.textContent = t.acreditados;
+    tdAcreditados.style.fontWeight = 'bold';
+
+    const tdInscriptos = document.createElement('td');
+    tdInscriptos.textContent = t.inscriptos;
+
+    const tdPendientes = document.createElement('td');
+    const pendientes = Math.max(0, t.inscriptos - t.acreditados);
+    tdPendientes.textContent = pendientes;
+    tdPendientes.className = pendientes === 0 ? 'encuentro-si' : '';
+
+    tr.append(tdTaller, tdFecha, tdHora, tdAcreditados, tdInscriptos, tdPendientes);
+    cuerpo.appendChild(tr);
+  }
+}
+
+async function cargarAcreditaciones() {
+  resumenAcreditaciones.textContent = 'Cargando…';
+  const res = await api('/api/admin/acreditaciones/resumen');
+  if (!res.ok) {
+    resumenAcreditaciones.textContent = res.data.error || 'No se pudieron cargar las acreditaciones.';
+    return;
+  }
+  renderAcreditaciones(res.data);
+}
+
+el('botonActualizarAcreditaciones').addEventListener('click', cargarAcreditaciones);
+
+const ICONO_CATEGORIA_COMIDA = { desayuno: '☕', merienda: '🫖', otro: '🍽️' };
+
+function renderComidas(datos) {
+  resumenComidas.textContent = `Total acreditados: ${Number(datos.total) || 0}. Hora del servidor: ${datos.horaServidor || '—'} (los escaneos cuentan para el servicio cuyo horario incluya esa hora, ±20 min).`;
+
+  const cuerpoServicios = document.querySelector('#tablaComidasServicios tbody');
+  cuerpoServicios.innerHTML = '';
+  const servicios = datos.servicios || [];
+  if (servicios.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 9;
+    td.textContent = 'No hay bloques de desayuno/merienda en el programa.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpoServicios.appendChild(tr);
+  }
+  for (const s of servicios) {
+    const tr = document.createElement('tr');
+    const icono = ICONO_CATEGORIA_COMIDA[s.categoria] || '';
+
+    const tdTitulo = document.createElement('td');
+    tdTitulo.textContent = `${icono} ${s.titulo}`;
+
+    const tdDia = document.createElement('td');
+    tdDia.textContent = formatearFecha(s.dia);
+
+    const tdHorario = document.createElement('td');
+    tdHorario.textContent = `${s.hora_inicio || ''} – ${s.hora_fin || ''}`;
+
+    const tdTotal = document.createElement('td');
+    tdTotal.textContent = s.asistentes;
+    tdTotal.style.fontWeight = 'bold';
+
+    const dietas = s.dietas || {};
+    const celdasDietas = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_lactosa', 'otro'].map((clave) => {
+      const td = document.createElement('td');
+      const cantidad = Number(dietas[clave] || 0);
+      td.textContent = cantidad;
+      if (cantidad > 0 && clave !== 'sin_restriccion') td.classList.add('encuentro-si');
+      return td;
+    });
+
+    tr.append(tdTitulo, tdDia, tdHorario, tdTotal, ...celdasDietas);
+    cuerpoServicios.appendChild(tr);
+  }
+
+  const cuerpoAsistentes = document.querySelector('#tablaComidasAsistentes tbody');
+  cuerpoAsistentes.innerHTML = '';
+  const porAsistente = datos.porAsistente || [];
+  if (porAsistente.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 7;
+    td.textContent = 'Todavía no hay escaneos registrados en desayunos o meriendas.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpoAsistentes.appendChild(tr);
+  }
+  for (const p of porAsistente) {
+    const tr = document.createElement('tr');
+
+    const tdFecha = document.createElement('td');
+    tdFecha.textContent = p.fechaAcreditacion || '—';
+    if (!p.fechaAcreditacion) tdFecha.style.color = 'var(--color-texto-suave)';
+
+    const tdDni = document.createElement('td');
+    tdDni.className = 'celda-dni';
+    tdDni.textContent = p.dni;
+
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/, '');
+
+    const tdAlimentacion = document.createElement('td');
+    tdAlimentacion.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+
+    const tdDesayunos = document.createElement('td');
+    tdDesayunos.textContent = p.desayunos;
+
+    const tdMeriendas = document.createElement('td');
+    tdMeriendas.textContent = p.meriendas;
+
+    const tdTotal = document.createElement('td');
+    tdTotal.textContent = p.total;
+    tdTotal.style.fontWeight = 'bold';
+
+    tr.append(tdFecha, tdDni, tdNombre, tdAlimentacion, tdDesayunos, tdMeriendas, tdTotal);
+    cuerpoAsistentes.appendChild(tr);
+  }
+}
+
+async function cargarComidas() {
+  resumenComidas.textContent = 'Cargando…';
+  const res = await api('/api/admin/comidas/resumen');
+  if (!res.ok) {
+    resumenComidas.textContent = res.data.error || 'No se pudo cargar el recuento de comidas.';
+    return;
+  }
+  renderComidas(res.data);
+}
+
+el('botonActualizarComidas').addEventListener('click', cargarComidas);
+
 async function cargarDatos() {
   mostrarMensaje(mensajePanel, '', '');
   const esAdmin = miSesion && miSesion.rol === 'admin';
@@ -653,8 +986,9 @@ async function cargarDatos() {
     api('/api/admin/inscripciones'),
     api('/api/admin/encuentro'),
   ];
-  if (esAdmin) peticiones.push(api('/api/admin/eventos'), api('/api/admin/usuarios'));
-  const [talleres, inscripciones, encuentro, eventos, usuarios] = await Promise.all(peticiones);
+  if (esAdmin) peticiones.push(api('/api/admin/eventos'), api('/api/admin/usuarios'), api('/api/admin/config'));
+  const respuestas = await Promise.all(peticiones);
+  const [talleres, inscripciones, encuentro] = respuestas;
 
   if (!talleres.ok) {
     mostrarLogin();
@@ -666,8 +1000,10 @@ async function cargarDatos() {
   renderInscripciones(inscripciones.data);
   resumenEncuentro.textContent = `Personas cargadas: ${encuentro.data.total ?? 0}.`;
   if (esAdmin) {
+    const [, , , eventos, usuarios, config] = respuestas;
     renderEventos(eventos.data || []);
     renderUsuarios(usuarios.data || []);
+    renderPermisos(usuarios.data || []);
   }
   mostrarPanel();
 }
@@ -741,7 +1077,12 @@ formLogin.addEventListener('submit', async (e) => {
     mostrarMensaje(mensajeLogin, res.data.error || 'Usuario o contraseña incorrectos.', 'error');
     return;
   }
-  miSesion = { usuario: res.data.usuario, nombre: res.data.nombre, rol: res.data.rol };
+  miSesion = {
+    usuario: res.data.usuario,
+    nombre: res.data.nombre,
+    rol: res.data.rol,
+    perm_acreditacion: Boolean(res.data.perm_acreditacion),
+  };
   formLogin.reset();
   await cargarDatos();
 });
@@ -751,10 +1092,180 @@ botonSalir.addEventListener('click', async () => {
   mostrarLogin();
 });
 
+function renderPermisos(usuarios) {
+  const tabla = el('tablaPermisos');
+  if (!tabla) return;
+  const cuerpo = tabla.querySelector('tbody');
+  cuerpo.innerHTML = '';
+  const PERM_CAMPOS = [
+    { key: 'perm_inscripciones', label: 'Inscripciones' },
+    { key: 'perm_talleres', label: 'Talleres' },
+    { key: 'perm_programa', label: 'Programa' },
+    { key: 'perm_encuentro', label: 'Encuentro' },
+    { key: 'perm_acreditacion', label: 'Acreditación' },
+  ];
+  for (const u of usuarios) {
+    const tr = document.createElement('tr');
+    const tdUser = document.createElement('td');
+    tdUser.innerHTML = `<strong>${escapeHtml(u.username)}</strong><br><span style="color:var(--color-texto-suave);font-size:0.85rem;">${escapeHtml(u.nombre)} (${u.rol})</span>`;
+    tr.appendChild(tdUser);
+    for (const p of PERM_CAMPOS) {
+      const td = document.createElement('td');
+      td.style.textAlign = 'center';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!u[p.key];
+      cb.dataset.userId = u.id;
+      cb.dataset.perm = p.key;
+      cb.addEventListener('change', async () => {
+        const payload = {};
+        for (const pp of PERM_CAMPOS) {
+          const input = tabla.querySelector(`input[data-user-id="${u.id}"][data-perm="${pp.key}"]`);
+          payload[pp.key] = input ? input.checked : false;
+        }
+        const res = await api(`/api/admin/usuarios/${u.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        if (!res.ok) {
+          mostrarMensaje(el('mensajePermisos'), res.data.error || 'No se pudo guardar.', 'error');
+          cb.checked = !cb.checked;
+        } else {
+          mostrarMensaje(el('mensajePermisos'), `Permisos de ${u.username} actualizados.`, 'ok');
+        }
+      });
+      td.appendChild(cb);
+      tr.appendChild(td);
+    }
+    cuerpo.appendChild(tr);
+  }
+}
+
+el('formPermisos').addEventListener('submit', (e) => {
+  e.preventDefault();
+});
+
+function abrirModalBloque(bloque) {
+  bloqueEditandoId = bloque ? bloque.id : null;
+  modalBloqueTitulo.textContent = bloque ? 'Editar bloque' : 'Nuevo bloque';
+  mostrarMensaje(mensajeBloque, '', '');
+
+  if (bloque) {
+    el('bloqueDia').value = bloque.dia || '';
+    el('bloqueTipo').value = bloque.tipo || 'general';
+    el('bloqueTitulo').value = bloque.titulo || '';
+    el('bloqueIcono').value = bloque.icono || '';
+    el('bloqueHoraInicio').value = bloque.hora_inicio || '';
+    el('bloqueHoraFin').value = bloque.hora_fin || '';
+    el('bloqueDescripcion').value = bloque.descripcion || '';
+    el('bloqueOrden').value = bloque.orden || 0;
+    if (bloque.tipo === 'ponencia') {
+      let datos = [];
+      try { datos = JSON.parse(bloque.datos || '[]'); } catch (e) { datos = []; }
+      el('bloquePonencias').value = datos.map(p => `${p.hora || ''} | ${p.titulo || ''} | ${p.ponente || ''}`).join('\n');
+      campoPonencias.hidden = false;
+    } else {
+      el('bloquePonencias').value = '';
+      campoPonencias.hidden = true;
+    }
+  } else {
+    formBloquePrograma.reset();
+    el('bloqueOrden').value = 0;
+    campoPonencias.hidden = true;
+  }
+
+  modalBloquePrograma.hidden = false;
+  modalBloquePrograma.setAttribute('aria-hidden', 'false');
+}
+
+function cerrarModalBloque() {
+  modalBloquePrograma.hidden = true;
+  modalBloquePrograma.setAttribute('aria-hidden', 'true');
+  bloqueEditandoId = null;
+}
+
+el('bloqueTipo').addEventListener('change', () => {
+  campoPonencias.hidden = el('bloqueTipo').value !== 'ponencia';
+});
+
+el('botonCancelarBloque').addEventListener('click', cerrarModalBloque);
+
+formBloquePrograma.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  mostrarMensaje(mensajeBloque, '', '');
+
+  let datos = null;
+  if (el('bloqueTipo').value === 'ponencia') {
+    const lineas = el('bloquePonencias').value.trim().split('\n').filter(Boolean);
+    datos = lineas.map(linea => {
+      const partes = linea.split('|').map(s => s.trim());
+      return { hora: partes[0] || '', titulo: partes[1] || '', ponente: partes[2] || '' };
+    });
+  }
+
+  const payload = {
+    dia: el('bloqueDia').value,
+    tipo: el('bloqueTipo').value,
+    titulo: el('bloqueTitulo').value.trim(),
+    icono: el('bloqueIcono').value.trim(),
+    hora_inicio: el('bloqueHoraInicio').value,
+    hora_fin: el('bloqueHoraFin').value,
+    descripcion: el('bloqueDescripcion').value.trim(),
+    orden: Number(el('bloqueOrden').value) || 0,
+    datos: datos ? JSON.stringify(datos) : null,
+  };
+
+  if (!payload.titulo) {
+    mostrarMensaje(mensajeBloque, 'El título es obligatorio.', 'error');
+    return;
+  }
+
+  const esEdicion = !!bloqueEditandoId;
+  const res = esEdicion
+    ? await api(`/api/admin/programa/bloques/${bloqueEditandoId}`, { method: 'PUT', body: JSON.stringify(payload) })
+    : await api('/api/admin/programa/bloques', { method: 'POST', body: JSON.stringify(payload) });
+
+  if (!res.ok) {
+    mostrarMensaje(mensajeBloque, res.data.error || 'No se pudo guardar el bloque.', 'error');
+  } else {
+    mostrarMensaje(mensajeBloque, esEdicion ? 'Bloque actualizado.' : 'Bloque creado.', 'ok');
+    await initProgramaAdmin();
+  }
+});
+
+async function initProgramaAdmin() {
+  const container = el('programaAdmin');
+  if (!container) return;
+  ProgramaUI.init({
+    container,
+    mode: 'admin',
+    onAdd: () => abrirModalBloque(null),
+    onEdit: (id) => {
+      const bloques = ProgramaUI.getBloques();
+      const bloque = bloques.find(b => b.id === id);
+      if (bloque) abrirModalBloque(bloque);
+    },
+    onDelete: async (id) => {
+      if (!window.confirm('¿Eliminar este bloque del programa?')) return;
+      const ok = await ProgramaUI.eliminarBloque(id);
+      if (!ok) {
+        mostrarMensaje(mensajePanel, 'No se pudo eliminar el bloque.', 'error');
+      } else {
+        mostrarMensaje(mensajePanel, 'Bloque eliminado.', 'ok');
+        await initProgramaAdmin();
+      }
+    },
+  });
+  const ok = await ProgramaUI.cargar();
+  if (ok) ProgramaUI.render();
+}
+
 (async () => {
   const res = await api('/api/admin/perfil');
   if (res.ok) {
-    miSesion = { usuario: res.data.usuario, nombre: res.data.nombre, rol: res.data.rol };
+    miSesion = {
+      usuario: res.data.usuario,
+      nombre: res.data.nombre,
+      rol: res.data.rol,
+      perm_acreditacion: Boolean(res.data.perm_acreditacion),
+    };
     await cargarDatos();
   } else {
     mostrarLogin();
