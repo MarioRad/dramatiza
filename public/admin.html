@@ -50,6 +50,7 @@
           <button type="button" class="tab" data-vista="programa">Programa</button>
           <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
           <button type="button" class="tab" data-vista="pagos">Pagos y cuotas</button>
+          <button type="button" class="tab" data-vista="notificaciones">Notificaciones</button>
           <button type="button" class="tab tab-acreditacion" data-vista="acreditaciones" hidden>Acreditaciones</button>
           <button type="button" class="tab tab-acreditacion" data-vista="comidas" hidden>Desayunos y meriendas</button>
           <button type="button" class="tab tab-admin" data-vista="eventos" hidden>Eventos</button>
@@ -192,6 +193,51 @@
               <tbody></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div id="vistaNotificaciones" class="tab-contenido" hidden>
+        <h3>Notificaciones a la app móvil</h3>
+        <p class="ayuda">Creá avisos que la app móvil de acreditación muestra a los operadores (cambios de horario, instrucciones, novedades). La app los recibe al sincronizar; los que están "visibles" también se muestran en el escáner.</p>
+        <div id="mensajeNotificaciones" class="mensaje" role="alert"></div>
+        <form id="formNotificacion" class="pagos-fila">
+          <input type="hidden" id="notifIdEditando">
+          <div class="campo">
+            <label for="notifTitulo">Título</label>
+            <input type="text" id="notifTitulo" maxlength="200" required placeholder="Ej: Cambio de horario de merienda">
+          </div>
+          <div class="campo">
+            <label for="notifTipo">Tipo</label>
+            <select id="notifTipo">
+              <option value="info">Info</option>
+              <option value="alerta">Alerta</option>
+              <option value="urgente">Urgente</option>
+              <option value="recordatorio">Recordatorio</option>
+            </select>
+          </div>
+          <div class="campo" style="flex:1 1 100%;">
+            <label for="notifMensaje">Mensaje</label>
+            <textarea id="notifMensaje" rows="2" maxlength="2000" required style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;" placeholder="Detalle del aviso…"></textarea>
+          </div>
+          <label class="opcion-plan-activo"><input type="checkbox" id="notifActiva" checked> Visible para la app</label>
+          <button type="submit" class="boton" id="botonGuardarNotif">Publicar notificación</button>
+          <button type="button" class="boton boton-secundario" id="botonCancelarNotif" hidden>Cancelar</button>
+        </form>
+        <div class="tabla-envoltura">
+          <table id="tablaNotificaciones">
+            <thead>
+              <tr>
+                <th>Título</th>
+                <th>Tipo</th>
+                <th>Mensaje</th>
+                <th>Visible</th>
+                <th>Fecha</th>
+                <th>Creado por</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
 

@@ -3,11 +3,21 @@ const ETIQUETAS_EVENTO = {
   inscripcion_creada: 'Inscripción creada',
   inscripcion_modificada: 'Inscripción modificada',
   inscripcion_eliminada: 'Inscripción eliminada',
+  inscripcion_finalizada: 'Inscripción finalizada',
+  inscripcion_anulada: 'Inscripción anulada',
+  constancia_reenviada: 'Constancia reenviada',
   acreditacion_reenviada: 'Acreditación reenviada',
   acreditacion_verificada: 'Acreditación verificada',
+  programa_bloque_creado: 'Bloque de programa creado',
+  programa_bloque_modificado: 'Bloque de programa modificado',
+  programa_bloque_eliminado: 'Bloque de programa eliminado',
   usuario_creado: 'Usuario creado',
   usuario_modificado: 'Usuario modificado',
   usuario_eliminado: 'Usuario eliminado',
+  notificacion_creada: 'Notificación creada',
+  notificacion_modificada: 'Notificación modificada',
+  notificacion_eliminada: 'Notificación eliminada',
+  config_modificada: 'Configuración modificada',
 };
 const ETIQUETAS_ALIMENTACION = {
   sin_restriccion: 'Sin restricción',
@@ -22,6 +32,7 @@ const TITULOS_VISTA = {
   programa: 'Programa del evento',
   encuentro: 'Listado del encuentro',
   pagos: 'Gestión de pagos y cuotas',
+  notificaciones: 'Notificaciones a la app móvil',
   acreditaciones: 'Acreditaciones',
   comidas: 'Desayunos y meriendas',
   eventos: 'Registro de eventos',
@@ -115,6 +126,10 @@ async function api(uri, opciones = {}) {
 
 function formatearFecha(valor) {
   if (!valor) return '';
+  const iso = String(valor).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1].slice(-2)}`;
+  }
   const partes = String(valor).split(/[/\-]/);
   if (partes.length >= 3) {
     const d = partes[0].padStart(2, '0');
@@ -178,6 +193,9 @@ function cambiarVista(vista) {
   }
   if (vista === 'pagos') {
     cargarPagos();
+  }
+  if (vista === 'notificaciones') {
+    cargarNotificaciones();
   }
 }
 
@@ -1696,6 +1714,188 @@ botonGuardarCuota.addEventListener('click', async () => {
 });
 
 filtroPagoDni.addEventListener('input', renderPagos);
+
+// ── Notificaciones a la app móvil ──────────────────────────────────
+const mensajeNotificaciones = el('mensajeNotificaciones');
+const formNotificacion = el('formNotificacion');
+const notifTitulo = el('notifTitulo');
+const notifMensaje = el('notifMensaje');
+const notifTipo = el('notifTipo');
+const notifActiva = el('notifActiva');
+const botonGuardarNotif = el('botonGuardarNotif');
+const botonCancelarNotif = el('botonCancelarNotif');
+const tablaNotificaciones = el('tablaNotificaciones');
+
+const ETIQUETAS_TIPO_NOTIF = { info: 'Info', alerta: 'Alerta', urgente: 'Urgente', recordatorio: 'Recordatorio' };
+
+let notifEditandoId = null;
+
+function formatearFechaCompleta(valor) {
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return valor || '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function cargarNotificaciones() {
+  const res = await api('/api/admin/notificaciones');
+  if (!res.ok) {
+    mostrarMensaje(mensajeNotificaciones, res.data.error || 'No se pudieron cargar las notificaciones.', 'error');
+    return;
+  }
+  renderNotificaciones(res.data || []);
+}
+
+function renderNotificaciones(lista) {
+  const tbody = tablaNotificaciones.querySelector('tbody');
+  tbody.innerHTML = '';
+  if (lista.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 7;
+    td.textContent = 'No hay notificaciones creadas.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const n of lista) {
+    const tr = document.createElement('tr');
+
+    const tdTitulo = document.createElement('td');
+    tdTitulo.textContent = n.titulo;
+    tdTitulo.style.fontWeight = 'bold';
+
+    const tdTipo = document.createElement('td');
+    tdTipo.textContent = ETIQUETAS_TIPO_NOTIF[n.tipo] || n.tipo;
+    tdTipo.className = 'notif-tipo-' + (ETIQUETAS_TIPO_NOTIF[n.tipo] ? n.tipo : 'info');
+
+    const tdMensaje = document.createElement('td');
+    tdMensaje.textContent = n.mensaje || '';
+    tdMensaje.style.whiteSpace = 'normal';
+
+    const tdEstado = document.createElement('td');
+    tdEstado.style.textAlign = 'center';
+    const checkVisible = document.createElement('input');
+    checkVisible.type = 'checkbox';
+    checkVisible.checked = Boolean(n.activa);
+    checkVisible.title = 'Visible para la app móvil';
+    checkVisible.addEventListener('change', async () => {
+      checkVisible.disabled = true;
+      const res = await api(`/api/admin/notificaciones/${n.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          titulo: n.titulo,
+          mensaje: n.mensaje,
+          tipo: n.tipo || 'info',
+          activa: checkVisible.checked,
+        }),
+      });
+      if (!res.ok) {
+        checkVisible.checked = !checkVisible.checked;
+        mostrarMensaje(mensajeNotificaciones, res.data.error || 'No se pudo actualizar la notificación.', 'error');
+      } else {
+        mostrarMensaje(
+          mensajeNotificaciones,
+          checkVisible.checked ? 'La notificación ya es visible para la app.' : 'La notificación quedó oculta en la app.',
+          'ok'
+        );
+        await cargarNotificaciones();
+      }
+      checkVisible.disabled = false;
+    });
+    tdEstado.appendChild(checkVisible);
+
+    const tdFecha = document.createElement('td');
+    tdFecha.textContent = n.creado_en_texto || formatearFechaCompleta(n.creado_en);
+
+    const tdUsuario = document.createElement('td');
+    tdUsuario.textContent = n.creado_por || '—';
+
+    const tdAcciones = document.createElement('td');
+    const cont = document.createElement('div');
+    cont.className = 'acciones-fila';
+    const btnEditar = document.createElement('button');
+    btnEditar.type = 'button';
+    btnEditar.className = 'boton boton-chico';
+    btnEditar.textContent = 'Editar';
+    btnEditar.addEventListener('click', () => editarNotificacion(n));
+    const btnEliminar = document.createElement('button');
+    btnEliminar.type = 'button';
+    btnEliminar.className = 'boton boton-peligro boton-chico';
+    btnEliminar.textContent = 'Eliminar';
+    btnEliminar.addEventListener('click', () => eliminarNotificacion(n));
+    cont.appendChild(btnEditar);
+    cont.appendChild(btnEliminar);
+    tdAcciones.appendChild(cont);
+
+    tr.append(tdTitulo, tdTipo, tdMensaje, tdEstado, tdFecha, tdUsuario, tdAcciones);
+    tbody.appendChild(tr);
+  }
+}
+
+function editarNotificacion(n) {
+  notifEditandoId = n.id;
+  notifTitulo.value = n.titulo;
+  notifMensaje.value = n.mensaje;
+  notifTipo.value = n.tipo || 'info';
+  notifActiva.checked = Boolean(n.activa);
+  botonGuardarNotif.textContent = 'Guardar cambios';
+  botonCancelarNotif.hidden = false;
+  el('vistaNotificaciones').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function resetFormNotificacion() {
+  notifEditandoId = null;
+  formNotificacion.reset();
+  notifTipo.value = 'info';
+  notifActiva.checked = true;
+  botonCancelarNotif.hidden = true;
+  botonGuardarNotif.textContent = 'Publicar notificación';
+}
+
+async function eliminarNotificacion(n) {
+  if (!window.confirm(`¿Eliminar la notificación "${n.titulo}"?`)) return;
+  const res = await api(`/api/admin/notificaciones/${n.id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    mostrarMensaje(mensajeNotificaciones, res.data.error || 'No se pudo eliminar.', 'error');
+  } else {
+    mostrarMensaje(mensajeNotificaciones, 'Notificación eliminada.', 'ok');
+    await cargarNotificaciones();
+  }
+}
+
+formNotificacion.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    titulo: notifTitulo.value.trim(),
+    mensaje: notifMensaje.value.trim(),
+    tipo: notifTipo.value,
+    activa: notifActiva.checked,
+  };
+  if (!payload.titulo || !payload.mensaje) {
+    mostrarMensaje(mensajeNotificaciones, 'Completá título y mensaje.', 'error');
+    return;
+  }
+  botonGuardarNotif.disabled = true;
+  const res = notifEditandoId
+    ? await api(`/api/admin/notificaciones/${notifEditandoId}`, { method: 'PUT', body: JSON.stringify(payload) })
+    : await api('/api/admin/notificaciones', { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) {
+    mostrarMensaje(mensajeNotificaciones, res.data.error || 'No se pudo guardar la notificación.', 'error');
+  } else {
+    mostrarMensaje(
+      mensajeNotificaciones,
+      notifEditandoId ? 'Notificación actualizada.' : 'Notificación publicada. La app la verá al sincronizar.',
+      'ok'
+    );
+    resetFormNotificacion();
+    await cargarNotificaciones();
+  }
+  botonGuardarNotif.disabled = false;
+});
+
+botonCancelarNotif.addEventListener('click', resetFormNotificacion);
 
 (async () => {
   const res = await api('/api/admin/perfil');

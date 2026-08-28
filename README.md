@@ -52,6 +52,11 @@ Aplicación web para inscribir personas a talleres con cupos limitados. Hay 25 t
 
    (También funcionan las variables `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`.)
 
+> **Zona horaria:** el sistema almacena los timestamps en UTC y los muestra en
+> `America/Argentina/Salta` (el server formatea las fechas de notificaciones; el panel
+> muestra la zona horaria del navegador). Con PostgreSQL la sesión se fuerza a `UTC`
+> automáticamente, por lo que no hace falta configurar la zona en la base.
+
 4. Definir la clave del panel de administración:
 
    ```
@@ -103,6 +108,10 @@ src/
 | DELETE | `/api/admin/talleres/:id` | Elimina un taller y sus inscripciones (requiere sesión) |
 | GET | `/api/admin/inscripciones` | Lista todas las inscripciones (requiere sesión) |
 | DELETE | `/api/admin/inscripciones/:id` | Elimina una inscripción (requiere sesión) |
+| GET | `/api/admin/notificaciones` | Lista las notificaciones a la app móvil (requiere sesión) |
+| POST | `/api/admin/notificaciones` | Crea una notificación `{ titulo, mensaje, tipo, activa }` (requiere sesión) |
+| PUT | `/api/admin/notificaciones/:id` | Edita una notificación (requiere sesión) |
+| DELETE | `/api/admin/notificaciones/:id` | Elimina una notificación (requiere sesión) |
 
 Los talleres se crean con `{ nombre, descripcion, cupo, parts: [{ fecha, hora, duracion_hs }]`. No se puede bajar el cupo por debajo de la cantidad de inscriptos actuales.
 
@@ -135,3 +144,17 @@ La app móvil (React Native/Expo) vive en **su propio repositorio** separado de 
 backend. Consume esta API por HTTP (`POST /api/mobile/login` y `/api/mobile/acreditar`),
 así que el backend tiene que estar accesible desde el teléfono (misma red Wi-Fi o IP pública).
 Ver los endpoints en `src/server.js`.
+
+### Endpoints móviles
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| POST | `/api/mobile/login` | Inicia sesión (`{ username, password }`) → `{ token }` |
+| POST | `/api/mobile/logout` | Cierra la sesión |
+| POST | `/api/mobile/acreditar` | Escanea/acredita un QR (`{ codigo }`) |
+| GET | `/api/mobile/notificaciones` | Lista las notificaciones activas creadas desde el panel → `{ notificaciones: [{ id, titulo, mensaje, tipo, creado_en }] }` |
+
+Las notificaciones se crean desde la pestaña **Notificaciones** del panel de
+administración. La app debe consultar `GET /api/mobile/notificaciones` (con el token
+`Bearer` de la sesión móvil) al iniciar o periódicamente para mostrar avisos a los
+operadores. Tipos disponibles: `info`, `alerta`, `urgente`, `recordatorio`.

@@ -1423,6 +1423,142 @@ app.put('/api/admin/config', requireAdmin, async (req, res, next) => {
   }
 });
 
+// ── Notificaciones a la app móvil ───────────────────────────────────
+
+const TIPOS_NOTIFICACION = ['info', 'alerta', 'urgente', 'recordatorio'];
+
+function validarNotificacion(body) {
+  const titulo = String(body.titulo || '').trim();
+  const mensaje = String(body.mensaje || '').trim();
+  const tipo = String(body.tipo || 'info').trim();
+  if (titulo.length < 2 || titulo.length > 200) {
+    throw new db.HttpError(400, 'El título debe tener entre 2 y 200 caracteres.');
+  }
+  if (!mensaje || mensaje.length > 2000) {
+    throw new db.HttpError(400, 'El mensaje es obligatorio (máximo 2000 caracteres).');
+  }
+  if (!TIPOS_NOTIFICACION.includes(tipo)) {
+    throw new db.HttpError(400, 'Tipo de notificación inválido.');
+  }
+  return { titulo, mensaje, tipo };
+}
+
+app.get('/api/admin/notificaciones', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await db.listarNotificaciones());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/notificaciones', requireAuth, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const { titulo, mensaje, tipo } = validarNotificacion(body);
+    const id = await db.crearNotificacion({
+      titulo,
+      mensaje,
+      tipo,
+      activa: body.activa !== false,
+      creadoPor: req.sesion.usuario,
+    });
+    await db.registrarEvento('notificacion_creada', `Notificación creada: "${titulo}" (${tipo})`, req.sesion.usuario);
+    res.status(201).json({ ok: true, id });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/notificaciones/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de notificación inválido.');
+    const body = req.body || {};
+    const { titulo, mensaje, tipo } = validarNotificacion(body);
+    await db.actualizarNotificacion(id, { titulo, mensaje, tipo, activa: body.activa !== false });
+    await db.registrarEvento('notificacion_modificada', `Notificación actualizada: "${titulo}" (${tipo})`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/notificaciones/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de notificación inválido.');
+    const anterior = await db.queryOne('SELECT titulo FROM notificaciones WHERE id = ?', [id]);
+    await db.eliminarNotificacion(id);
+    await db.registrarEvento(
+      'notificacion_eliminada',
+      `Notificación eliminada: "${anterior ? anterior.titulo : id}"`,
+      req.sesion.usuario
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/mobile/notificaciones', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) {
+      return res.status(401).json({ error: 'No autorizado.' });
+    }
+    const lista = await db.listarNotificacionesActivas(sesion.usuario);
+    const sinLeer = lista.filter((n) => !n.leida).length;
+    res.json({ ok: true, notificaciones: lista, sin_leer: sinLeer });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/mobile/notificaciones/sin_leer', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) {
+      return res.status(401).json({ error: 'No autorizado.' });
+    }
+    const sinLeer = await db.contarNotificacionesSinLeer(sesion.usuario);
+    res.json({ ok: true, sin_leer: sinLeer });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/mobile/notificaciones/leer-todas', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) {
+      return res.status(401).json({ error: 'No autorizado.' });
+    }
+    await db.marcarTodasNotificacionesLeidas(sesion.usuario);
+    const sinLeer = await db.contarNotificacionesSinLeer(sesion.usuario);
+    res.json({ ok: true, sin_leer: sinLeer });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/mobile/notificaciones/:id/leer', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) {
+      return res.status(401).json({ error: 'No autorizado.' });
+    }
+    const id = Number((req.params || {}).id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de notificación inválido.' });
+    }
+    await db.marcarNotificacionLeida(sesion.usuario, id);
+    const sinLeer = await db.contarNotificacionesSinLeer(sesion.usuario);
+    res.json({ ok: true, sin_leer: sinLeer });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.use((err, _req, res, _next) => {
   const status = err.status || 500;
   const message = err.message || 'Error interno del servidor.';

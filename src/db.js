@@ -15,18 +15,23 @@ class HttpError extends Error {
 async function initPool() {
   if (pool) return pool;
   if (isPg) {
-    const { Pool } = require('pg');
-    pool = new Pool(
-      process.env.DATABASE_URL
-        ? { connectionString: process.env.DATABASE_URL }
-        : {
-            host: process.env.DB_HOST || '127.0.0.1',
-            port: Number(process.env.DB_PORT || 5432),
-            user: process.env.DB_USER || 'postgres',
-            password: process.env.DB_PASSWORD || '',
-            database: process.env.DB_NAME || 'inscripciones',
-          }
+    const pg = require('pg');
+    pg.types.setTypeParser(pg.types.builtins.TIMESTAMP, (v) =>
+      v == null ? null : new Date(v.replace(' ', 'T') + 'Z')
     );
+    const poolConfig = {
+      options: '-c TimeZone=UTC',
+    };
+    if (process.env.DATABASE_URL) {
+      poolConfig.connectionString = process.env.DATABASE_URL;
+    } else {
+      poolConfig.host = process.env.DB_HOST || '127.0.0.1';
+      poolConfig.port = Number(process.env.DB_PORT || 5432);
+      poolConfig.user = process.env.DB_USER || 'postgres';
+      poolConfig.password = process.env.DB_PASSWORD || '';
+      poolConfig.database = process.env.DB_NAME || 'inscripciones';
+    }
+    pool = new pg.Pool(poolConfig);
   } else {
     const mysql = require('mysql2/promise');
     pool = mysql.createPool({
@@ -380,6 +385,23 @@ async function init() {
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_pago_cuota UNIQUE (asistente_plan_id, numero_cuota),
     CONSTRAINT fk_asistente_plan FOREIGN KEY (asistente_plan_id) REFERENCES asistente_planes (id) ON DELETE CASCADE
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS notificaciones (
+    id ${id} PRIMARY KEY,
+    titulo VARCHAR(200) NOT NULL,
+    mensaje TEXT NOT NULL,
+    tipo VARCHAR(30) NOT NULL DEFAULT 'info',
+    activa ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    creado_por VARCHAR(255) NOT NULL DEFAULT '',
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS notificaciones_leidas (
+    id ${id} PRIMARY KEY,
+    usuario VARCHAR(50) NOT NULL,
+    notificacion_id INT NOT NULL,
+    CONSTRAINT uq_notificaciones_leidas UNIQUE (usuario, notificacion_id)
   )`);
 
   if (!(await tieneColumna('talleres', 'duracion_hs'))) {
@@ -1308,6 +1330,125 @@ async function sincronizarEstadoPagoPorDni(dni) {
   return estado;
 }
 
+// ── Notificaciones ──────────────────────────────────────────────────
+
+const boolVal = (v) => (isPg ? !!v : v ? 1 : 0);
+
+const EPOCH_FECHA_SQL = isPg
+  ? "round(extract(epoch from creado_en AT TIME ZONE current_setting('TimeZone')))"
+  : "UNIX_TIMESTAMP(creado_en)";
+
+function formatearFechaServer(epoch) {
+  const d = new Date(Number(epoch) * 1000);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function listarNotificaciones() {
+  const filas = await query(`SELECT id, titulo, mensaje, tipo, activa, creado_por, creado_en, ${EPOCH_FECHA_SQL} AS creado_en_epoch FROM notificaciones ORDER BY id DESC`);
+  return filas.map((f) => ({
+    ...f,
+    id: Number(f.id),
+    activa: Boolean(f.activa),
+    creado_en_texto: formatearFechaServer(f.creado_en_epoch),
+  }));
+}
+
+async function listarNotificacionesActivas(usuario = '') {
+  const filas = await query(
+    `SELECT n.id, n.titulo, n.mensaje, n.tipo, n.creado_en,
+       ${EPOCH_FECHA_SQL} AS creado_en_epoch,
+       CASE WHEN l.id IS NULL THEN FALSE ELSE TRUE END AS leida
+     FROM notificaciones n
+     LEFT JOIN notificaciones_leidas l
+       ON l.notificacion_id = n.id AND l.usuario = ?
+     WHERE n.activa = TRUE
+     ORDER BY n.id DESC`,
+    [usuario]
+  );
+  return filas.map((f) => ({
+    ...f,
+    id: Number(f.id),
+    leida: Boolean(f.leida),
+    creado_en_texto: formatearFechaServer(f.creado_en_epoch),
+  }));
+}
+
+async function contarNotificacionesSinLeer(usuario) {
+  const fila = await queryOne(
+    `SELECT COUNT(*) AS n FROM notificaciones n
+     WHERE n.activa = TRUE
+       AND NOT EXISTS (
+         SELECT 1 FROM notificaciones_leidas l
+         WHERE l.notificacion_id = n.id AND l.usuario = ?
+       )`,
+    [usuario]
+  );
+  return Number(fila.n);
+}
+
+async function marcarNotificacionLeida(usuario, notificacionId) {
+  if (isPg) {
+    await query(
+      'INSERT INTO notificaciones_leidas (usuario, notificacion_id) VALUES (?, ?) ON CONFLICT (usuario, notificacion_id) DO NOTHING',
+      [usuario, notificacionId]
+    );
+  } else {
+    await query(
+      'INSERT IGNORE INTO notificaciones_leidas (usuario, notificacion_id) VALUES (?, ?)',
+      [usuario, notificacionId]
+    );
+  }
+}
+
+async function marcarTodasNotificacionesLeidas(usuario) {
+  if (isPg) {
+    await query(
+      `INSERT INTO notificaciones_leidas (usuario, notificacion_id)
+       SELECT ?, id FROM notificaciones WHERE activa = TRUE
+       ON CONFLICT (usuario, notificacion_id) DO NOTHING`,
+      [usuario]
+    );
+  } else {
+    await query(
+      'INSERT IGNORE INTO notificaciones_leidas (usuario, notificacion_id) SELECT ?, id FROM notificaciones WHERE activa = TRUE',
+      [usuario]
+    );
+  }
+}
+
+async function crearNotificacion({ titulo, mensaje, tipo = 'info', activa = true, creadoPor = '' }) {
+  if (isPg) {
+    const filas = await query(
+      'INSERT INTO notificaciones (titulo, mensaje, tipo, activa, creado_por) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      [titulo, mensaje, tipo, boolVal(activa), creadoPor]
+    );
+    return Number(filas[0].id);
+  }
+  const res = await mutation(
+    'INSERT INTO notificaciones (titulo, mensaje, tipo, activa, creado_por) VALUES (?, ?, ?, ?, ?)',
+    [titulo, mensaje, tipo, boolVal(activa), creadoPor]
+  );
+  return res.insertId;
+}
+
+async function actualizarNotificacion(id, { titulo, mensaje, tipo, activa }) {
+  const existe = await queryOne('SELECT id FROM notificaciones WHERE id = ?', [id]);
+  if (!existe) throw new HttpError(404, 'Notificación no encontrada.');
+  await mutation(
+    'UPDATE notificaciones SET titulo = ?, mensaje = ?, tipo = ?, activa = ? WHERE id = ?',
+    [titulo, mensaje, tipo, boolVal(activa), id]
+  );
+  return true;
+}
+
+async function eliminarNotificacion(id) {
+  const res = await mutation('DELETE FROM notificaciones WHERE id = ?', [id]);
+  if (!res.filasAfectadas) throw new HttpError(404, 'Notificación no encontrada.');
+  return true;
+}
+
 // ── Pagos y cuotas ────────────────────────────────────────────────────
 
 module.exports = {
@@ -1372,4 +1513,12 @@ module.exports = {
   registrarPagoCuota,
   eliminarPagoCuota,
   sincronizarEstadoPagoPorDni,
+  listarNotificaciones,
+  listarNotificacionesActivas,
+  contarNotificacionesSinLeer,
+  marcarNotificacionLeida,
+  marcarTodasNotificacionesLeidas,
+  crearNotificacion,
+  actualizarNotificacion,
+  eliminarNotificacion,
 };

@@ -415,6 +415,12 @@ td {
 .estado-pago-texto.pago_completo { color: var(--color-ok); }
 .estado-pago-texto.pago_parcial { color: #b45309; }
 .estado-pago-texto.no_pagado { color: var(--color-error); }
+
+/* ── Notificaciones ─────────────────────────────── */
+.notif-tipo-info { color: var(--color-texto); }
+.notif-tipo-alerta { color: #b45309; }
+.notif-tipo-urgente { color: var(--color-error); font-weight: 700; }
+.notif-tipo-recordatorio { color: var(--color-primario); }
 .modal-contenido-edicion { max-width: calc(100vw - 2rem); width: 100%; }
 .modal-contenido-medio { max-width: 460px; }
 
