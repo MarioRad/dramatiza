@@ -344,6 +344,44 @@ async function init() {
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  const num = isPg ? 'NUMERIC(10,2)' : 'DECIMAL(10,2)';
+
+  await query(`CREATE TABLE IF NOT EXISTS planes_pago (
+    id ${id} PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    descripcion TEXT,
+    monto_total ${num} NOT NULL DEFAULT 0,
+    cantidad_cuotas INT NOT NULL DEFAULT 1,
+    activo ${isPg ? 'BOOLEAN NOT NULL DEFAULT TRUE' : 'TINYINT(1) NOT NULL DEFAULT 1'},
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS asistente_planes (
+    id ${id} PRIMARY KEY,
+    dni VARCHAR(20) NOT NULL,
+    plan_id INT NOT NULL,
+    monto_total ${num} NOT NULL DEFAULT 0,
+    cantidad_cuotas INT NOT NULL DEFAULT 1,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_dni_plan UNIQUE (dni, plan_id),
+    CONSTRAINT fk_plan_pago FOREIGN KEY (plan_id) REFERENCES planes_pago (id) ON DELETE CASCADE
+  )`);
+
+  if (!(await tieneColumna('pagos_cuotas', 'asistente_plan_id'))) {
+    await query('DROP TABLE IF EXISTS pagos_cuotas CASCADE');
+  }
+
+  await query(`CREATE TABLE IF NOT EXISTS pagos_cuotas (
+    id ${id} PRIMARY KEY,
+    asistente_plan_id INT NOT NULL,
+    numero_cuota INT NOT NULL,
+    monto ${num} NOT NULL DEFAULT 0,
+    fecha_pago DATE,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_pago_cuota UNIQUE (asistente_plan_id, numero_cuota),
+    CONSTRAINT fk_asistente_plan FOREIGN KEY (asistente_plan_id) REFERENCES asistente_planes (id) ON DELETE CASCADE
+  )`);
+
   if (!(await tieneColumna('talleres', 'duracion_hs'))) {
     await query('ALTER TABLE talleres ADD COLUMN duracion_hs INT NOT NULL DEFAULT 3');
   }
@@ -863,6 +901,80 @@ async function cambiarTallerInscripcion(id, nuevoTallerId) {
   };
 }
 
+async function reemplazarTalleresInscripcion(dni, ids) {
+  const seleccionIds = Array.isArray(ids)
+    ? [...new Set(ids.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))]
+    : [];
+  if (seleccionIds.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+
+  const persona = await queryOne(
+    'SELECT dni, nombre, apellido, email, telefono, alimentacion FROM inscripciones WHERE dni = ? ORDER BY id LIMIT 1',
+    [dni]
+  );
+  if (!persona) throw new HttpError(404, 'No se encontraron inscripciones para el DNI indicado.');
+
+  return transaction(async (run) => {
+    const actuales = await run(
+      `SELECT i.id, i.taller_id, i.en_encuentro, i.estado_pago,
+         t.nombre, t.fecha, t.hora, t.duracion_hs
+       FROM inscripciones i JOIN talleres t ON t.id = i.taller_id
+       WHERE i.dni = ?
+       ORDER BY i.id`,
+      [dni]
+    );
+
+    const actualesPorTaller = new Map(actuales.map((a) => [Number(a.taller_id), a]));
+    const idsActuales = actuales.map((a) => Number(a.taller_id));
+
+    const nuevosTalleres = [];
+    for (const id of seleccionIds) {
+      const t = await run('SELECT id, nombre, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [id]);
+      if (t.length === 0) throw new HttpError(400, 'Uno de los talleres seleccionados no existe.');
+      const taller = t[0];
+      if (actualesPorTaller.has(id)) continue;
+      const conteo = await run('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND dni <> ?', [id, dni]);
+      if (Number(conteo[0].n) >= Number(taller.cupo)) {
+        throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
+      }
+      nuevosTalleres.push(taller);
+    }
+
+    const finales = actuales
+      .filter((a) => seleccionIds.includes(Number(a.taller_id)))
+      .map((a) => ({ ...a, taller_id: Number(a.taller_id) }));
+    for (const nt of nuevosTalleres) finales.push(nt);
+    const conflicto = buscarConflictoHorario([], finales);
+    if (conflicto) {
+      throw new HttpError(
+        409,
+        `Los talleres "${conflicto[0].nombre}" y "${conflicto[1].nombre}" se superponen en horario. Elegí otros talleres.`
+      );
+    }
+
+    const estadoPago = actuales[0] && actuales[0].estado_pago ? actuales[0].estado_pago : 'no_pagado';
+    const enEncuentro = actuales.some((a) => a.en_encuentro) ? 1 : 0;
+
+    for (const id of idsActuales) {
+      if (!seleccionIds.includes(id)) {
+        await run('DELETE FROM inscripciones WHERE dni = ? AND taller_id = ?', [dni, id]);
+      }
+    }
+    for (const id of seleccionIds) {
+      if (idsActuales.includes(id)) continue;
+      try {
+        await run(
+          'INSERT INTO inscripciones (nombre, apellido, dni, email, telefono, alimentacion, taller_id, en_encuentro, estado_pago) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [persona.nombre, persona.apellido, persona.dni, persona.email, persona.telefono || '', persona.alimentacion || 'sin_restriccion', id, enEncuentro, estadoPago]
+        );
+      } catch (e) {
+        const duplicado = isPg ? e.code === '23505' : e.code === 'ER_DUP_ENTRY';
+        if (duplicado) throw new HttpError(409, 'El DNI ya está inscripto en ese taller.');
+        throw e;
+      }
+    }
+  }).then(() => ({ dni: persona.dni, nombre: persona.nombre, apellido: persona.apellido }));
+}
+
 // ── Programa ──────────────────────────────────────────────────────────
 
 async function listarPrograma() {
@@ -1072,6 +1184,132 @@ async function resumenComidas() {
   return { servicios, dietas, porAsistente };
 }
 
+// ── Pagos y cuotas ────────────────────────────────────────────────────
+
+function formatearMonto(v) {
+  return Number(v ?? 0);
+}
+
+async function listarPlanesPago() {
+  return query(
+    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, activo, creado_en
+     FROM planes_pago ORDER BY id`
+  );
+}
+
+async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1 }) {
+  return mutation(
+    'INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas) VALUES (?, ?, ?, ?)',
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1]
+  );
+}
+
+async function actualizarPlanPago(id, { nombre, descripcion, montoTotal, cantidadCuotas, activo }) {
+  const existe = await queryOne('SELECT id FROM planes_pago WHERE id = ?', [id]);
+  if (!existe) throw new HttpError(404, 'Plan no encontrado.');
+  await mutation(
+    'UPDATE planes_pago SET nombre = ?, descripcion = ?, monto_total = ?, cantidad_cuotas = ?, activo = ? WHERE id = ?',
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, activo ? 1 : 0, id]
+  );
+}
+
+async function eliminarPlanPago(id) {
+  await mutation('DELETE FROM planes_pago WHERE id = ?', [id]);
+}
+
+async function asignarPlanAsistente(dni, planId) {
+  if (!/^\d{7,8}$/.test(String(dni || '').trim())) throw new HttpError(400, 'DNI inválido.');
+  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas FROM planes_pago WHERE id = ?', [planId]);
+  if (!plan) throw new HttpError(404, 'Plan no encontrado.');
+  await mutation(
+    'INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas) VALUES (?, ?, ?, ?)',
+    [String(dni).trim(), planId, formatearMonto(plan.monto_total), Number(plan.cantidad_cuotas) || 1]
+  );
+  await sincronizarEstadoPagoPorDni(String(dni).trim());
+}
+
+async function listarPagos() {
+  const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas FROM planes_pago`);
+  const asistentes = query(
+    `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas,
+            COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
+            COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
+     FROM asistente_planes a
+     LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
+     ORDER BY e.apellido, e.nombre, a.dni`
+  );
+  const pagos = query(
+    `SELECT asistente_plan_id, numero_cuota, monto, fecha_pago FROM pagos_cuotas ORDER BY numero_cuota`
+  );
+  const [planesRes, asistentesRes, pagosRes] = await Promise.all([planes, asistentes, pagos]);
+
+  const pagosPorPlan = new Map();
+  for (const p of pagosRes) {
+    const clave = Number(p.asistente_plan_id);
+    if (!pagosPorPlan.has(clave)) pagosPorPlan.set(clave, []);
+    pagosPorPlan.get(clave).push({ numero: Number(p.numero_cuota), monto: formatearMonto(p.monto), fecha: p.fecha_pago || '' });
+  }
+
+  const planPorId = new Map(planesRes.map((pl) => [Number(pl.id), pl]));
+
+  return asistentesRes.map((a) => ({
+    asistentePlanId: Number(a.asistente_plan_id),
+    dni: a.dni,
+    nombre: a.nombre,
+    apellido: a.apellido,
+    email: a.email,
+    telefono: a.telefono,
+    planId: Number(a.plan_id),
+    planNombre: planPorId.get(Number(a.plan_id))?.nombre || '',
+    montoTotal: formatearMonto(a.monto_total),
+    cantidadCuotas: Number(a.cantidad_cuotas) || 1,
+    cuotas: pagosPorPlan.get(Number(a.asistente_plan_id)) || [],
+  }));
+}
+
+async function registrarPagoCuota(asistentePlanId, numeroCuota, monto, fechaPago) {
+  const plan = await queryOne('SELECT id, dni, monto_total, cantidad_cuotas FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  if (!plan) throw new HttpError(404, 'Plan de asistente no encontrado.');
+  if (Number(numeroCuota) < 1 || Number(numeroCuota) > Number(plan.cantidad_cuotas)) {
+    throw new HttpError(400, `La cuota debe estar entre 1 y ${plan.cantidad_cuotas}.`);
+  }
+  const fecha = String(fechaPago || '').trim() || null;
+  await mutation(
+    'INSERT INTO pagos_cuotas (asistente_plan_id, numero_cuota, monto, fecha_pago) VALUES (?, ?, ?, ?) ' +
+      (isPg ? 'ON CONFLICT (asistente_plan_id, numero_cuota) DO UPDATE SET monto = EXCLUDED.monto, fecha_pago = EXCLUDED.fecha_pago'
+            : 'ON DUPLICATE KEY UPDATE monto = VALUES(monto), fecha_pago = VALUES(fecha_pago)'),
+    [asistentePlanId, Number(numeroCuota), formatearMonto(monto), fecha]
+  );
+  await sincronizarEstadoPagoPorDni(String(plan.dni).trim());
+}
+
+async function eliminarPagoCuota(asistentePlanId, numeroCuota) {
+  const plan = await queryOne('SELECT dni FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  await mutation('DELETE FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, Number(numeroCuota)]);
+  if (plan) await sincronizarEstadoPagoPorDni(String(plan.dni).trim());
+}
+
+async function sincronizarEstadoPagoPorDni(dni) {
+  const planes = await query(
+    `SELECT ap.cantidad_cuotas,
+            (SELECT COUNT(*) FROM pagos_cuotas pc WHERE pc.asistente_plan_id = ap.id) AS cuotas_pagadas
+     FROM asistente_planes ap WHERE ap.dni = ?`,
+    [dni]
+  );
+  if (planes.length === 0) return;
+  let total = 0;
+  let pagadas = 0;
+  for (const p of planes) {
+    total += Number(p.cantidad_cuotas) || 1;
+    pagadas += Number(p.cuotas_pagadas) || 0;
+  }
+  const estado = total === 0 ? 'no_pagado' : pagadas >= total ? 'pago_completo' : pagadas > 0 ? 'pago_parcial' : 'no_pagado';
+  await mutation('UPDATE inscripciones SET estado_pago = ? WHERE dni = ?', [estado, dni]);
+  return estado;
+}
+
+// ── Pagos y cuotas ────────────────────────────────────────────────────
+
 module.exports = {
   HttpError,
   init,
@@ -1091,6 +1329,7 @@ module.exports = {
   registrarEvento,
   listarEventos,
   cambiarTallerInscripcion,
+  reemplazarTalleresInscripcion,
   hayUsuarios,
   crearUsuario,
   buscarUsuario,
@@ -1124,4 +1363,13 @@ module.exports = {
   tieneAsistenciaComida,
   registrarAsistenciaComida,
   resumenComidas,
+  listarPlanesPago,
+  crearPlanPago,
+  actualizarPlanPago,
+  eliminarPlanPago,
+  asignarPlanAsistente,
+  listarPagos,
+  registrarPagoCuota,
+  eliminarPagoCuota,
+  sincronizarEstadoPagoPorDni,
 };

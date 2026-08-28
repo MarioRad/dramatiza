@@ -128,3 +128,10 @@ El campo `tallerIds` es obligatorio: una lista de IDs de talleres separados por 
 - Si un taller llega a su cupo, deja de aceptar inscripciones (respuesta `409`).
 - No se puede bajar el cupo de un taller por debajo de su cantidad de inscriptos actuales.
 - Los talleres de ejemplo y sus cupos iniciales (20) se pueden cambiar directamente en la base de datos o desde el panel.
+
+## App móvil de acreditación
+
+La app móvil (React Native/Expo) vive en **su propio repositorio** separado de este
+backend. Consume esta API por HTTP (`POST /api/mobile/login` y `/api/mobile/acreditar`),
+así que el backend tiene que estar accesible desde el teléfono (misma red Wi-Fi o IP pública).
+Ver los endpoints en `src/server.js`.

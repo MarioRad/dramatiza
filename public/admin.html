@@ -49,6 +49,7 @@
           <button type="button" class="tab" data-vista="talleres">Talleres</button>
           <button type="button" class="tab" data-vista="programa">Programa</button>
           <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
+          <button type="button" class="tab" data-vista="pagos">Pagos y cuotas</button>
           <button type="button" class="tab tab-acreditacion" data-vista="acreditaciones" hidden>Acreditaciones</button>
           <button type="button" class="tab tab-acreditacion" data-vista="comidas" hidden>Desayunos y meriendas</button>
           <button type="button" class="tab tab-admin" data-vista="eventos" hidden>Eventos</button>
@@ -118,6 +119,79 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+      </div>
+
+      <div id="vistaPagos" class="tab-contenido" hidden>
+        <h3>Gestión de pagos y cuotas</h3>
+        <div id="mensajePagos" class="mensaje" role="alert"></div>
+
+        <div class="pagos-seccion">
+          <div class="pagos-seccion-cabecera"><h4>1 · Plan de cuotas del evento</h4></div>
+          <form id="formPlanPago" class="pagos-fila">
+            <input type="hidden" id="planIdEditando">
+            <div class="campo">
+              <label for="planNombre">Nombre</label>
+              <input type="text" id="planNombre" required placeholder="Ej: Inscripción Encuentro">
+            </div>
+            <div class="campo">
+              <label for="planDescripcion">Descripción</label>
+              <input type="text" id="planDescripcion" placeholder="Opcional">
+            </div>
+            <div class="campo">
+              <label for="planMonto">Monto total ($)</label>
+              <input type="number" id="planMonto" min="0" step="0.01" required>
+            </div>
+            <div class="campo">
+              <label for="planCuotas">Cuotas</label>
+              <input type="number" id="planCuotas" min="1" step="1" required>
+            </div>
+            <label class="opcion-plan-activo"><input type="checkbox" id="planActivo" checked> Activo</label>
+            <button type="submit" class="boton" id="botonGuardarPlan">Guardar plan</button>
+            <button type="button" class="boton boton-secundario" id="botonCancelarPlan" hidden>Cancelar</button>
+          </form>
+          <div class="tabla-envoltura">
+            <table id="tablaPlanes">
+              <thead>
+                <tr><th>Nombre</th><th>Descripción</th><th>Monto total</th><th>Cuotas</th><th>Activo</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pagos-seccion">
+          <div class="pagos-seccion-cabecera"><h4>2 · Asignar plan a un asistente</h4></div>
+          <form id="formAsignarPlan" class="pagos-fila">
+            <div class="campo">
+              <label for="asignarDni">DNI</label>
+              <input type="text" id="asignarDni" inputmode="numeric" maxlength="8" required>
+            </div>
+            <div class="campo">
+              <label for="asignarPlan">Plan</label>
+              <select id="asignarPlan"></select>
+            </div>
+            <button type="submit" class="boton boton-secundario" id="botonAsignarPlan">Asignar plan</button>
+          </form>
+        </div>
+
+        <div class="pagos-seccion">
+          <div class="pagos-seccion-cabecera"><h4>3 · Asistentes y cuotas</h4></div>
+          <p class="ayuda" id="resumenPagos"></p>
+          <div class="filtros-barra">
+            <div class="campo">
+              <label for="filtroPagoDni">Buscar por DNI</label>
+              <input type="text" id="filtroPagoDni" inputmode="numeric" maxlength="8" placeholder="Ej: 30123456">
+            </div>
+          </div>
+          <div class="tabla-envoltura">
+            <table id="tablaPagos">
+              <thead>
+                <tr><th>DNI</th><th>Nombre</th><th>Plan</th><th>Total / cuota</th><th>Cuotas</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -260,14 +334,15 @@
   </main>
 
   <div id="modalEditarInscripcion" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalEditarTitulo">
+    <div class="modal-contenido modal-contenido-edicion" role="dialog" aria-modal="true" aria-labelledby="modalEditarTitulo">
       <h3 id="modalEditarTitulo">Editar inscripción</h3>
       <p id="modalEditarInfo" class="ayuda"></p>
       <div class="campo">
-        <label for="modalEditarTaller">Taller</label>
-        <select id="modalEditarTaller"></select>
-        <p class="ayuda-campo">Solo se pueden elegir talleres disponibles (con cupo).</p>
+        <label>Talleres</label>
+        <div id="modalEditarTalleres" class="talleres-multiple"></div>
+        <p class="ayuda-campo">Marcá todos los talleres del asistente. Al guardar se reemplaza su selección.</p>
       </div>
+      <div id="modalEditarConflicto" class="aviso-conflicto" hidden></div>
       <div class="modal-acciones">
         <button type="button" class="boton boton-modal" id="botonGuardarEdicion">Guardar</button>
         <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEdicion">Cancelar</button>
@@ -317,6 +392,28 @@
       <div class="modal-acciones">
         <button type="button" class="boton boton-modal" id="botonGuardarUsuario">Guardar</button>
         <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarUsuario">Cancelar</button>
+      </div>
+    </div>
+  </div>
+  <div id="modalCuota" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-medio" role="dialog" aria-modal="true" aria-labelledby="modalCuotaTitulo">
+      <h3 id="modalCuotaTitulo">Registrar cuota</h3>
+      <p id="modalCuotaInfo" class="ayuda"></p>
+      <input type="hidden" id="modalCuotaPlanId">
+      <input type="hidden" id="modalCuotaNumero">
+      <div class="campos">
+        <div class="campo">
+          <label for="modalCuotaMonto">Monto ($)</label>
+          <input type="number" id="modalCuotaMonto" min="0" step="0.01" required>
+        </div>
+        <div class="campo">
+          <label for="modalCuotaFecha">Fecha de pago</label>
+          <input type="date" id="modalCuotaFecha">
+        </div>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarCuota">Registrar pago</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarCuota">Cancelar</button>
       </div>
     </div>
   </div>

@@ -21,6 +21,7 @@ const TITULOS_VISTA = {
   talleres: 'Talleres y cupos',
   programa: 'Programa del evento',
   encuentro: 'Listado del encuentro',
+  pagos: 'Gestión de pagos y cuotas',
   acreditaciones: 'Acreditaciones',
   comidas: 'Desayunos y meriendas',
   eventos: 'Registro de eventos',
@@ -56,7 +57,7 @@ const resumenAcreditaciones = el('resumenAcreditaciones');
 const resumenComidas = el('resumenComidas');
 const modalEditar = el('modalEditarInscripcion');
 const modalEditarInfo = el('modalEditarInfo');
-const modalEditarTaller = el('modalEditarTaller');
+const modalEditarTalleres = el('modalEditarTalleres');
 const botonGuardarEdicion = el('botonGuardarEdicion');
 const botonCancelarEdicion = el('botonCancelarEdicion');
 const modalUsuario = el('modalUsuario');
@@ -84,6 +85,7 @@ const campoPonencias = el('campoPonencias');
 
 let talleresActuales = [];
 let inscripcionEditando = null;
+let talleresEditando = [];
 let usuarioEditando = null;
 let miSesion = null;
 let vistaActiva = 'inscripciones';
@@ -170,6 +172,12 @@ function cambiarVista(vista) {
   }
   if (vista === 'comidas') {
     cargarComidas();
+  }
+  if (vista === 'inscripciones') {
+    cargarInscripciones();
+  }
+  if (vista === 'pagos') {
+    cargarPagos();
   }
 }
 
@@ -442,26 +450,85 @@ el('botonAgregar').addEventListener('click', () => {
   contenedor.insertBefore(filaTaller({ cupo: 20 }, [], true), contenedor.firstChild);
 });
 
-function abrirModalEdicion(inscripcion) {
+function bloquesHorario(t) {
+  const mFecha = String(t.fecha || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const mHora = String(t.hora || '').trim().match(/(\d{1,2}):(\d{2})/);
+  if (!mFecha || !mHora) return [];
+  const durHs = Number(t.duracion_hs) || 3;
+  const numDias = durHs >= 6 ? 2 : 1;
+  const inicio = new Date(Number(mFecha[1]), Number(mFecha[2]) - 1, Number(mFecha[3]), Number(mHora[1]), Number(mHora[2]));
+  if (Number.isNaN(inicio.getTime())) return [];
+  const durMs = durHs * 3600 * 1000;
+  const bloques = [];
+  for (let i = 0; i < numDias; i++) {
+    const s = new Date(inicio.getTime() + i * 86400000);
+    bloques.push([s.getTime(), s.getTime() + durMs]);
+  }
+  return bloques;
+}
+
+function talleresSeSuperponenEdicion(a, b) {
+  const ba = bloquesHorario(a);
+  const bb = bloquesHorario(b);
+  for (const x of ba) {
+    for (const y of bb) {
+      if (x[0] < y[1] && y[0] < x[1]) return true;
+    }
+  }
+  return false;
+}
+
+function actualizarConflictoEdicion() {
+  const aviso = el('modalEditarConflicto');
+  const seleccionados = [...modalEditarTalleres.querySelectorAll('input[type="checkbox"]:checked')].map((c) => Number(c.value));
+  const byId = new Map(talleresActuales.map((t) => [Number(t.id), t]));
+  const extra = seleccionados.map((id) => byId.get(id)).filter(Boolean);
+  const pares = [];
+  for (let i = 0; i < extra.length; i++) {
+    for (let j = i + 1; j < extra.length; j++) {
+      if (talleresSeSuperponenEdicion(extra[i], extra[j])) pares.push([extra[i], extra[j]]);
+    }
+  }
+  if (pares.length === 0) {
+    aviso.hidden = true;
+    aviso.innerHTML = '';
+    return;
+  }
+  const filas = pares.map(([a, b]) => `• ${a.nombre} ↔ ${b.nombre}`).join('<br>');
+  aviso.innerHTML = `<strong>⚠ Conflicto de horarios:</strong><br>${filas}`;
+  aviso.hidden = false;
+}
+
+function abrirModalEdicion(inscripcion, filas = []) {
   inscripcionEditando = inscripcion;
+  talleresEditando = filas.map((f) => Number(f.taller_id));
   modalEditarInfo.textContent =
     `${inscripcion.nombre} ${inscripcion.apellido} (DNI ${inscripcion.dni})`;
 
-  modalEditarTaller.innerHTML = '';
+  modalEditarTalleres.innerHTML = '';
   for (const t of talleresActuales) {
-    const opcion = document.createElement('option');
-    opcion.value = t.id;
-    const lleno = t.inscriptos >= t.cupo;
-    const esActual = t.id === inscripcion.taller_id;
-    const etiqueta = lleno && !esActual
+    const id = Number(t.id);
+    const marcado = talleresEditando.includes(id);
+    const lleno = t.inscriptos >= t.cupo && !marcado;
+
+    const label = document.createElement('label');
+    label.className = 'opcion-taller' + (lleno ? ' opcion-taller-lleno' : '');
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.value = id;
+    check.checked = marcado;
+    check.disabled = lleno;
+    const span = document.createElement('span');
+    const etiqueta = lleno
       ? `${t.nombre} (lleno)`
       : `${t.nombre} — ${t.cupo - t.inscriptos} cupos`;
-    opcion.textContent = etiqueta;
-    opcion.disabled = lleno && !esActual;
-    if (esActual) opcion.selected = true;
-    modalEditarTaller.appendChild(opcion);
+    span.textContent = etiqueta;
+    label.appendChild(check);
+    label.appendChild(span);
+    modalEditarTalleres.appendChild(label);
   }
 
+  actualizarConflictoEdicion();
   modalEditar.hidden = false;
   modalEditar.setAttribute('aria-hidden', 'false');
 }
@@ -470,23 +537,30 @@ function cerrarModalEdicion() {
   modalEditar.hidden = true;
   modalEditar.setAttribute('aria-hidden', 'true');
   inscripcionEditando = null;
+  talleresEditando = [];
 }
 
 botonCancelarEdicion.addEventListener('click', cerrarModalEdicion);
+modalEditarTalleres.addEventListener('change', actualizarConflictoEdicion);
 
 botonGuardarEdicion.addEventListener('click', async () => {
   if (!inscripcionEditando) return;
-  const nuevoTaller = modalEditarTaller.value;
-  if (!nuevoTaller) return;
+  const seleccionados = [...modalEditarTalleres.querySelectorAll('input[type="checkbox"]:checked')].map(
+    (c) => Number(c.value)
+  );
+  if (seleccionados.length === 0) {
+    mostrarMensaje(mensajePanel, 'Debés seleccionar al menos un taller.', 'error');
+    return;
+  }
   botonGuardarEdicion.disabled = true;
-  const res = await api(`/api/admin/inscripciones/${inscripcionEditando.id}`, {
+  const res = await api('/api/admin/inscripciones-talleres', {
     method: 'PUT',
-    body: JSON.stringify({ taller_id: nuevoTaller }),
+    body: JSON.stringify({ dni: inscripcionEditando.dni, talleres: seleccionados }),
   });
   if (!res.ok) {
-    mostrarMensaje(mensajePanel, res.data.error || 'No se pudo modificar la inscripción.', 'error');
+    mostrarMensaje(mensajePanel, res.data.error || 'No se pudieron actualizar los talleres.', 'error');
   } else {
-    mostrarMensaje(mensajePanel, 'Inscripción modificada.', 'ok');
+    mostrarMensaje(mensajePanel, 'Talleres actualizados.', 'ok');
     cerrarModalEdicion();
     await cargarDatos();
   }
@@ -496,13 +570,26 @@ botonGuardarEdicion.addEventListener('click', async () => {
 function renderInscripciones(inscripciones) {
   const cuerpo = document.querySelector('#tablaInscripciones tbody');
   cuerpo.innerHTML = '';
-  const enEncuentro = inscripciones.filter((i) => i.en_encuentro).length;
-  const completos = inscripciones.filter((i) => i.estado_pago === 'pago_completo').length;
-  const parciales = inscripciones.filter((i) => i.estado_pago === 'pago_parcial').length;
-  const noPagados = inscripciones.filter((i) => i.estado_pago !== 'pago_completo' && i.estado_pago !== 'pago_parcial').length;
+
+  const porDniResumen = new Map();
+  for (const i of inscripciones) {
+    if (!porDniResumen.has(i.dni)) porDniResumen.set(i.dni, []);
+    porDniResumen.get(i.dni).push(i);
+  }
+  const personas = [...porDniResumen.keys()];
+  const enEncuentro = personas.filter((d) => porDniResumen.get(d).some((i) => i.en_encuentro)).length;
+  let completos = 0;
+  let parciales = 0;
+  let noPagados = 0;
+  for (const d of personas) {
+    const estados = porDniResumen.get(d).map((i) => i.estado_pago || 'no_pagado');
+    if (estados.every((e) => e === 'pago_completo')) completos++;
+    else if (estados.some((e) => e === 'pago_parcial')) parciales++;
+    else noPagados++;
+  }
   resumenInscripciones.textContent =
-    `Total: ${inscripciones.length} inscripción(es) · ${enEncuentro} con pagos registrados · ` +
-    `${completos} completo(s) · ${parciales} parcial(es) · ${noPagados} no pagado(s).`;
+    `Personas: ${personas.length} (${inscripciones.length} inscripciones en talleres) · ` +
+    `en encuentro: ${enEncuentro} · pagos: ${completos} completo(s) · ${parciales} parcial(es) · ${noPagados} no pagado(s).`;
 
   const dniFiltro = buscarDni.value.trim().replace(/\D/g, '');
   const pagoFiltro = filtroPago.value;
@@ -521,7 +608,20 @@ function renderInscripciones(inscripciones) {
     return;
   }
 
+  const grupos = [];
+  const porDni = new Map();
   for (const i of visibles) {
+    if (!porDni.has(i.dni)) {
+      porDni.set(i.dni, []);
+      grupos.push(i.dni);
+    }
+    porDni.get(i.dni).push(i);
+  }
+
+  for (const dni of grupos) {
+    const filas = porDni.get(dni);
+    const i = filas[0];
+
     const tr = document.createElement('tr');
 
     const tdDni = document.createElement('td');
@@ -541,38 +641,36 @@ function renderInscripciones(inscripciones) {
     tdAlimentacion.textContent = ETIQUETAS_ALIMENTACION[i.alimentacion] || i.alimentacion || '—';
 
     const tdTaller = document.createElement('td');
-    tdTaller.textContent = i.taller;
+    const talleresUnicos = [...new Map(filas.map((f) => [f.taller, f])).values()];
+    const totalSesiones = filas.length;
+    const divTalleres = document.createElement('div');
+    divTalleres.className = 'lista-talleres-inscripcion';
+    for (const ft of talleresUnicos) {
+      const span = document.createElement('div');
+      span.className = 'chip-taller';
+      span.textContent = ft.taller;
+      divTalleres.appendChild(span);
+    }
+    if (totalSesiones > talleresUnicos.length) {
+      const span = document.createElement('div');
+      span.className = 'chip-taller chip-taller-mas';
+      span.textContent = `+${totalSesiones - talleresUnicos.length} sesión(es)`;
+      divTalleres.appendChild(span);
+    }
+    if (talleresUnicos.length === 0) {
+      divTalleres.textContent = '—';
+    }
+    tdTaller.appendChild(divTalleres);
 
     const tdEncuentro = document.createElement('td');
-    tdEncuentro.textContent = i.en_encuentro ? 'Sí' : 'No';
-    tdEncuentro.className = i.en_encuentro ? 'encuentro-si' : 'encuentro-no';
+    tdEncuentro.textContent = filas.some((f) => f.en_encuentro) ? 'Sí' : 'No';
+    tdEncuentro.className = filas.some((f) => f.en_encuentro) ? 'encuentro-si' : 'encuentro-no';
 
     const tdPago = document.createElement('td');
-    const selectPago = document.createElement('select');
-    selectPago.className = `estado-pago ${i.estado_pago || 'no_pagado'}`;
-    for (const [valor, etiqueta] of Object.entries(ETIQUETAS_PAGO)) {
-      const opcion = document.createElement('option');
-      opcion.value = valor;
-      opcion.textContent = etiqueta;
-      selectPago.appendChild(opcion);
-    }
-    selectPago.value = i.estado_pago || 'no_pagado';
-    selectPago.addEventListener('change', async () => {
-      selectPago.disabled = true;
-      const res = await api(`/api/admin/inscripciones/${i.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ estado_pago: selectPago.value }),
-      });
-      if (!res.ok) {
-        mostrarMensaje(mensajePanel, res.data.error || 'No se pudo cambiar el estado de pago.', 'error');
-        selectPago.value = i.estado_pago || 'no_pagado';
-      } else {
-        mostrarMensaje(mensajePanel, `Pago de ${i.nombre} ${i.apellido} actualizado.`, 'ok');
-        await cargarDatos();
-      }
-      selectPago.disabled = false;
-    });
-    tdPago.appendChild(selectPago);
+    const spanPago = document.createElement('span');
+    spanPago.className = `estado-pago-texto ${i.estado_pago || 'no_pagado'}`;
+    spanPago.textContent = ETIQUETAS_PAGO[i.estado_pago] || '—';
+    tdPago.appendChild(spanPago);
 
     const tdFecha = document.createElement('td');
     tdFecha.textContent = formatearFecha(i.creado_en);
@@ -585,7 +683,7 @@ function renderInscripciones(inscripciones) {
     botonEditar.type = 'button';
     botonEditar.className = 'boton boton-chico';
     botonEditar.textContent = 'Editar';
-    botonEditar.addEventListener('click', () => abrirModalEdicion({ ...i, taller_id: i.taller_id }));
+    botonEditar.addEventListener('click', () => abrirModalEdicion(i, filas));
     contenedorAcciones.appendChild(botonEditar);
 
     const botonQr = document.createElement('button');
@@ -1008,6 +1106,20 @@ async function cargarDatos() {
   mostrarPanel();
 }
 
+async function cargarInscripciones() {
+  try {
+    const r = await api('/api/admin/inscripciones');
+    if (!r.ok) {
+      mostrarMensaje(mensajePanel, r.error || 'No se pudieron cargar las inscripciones.', 'error');
+      return;
+    }
+    window.__inscripcionesActuales = r.data;
+    renderInscripciones(r.data);
+  } catch {
+    mostrarMensaje(mensajePanel, 'No se pudieron cargar las inscripciones.', 'error');
+  }
+}
+
 formImportarEncuentro.addEventListener('submit', async (e) => {
   e.preventDefault();
   const archivo = archivoEncuentro.files[0];
@@ -1256,6 +1368,334 @@ async function initProgramaAdmin() {
   const ok = await ProgramaUI.cargar();
   if (ok) ProgramaUI.render();
 }
+
+// ── Pagos y cuotas ────────────────────────────────────────────────
+const mensajePagos = el('mensajePagos');
+const formPlanPago = el('formPlanPago');
+const planIdEditando = el('planIdEditando');
+const planNombre = el('planNombre');
+const planDescripcion = el('planDescripcion');
+const planMonto = el('planMonto');
+const planCuotas = el('planCuotas');
+const planActivo = el('planActivo');
+const botonGuardarPlan = el('botonGuardarPlan');
+const botonCancelarPlan = el('botonCancelarPlan');
+const tablaPlanes = el('tablaPlanes');
+const formAsignarPlan = el('formAsignarPlan');
+const asignarDni = el('asignarDni');
+const asignarPlan = el('asignarPlan');
+const botonAsignarPlan = el('botonAsignarPlan');
+const tablaPagos = el('tablaPagos');
+const resumenPagos = el('resumenPagos');
+const filtroPagoDni = el('filtroPagoDni');
+const modalCuota = el('modalCuota');
+const modalCuotaInfo = el('modalCuotaInfo');
+const modalCuotaPlanId = el('modalCuotaPlanId');
+const modalCuotaNumero = el('modalCuotaNumero');
+const modalCuotaMonto = el('modalCuotaMonto');
+const modalCuotaFecha = el('modalCuotaFecha');
+const botonGuardarCuota = el('botonGuardarCuota');
+const botonCancelarCuota = el('botonCancelarCuota');
+
+let planesPago = [];
+let pagosAsistentes = [];
+let cuotaContexto = null;
+
+function formatearMoneda(n) {
+  return Number(n ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function pagarPorCuota(ap) {
+  const n = Number(ap.cantidadCuotas) || 1;
+  return (Number(ap.montoTotal) || 0) / n;
+}
+
+function cuotaPagadaSet(ap) {
+  const s = new Set();
+  for (const c of ap.cuotas || []) s.add(c.numero);
+  return s;
+}
+
+async function cargarPagos() {
+  const [planesRes, pagosRes] = await Promise.all([
+    api('/api/admin/pagos/planes'),
+    api('/api/admin/pagos'),
+  ]);
+  if (!planesRes.ok || !pagosRes.ok) {
+    mostrarMensaje(mensajePagos, 'No se pudieron cargar los pagos.', 'error');
+    return;
+  }
+  planesPago = planesRes.data || [];
+  pagosAsistentes = pagosRes.data || [];
+  prellenarSelectPlanes();
+  renderPlanesPago();
+  renderPagos();
+}
+
+function prellenarSelectPlanes() {
+  asignarPlan.innerHTML = '';
+  for (const p of planesPago) {
+    const opcion = document.createElement('option');
+    opcion.value = p.id;
+    opcion.textContent = `${p.nombre} — ${formatearMoneda(p.monto_total)} / ${p.cantidad_cuotas} cuota(s)`;
+    asignarPlan.appendChild(opcion);
+  }
+}
+
+function renderPlanesPago() {
+  const tbody = tablaPlanes.querySelector('tbody');
+  tbody.innerHTML = '';
+  if (planesPago.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.textContent = 'No hay planes creados.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const p of planesPago) {
+    const tr = document.createElement('tr');
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = p.nombre;
+    const tdDesc = document.createElement('td');
+    tdDesc.textContent = p.descripcion || '—';
+    const tdMonto = document.createElement('td');
+    tdMonto.textContent = formatearMoneda(p.monto_total);
+    const tdCuotas = document.createElement('td');
+    tdCuotas.textContent = p.cantidad_cuotas;
+    const tdActivo = document.createElement('td');
+    tdActivo.textContent = p.activo ? 'Sí' : 'No';
+    tdActivo.className = p.activo ? 'encuentro-si' : 'encuentro-no';
+    const tdAcciones = document.createElement('td');
+    const cont = document.createElement('div');
+    cont.className = 'acciones-fila';
+    const btnEditar = document.createElement('button');
+    btnEditar.type = 'button';
+    btnEditar.className = 'boton boton-chico';
+    btnEditar.textContent = 'Editar';
+    btnEditar.addEventListener('click', () => editarPlanPago(p));
+    const btnEliminar = document.createElement('button');
+    btnEliminar.type = 'button';
+    btnEliminar.className = 'boton boton-peligro boton-chico';
+    btnEliminar.textContent = 'Eliminar';
+    btnEliminar.addEventListener('click', () => eliminarPlanPago(p));
+    cont.appendChild(btnEditar);
+    cont.appendChild(btnEliminar);
+    tdAcciones.appendChild(cont);
+    tr.append(tdNombre, tdDesc, tdMonto, tdCuotas, tdActivo, tdAcciones);
+    tbody.appendChild(tr);
+  }
+}
+
+function editarPlanPago(p) {
+  planIdEditando.value = p.id;
+  planNombre.value = p.nombre;
+  planDescripcion.value = p.descripcion || '';
+  planMonto.value = p.monto_total;
+  planCuotas.value = p.cantidad_cuotas;
+  planActivo.checked = Boolean(p.activo);
+  botonGuardarPlan.textContent = 'Actualizar plan';
+  botonCancelarPlan.hidden = false;
+}
+
+function resetFormPlan() {
+  planIdEditando.value = '';
+  formPlanPago.reset();
+  planActivo.checked = true;
+  botonCancelarPlan.hidden = true;
+  botonGuardarPlan.textContent = 'Guardar plan';
+}
+
+async function eliminarPlanPago(p) {
+  if (!window.confirm(`¿Eliminar el plan "${p.nombre}"? Se eliminarán las cuotas asociadas.`)) return;
+  const res = await api(`/api/admin/pagos/planes/${p.id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    mostrarMensaje(mensajePagos, res.data.error || 'No se pudo eliminar el plan.', 'error');
+  } else {
+    mostrarMensaje(mensajePagos, 'Plan eliminado.', 'ok');
+    await cargarPagos();
+  }
+}
+
+formPlanPago.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = planIdEditando.value;
+  const uri = id ? `/api/admin/pagos/planes/${id}` : '/api/admin/pagos/planes';
+  const method = id ? 'PUT' : 'POST';
+  const res = await api(uri, {
+    method,
+    body: JSON.stringify({
+      nombre: planNombre.value.trim(),
+      descripcion: planDescripcion.value.trim(),
+      monto_total: Number(planMonto.value) || 0,
+      cantidad_cuotas: Number(planCuotas.value) || 1,
+      activo: planActivo.checked,
+    }),
+  });
+  if (!res.ok) {
+    mostrarMensaje(mensajePagos, res.data.error || 'No se pudo guardar el plan.', 'error');
+  } else {
+    mostrarMensaje(mensajePagos, id ? 'Plan actualizado.' : 'Plan creado.', 'ok');
+    resetFormPlan();
+    await cargarPagos();
+  }
+});
+
+botonCancelarPlan.addEventListener('click', resetFormPlan);
+
+formAsignarPlan.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const dni = asignarDni.value.trim().replace(/\D/g, '');
+  if (!dni) {
+    mostrarMensaje(mensajePagos, 'Indicá un DNI.', 'error');
+    return;
+  }
+  if (!asignarPlan.value) {
+    mostrarMensaje(mensajePagos, 'Seleccioná un plan.', 'error');
+    return;
+  }
+  botonAsignarPlan.disabled = true;
+  const res = await api('/api/admin/pagos/asignar', {
+    method: 'POST',
+    body: JSON.stringify({ dni, plan_id: Number(asignarPlan.value) }),
+  });
+  if (!res.ok) {
+    mostrarMensaje(mensajePagos, res.data.error || 'No se pudo asignar el plan.', 'error');
+  } else {
+    mostrarMensaje(mensajePagos, 'Plan asignado.', 'ok');
+    asignarDni.value = '';
+    await cargarPagos();
+  }
+  botonAsignarPlan.disabled = false;
+});
+
+function renderPagos() {
+  const tbody = tablaPagos.querySelector('tbody');
+  tbody.innerHTML = '';
+  const dniFiltro = filtroPagoDni.value.trim().replace(/\D/g, '');
+  const visibles = pagosAsistentes.filter((a) => !dniFiltro || String(a.dni).includes(dniFiltro));
+  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length}.`;
+  if (visibles.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.textContent = dniFiltro ? 'Sin resultados.' : 'No hay asistentes con plan asignado.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const a of visibles) {
+    const tr = document.createElement('tr');
+    const pagadas = cuotaPagadaSet(a);
+    const n = Number(a.cantidadCuotas) || 1;
+    const cuota = pagarPorCuota(a);
+
+    const tdDni = document.createElement('td');
+    tdDni.className = 'celda-dni';
+    tdDni.textContent = a.dni;
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = [a.apellido, a.nombre].filter(Boolean).join(', ') || '—';
+    const tdPlan = document.createElement('td');
+    tdPlan.textContent = a.planNombre || '—';
+    const tdTotal = document.createElement('td');
+    tdTotal.textContent = `${formatearMoneda(a.montoTotal)} / ${formatearMoneda(cuota)}`;
+    tdTotal.className = 'pagos-total';
+
+    const tdCuotas = document.createElement('td');
+    const caja = document.createElement('div');
+    caja.className = 'pagos-cuotas';
+    for (let i = 1; i <= n; i++) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      const pagada = pagadas.has(i);
+      chip.className = 'pagos-cuota' + (pagada ? ' pagos-cuota-pagada' : '');
+      chip.textContent = pagada ? `✓ ${i}` : `${i}`;
+      chip.addEventListener('click', () => abrirModalCuota(a, i, pagada));
+      caja.appendChild(chip);
+    }
+    tdCuotas.appendChild(caja);
+
+    const tdEstado = document.createElement('td');
+    const pagadasN = pagadas.size;
+    const estado = pagadasN >= n ? 'pago_completo' : pagadasN === 0 ? 'no_pagado' : 'pago_parcial';
+    const spanEstado = document.createElement('span');
+    spanEstado.className = `estado-pago-texto ${estado}`;
+    spanEstado.textContent = ETIQUETAS_PAGO[estado] || '—';
+    tdEstado.appendChild(spanEstado);
+
+    tr.append(tdDni, tdNombre, tdPlan, tdTotal, tdCuotas, tdEstado);
+    tbody.appendChild(tr);
+  }
+}
+
+function abrirModalCuota(a, numero, pagada) {
+  cuotaContexto = { asistentePlanId: a.asistentePlanId, numero, pagada };
+  const pagoPrevio = a.cuotas.find((c) => c.numero === numero);
+  modalCuotaPlanId.value = a.asistentePlanId;
+  modalCuotaNumero.value = numero;
+  modalCuotaMonto.value = pagada ? (pagoPrevio ? pagoPrevio.monto : pagarPorCuota(a)) : pagarPorCuota(a);
+  modalCuotaFecha.value = pagada ? (pagoPrevio && pagoPrevio.fecha ? pagoPrevio.fecha : '') : new Date().toISOString().slice(0, 10);
+  const nombre = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
+  modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}`;
+  document.getElementById('modalCuotaTitulo').textContent = pagada ? 'Quitar pago de cuota' : 'Registrar pago de cuota';
+  botonGuardarCuota.textContent = pagada ? 'Quitar pago' : 'Registrar pago';
+  modalCuota.hidden = false;
+  modalCuota.setAttribute('aria-hidden', 'false');
+}
+
+function cerrarModalCuota() {
+  modalCuota.hidden = true;
+  modalCuota.setAttribute('aria-hidden', 'true');
+  cuotaContexto = null;
+}
+
+modalCuota.addEventListener('click', (e) => {
+  if (e.target === modalCuota) cerrarModalCuota();
+});
+
+botonCancelarCuota.addEventListener('click', cerrarModalCuota);
+
+botonGuardarCuota.addEventListener('click', async () => {
+  if (!cuotaContexto) return;
+  const { asistentePlanId, numero, pagada } = cuotaContexto;
+  botonGuardarCuota.disabled = true;
+  if (pagada) {
+    const res = await api('/api/admin/pagos/cuota', {
+      method: 'DELETE',
+      body: JSON.stringify({ asistente_plan_id: asistentePlanId, numero_cuota: numero }),
+    });
+    if (!res.ok) {
+      mostrarMensaje(mensajePagos, res.data.error || 'No se pudo quitar el pago.', 'error');
+    } else {
+      mostrarMensaje(mensajePagos, 'Pago de cuota eliminado.', 'ok');
+      cerrarModalCuota();
+      await cargarPagos();
+    }
+  } else {
+    const res = await api('/api/admin/pagos/cuota', {
+      method: 'POST',
+      body: JSON.stringify({
+        asistente_plan_id: asistentePlanId,
+        numero_cuota: numero,
+        monto: Number(modalCuotaMonto.value) || 0,
+        fecha_pago: modalCuotaFecha.value,
+      }),
+    });
+    if (!res.ok) {
+      mostrarMensaje(mensajePagos, res.data.error || 'No se pudo registrar el pago.', 'error');
+    } else {
+      mostrarMensaje(mensajePagos, 'Pago de cuota registrado.', 'ok');
+      cerrarModalCuota();
+      await cargarPagos();
+    }
+  }
+  botonGuardarCuota.disabled = false;
+});
+
+filtroPagoDni.addEventListener('input', renderPagos);
 
 (async () => {
   const res = await api('/api/admin/perfil');

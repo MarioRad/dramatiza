@@ -750,6 +750,24 @@ app.get('/api/admin/inscripciones', requireAuth, requirePermiso('perm_inscripcio
   }
 });
 
+app.put('/api/admin/inscripciones-talleres', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String((req.body || {}).dni || '').trim();
+    const talleres = (req.body || {}).talleres;
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    const resultado = await db.reemplazarTalleresInscripcion(dni, talleres);
+    await regenerarAcreditacion(dni);
+    await db.registrarEvento(
+      'inscripcion_modificada',
+      `Talleres de ${resultado.nombre} ${resultado.apellido} (DNI ${dni}) actualizados desde el panel`,
+      req.sesion.usuario
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.put('/api/admin/inscripciones/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -1049,6 +1067,9 @@ app.post('/api/mobile/acreditar', async (req, res, next) => {
       sesion.usuario
     ).catch(() => {});
 
+    const pagoCompleto =
+      inscripciones.length > 0 && inscripciones.every((i) => i.estado_pago === 'pago_completo');
+
     res.json({
       encontrado: true,
       coincideCodigo,
@@ -1058,11 +1079,13 @@ app.post('/api/mobile/acreditar', async (req, res, next) => {
       alimentacion: persona.alimentacion || (inscripciones[0] || {}).alimentacion || 'sin_restriccion',
       horaServidor: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
       servicio: servicioComida,
+      pagoCompleto,
       talleres: inscripciones.map((i) => ({
         taller: i.taller,
         fecha: i.fecha || '',
         hora: i.hora || '',
         lugar: i.lugar || '',
+        pago: i.estado_pago || 'no_pagado',
       })),
     });
   } catch (e) {
@@ -1143,15 +1166,111 @@ app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acredita
   }
 });
 
+// ── Pagos y cuotas ────────────────────────────────────────────────────
+app.get('/api/admin/pagos/planes', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    res.json(await db.listarPlanesPago());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/pagos/planes', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const nombre = String(body.nombre || '').trim();
+    if (!nombre) throw new db.HttpError(400, 'Indicá un nombre para el plan.');
+    await db.crearPlanPago({
+      nombre,
+      descripcion: String(body.descripcion || ''),
+      montoTotal: Number(body.monto_total) || 0,
+      cantidadCuotas: Math.max(1, Number(body.cantidad_cuotas) || 1),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/pagos/planes/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const body = req.body || {};
+    await db.actualizarPlanPago(id, {
+      nombre: String(body.nombre || '').trim(),
+      descripcion: String(body.descripcion || ''),
+      montoTotal: Number(body.monto_total) || 0,
+      cantidadCuotas: Math.max(1, Number(body.cantidad_cuotas) || 1),
+      activo: body.activo !== false,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/pagos/planes/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    await db.eliminarPlanPago(id);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/admin/pagos', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    res.json(await db.listarPagos());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/pagos/asignar', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    await db.asignarPlanAsistente(String(body.dni || '').trim(), Number(body.plan_id));
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    await db.registrarPagoCuota(
+      Number(body.asistente_plan_id),
+      Number(body.numero_cuota),
+      Number(body.monto) || 0,
+      String(body.fecha_pago || '')
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    await db.eliminarPagoCuota(Number(body.asistente_plan_id), Number(body.numero_cuota));
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     res.json({ total: await db.contarEncuentro() });
   } catch (e) {
     next(e);
   }
-});
-
-app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+});app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const nombre = String(body.nombre || '');
