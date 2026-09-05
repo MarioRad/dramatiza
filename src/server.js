@@ -331,6 +331,8 @@ function filasSheetsAObjetos(datos) {
     return String(fila[idx] || '');
   };
 
+  const apellidoNombreCombinados = esCabecera && columnas.apellido !== -1 && columnas.apellido === columnas.nombre;
+
   const personas = [];
   let invalidos = 0;
   for (let i = inicio; i < filas.length; i++) {
@@ -340,10 +342,25 @@ function filasSheetsAObjetos(datos) {
       invalidos++;
       continue;
     }
+    let apellido = celda(fila, 'apellido').trim();
+    let nombre = celda(fila, 'nombre').trim();
+    if (apellidoNombreCombinados) {
+      const partes = apellido.split(',');
+      if (partes.length >= 2) {
+        apellido = partes[0].trim();
+        nombre = partes.slice(1).join(',').trim();
+      } else {
+        const idx = apellido.indexOf(' ');
+        if (idx > 0) {
+          nombre = apellido.slice(idx + 1).trim();
+          apellido = apellido.slice(0, idx).trim();
+        }
+      }
+    }
     personas.push({
       dni,
-      nombre: celda(fila, 'nombre').trim(),
-      apellido: celda(fila, 'apellido').trim(),
+      nombre,
+      apellido,
       email: celda(fila, 'email').trim(),
       telefono: celda(fila, 'telefono').replace(/\D/g, ''),
       pago: normalizarEstadoPago(celda(fila, 'pago')),
