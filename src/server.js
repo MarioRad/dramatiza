@@ -1294,7 +1294,9 @@ app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), a
   } catch (e) {
     next(e);
   }
-});app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+});
+
+app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const nombre = String(body.nombre || '');
@@ -1311,6 +1313,26 @@ app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), a
     res.json({ ok: true, importados, existentes, invalidos, total: await db.contarEncuentro() });
   } catch (e) {
     next(e);
+  }
+});
+
+// Ruta que recibirá los datos desde Google Sheets
+app.post('/api/admin/insertar-datos', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+  const { datos } = req.body; 
+  // 'datos' será un array con los valores de la fila, ej: ['Juan', 'Perez', 'juan@email.com']
+
+  if (!datos || datos.length === 0) {
+    return res.status(400).json({ error: 'No se recibieron datos' });
+  }
+
+  try {
+    const query = 'INSERT INTO encuentro_inscripciones (dni,nombre, apellido, email,telefono,pago,creado_en,marca_temporal,fecha_de_nacimiento, provincia,ciudad,ocupacion,opcion_pago) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)';
+    await pool.query(query, datos);
+    
+    res.status(200).json({ message: 'Datos insertados correctamente' });
+  } catch (error) {
+    console.error('Error al insertar en Postgres:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
