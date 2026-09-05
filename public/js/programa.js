@@ -117,6 +117,7 @@ const ProgramaUI = (() => {
       const lleno = inscriptos >= cupo;
       const duracionHs = Number(t.duracion_hs) || 3;
       const duracionEtiqueta = duracionHs === 6 ? '6hs · 2 días' : '3hs · 1 día';
+      const esDosDias = !!t.pareja_id || talleres.some(x => x.pareja_id === t.id);
       const botonInscribirse = mode === 'seleccion' && !lleno
         ? `<button type="button" class="ws-inscribir-btn" data-taller-id="${t.id}" onclick="ProgramaUI.seleccionarTaller(${t.id})">Inscribirme</button>`
         : '';
@@ -127,7 +128,7 @@ const ProgramaUI = (() => {
           ${fotoHtml}
           <div class="ws-header">
             <span class="ws-duracion">${duracionEtiqueta}</span>
-            ${t.pareja_id ? '<span class="ws-dias">2 días</span>' : ''}
+            ${esDosDias ? '<span class="ws-dias">2 días</span>' : ''}
           </div>
           <div class="ws-title">${escapeHtml(t.nombre)}</div>
           ${t.disertante ? `<div class="ws-speaker">${escapeHtml(t.disertante)}</div>` : ''}

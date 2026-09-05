@@ -650,9 +650,10 @@ async function eliminarPonente(id) {
 
 async function listarPonentesConFecha() {
   const filas = await query(
-    `SELECT p.*, d.fecha AS fecha_dia
+    `SELECT p.*, d.fecha AS fecha_dia, d2.fecha AS fecha_dia2
      FROM ponentes p
      LEFT JOIN dias_ponentes d ON d.dia = p.dia
+     LEFT JOIN dias_ponentes d2 ON d2.dia = p.dia2
      ORDER BY p.dia, p.orden, p.id`
   );
   return filas;
@@ -689,32 +690,52 @@ async function sincronizarTalleresDesdePonentes() {
   for (let i = 0; i < talleresPonente.length; i++) {
     const p = talleresPonente[i];
     const fecha = convertirFechaDia(p.fecha_dia);
+    if (!fecha) continue;
     const nombre = (String(p.titulo || '').trim() || String(p.nombre || '')).slice(0, 120);
     const hora = String(p.horario || '').trim();
-
-    const existente = await queryOne('SELECT id FROM talleres WHERE ponente_id = ?', [p.id]);
+    const cupo = Number(p.cupo) || 20;
     const datos = {
       nombre,
       descripcion: String(p.descripcion || ''),
-      cupo: Number(p.cupo) || 20,
+      cupo,
       duracion_hs: 3,
-      fecha,
-      hora,
       lugar: '',
       disertante: String(p.nombre || ''),
       ponente_id: Number(p.id),
     };
 
-    if (existente) {
+    let main = await queryOne('SELECT id FROM talleres WHERE ponente_id = ? AND pareja_id IS NULL', [p.id]);
+    let mainId;
+    if (main) {
       await mutation(
         `UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, ponente_id = ? WHERE id = ?`,
-        [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, datos.disertante, datos.ponente_id, existente.id]
+        [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, datos.disertante, datos.ponente_id, main.id]
       );
+      mainId = main.id;
     } else {
-      await mutation(
-        `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, ponente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      const ins = await query(
+        `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, ponente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, datos.disertante, datos.ponente_id]
       );
+      mainId = Number(ins[0].id);
+    }
+
+    const fecha2 = convertirFechaDia(p.fecha_dia2);
+    const hora2 = String(p.horario2 || '').trim();
+    if (fecha2 && hora2) {
+      const parte = await queryOne('SELECT id, nombre FROM talleres WHERE pareja_id = ?', [mainId]);
+      const nombreParte = `${datos.nombre} (2° parte)`.slice(0, 120);
+      if (parte) {
+        await mutation(
+          `UPDATE talleres SET nombre = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, cupo = ?, ponente_id = ? WHERE id = ?`,
+          [nombreParte, fecha2, hora2, '', datos.disertante, datos.cupo, datos.ponente_id, parte.id]
+        );
+      } else {
+        await query(
+          `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, ponente_id, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+          [nombreParte, datos.descripcion, datos.cupo, 3, fecha2, hora2, '', datos.disertante, datos.ponente_id, mainId]
+        );
+      }
     }
   }
 
