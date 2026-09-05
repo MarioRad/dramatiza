@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel de Administración</title>
   <link rel="stylesheet" href="/css/estilos.css">
-  <link rel="stylesheet" href="/programa.css">
+  <link rel="stylesheet" href="/css/admin-ponentes.css">
 </head>
 <body>
   <header class="encabezado">
@@ -46,8 +46,7 @@
 
         <nav id="tabsPanel" class="tabs" aria-label="Secciones">
           <button type="button" class="tab" data-vista="inscripciones">Inscripciones</button>
-          <button type="button" class="tab" data-vista="talleres">Talleres</button>
-          <button type="button" class="tab" data-vista="programa">Programa</button>
+          <button type="button" class="tab" data-vista="ponentes">Ponentes</button>
           <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
           <button type="button" class="tab" data-vista="pagos">Pagos y cuotas</button>
           <button type="button" class="tab" data-vista="notificaciones">Notificaciones</button>
@@ -60,12 +59,6 @@
 
         <div id="mensajePanel" class="mensaje" role="alert"></div>
       </section>
-
-      <div id="vistaTalleres" class="tab-contenido" hidden>
-        <h3>Talleres y cupos</h3>
-        <div id="listaTalleres" class="talleres-grid"></div>
-        <button id="botonAgregar" class="boton boton-secundario" type="button">+ Agregar taller</button>
-      </div>
 
       <div id="vistaEncuentro" class="tab-contenido" hidden>
         <div class="cabecera-panel">
@@ -350,8 +343,27 @@
         <button id="botonAgregarUsuario" class="boton boton-secundario" type="button">+ Agregar usuario</button>
       </div>
 
-      <div id="vistaPrograma" class="tab-contenido" hidden>
-        <div id="programaAdmin" class="programa-container"></div>
+      <div id="vistaPonentes" class="tab-contenido" hidden>
+        <div class="ponentes-toolbar">
+          <input type="text" id="buscarPonente" class="campo-buscar" placeholder="Buscar por nombre o título...">
+          <button id="botonNuevoPonente" class="boton boton-secundario" type="button">+ Nuevo ponente</button>
+        </div>
+        <div id="diasPonentes" class="dias-ponentes"></div>
+        <div class="tabla-envoltura">
+          <table id="tablaPonentes">
+            <thead>
+              <tr>
+                <th style="width:56px">Foto</th>
+                <th>Nombre</th>
+                <th>Tipo</th>
+                <th>Título</th>
+                <th style="width:170px">Día / Horario</th>
+                <th style="width:110px">Acciones</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
 
       <div id="vistaPermisos" class="tab-contenido" hidden>
@@ -366,7 +378,6 @@
                   <th>Usuario</th>
                   <th style="text-align:center;">Inscripciones</th>
                   <th style="text-align:center;">Talleres</th>
-                  <th style="text-align:center;">Programa</th>
                   <th style="text-align:center;">Encuentro</th>
                   <th style="text-align:center;">Acreditación</th>
                 </tr>
@@ -429,7 +440,6 @@
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.35rem;">
             <label><input type="checkbox" id="permUsuarioInscripciones" checked> Inscripciones</label>
             <label><input type="checkbox" id="permUsuarioTalleres" checked> Talleres</label>
-            <label><input type="checkbox" id="permUsuarioPrograma" checked> Programa</label>
             <label><input type="checkbox" id="permUsuarioEncuentro" checked> Encuentro</label>
             <label><input type="checkbox" id="permUsuarioAcreditacion" checked> Acreditación</label>
           </div>
@@ -482,67 +492,80 @@
     </div>
   </div>
 
-  <div id="modalBloquePrograma" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-contenido-amplio" role="dialog" aria-modal="true" aria-labelledby="modalBloqueTitulo">
-      <h3 id="modalBloqueTitulo">Nuevo bloque</h3>
-      <div id="mensajeBloque" class="mensaje" role="alert"></div>
-      <form id="formBloquePrograma">
+  <div id="modalPonente" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-medio" role="dialog" aria-modal="true" aria-labelledby="modalPonenteTitulo">
+      <h3 id="modalPonenteTitulo">Nuevo ponente</h3>
+      <div id="mensajePonente" class="mensaje" role="alert"></div>
+      <form id="formPonente">
+        <input type="hidden" id="ponenteId">
         <div class="campos">
           <div class="campo">
-            <label for="bloqueDia">Día</label>
-            <input type="date" id="bloqueDia" required>
+            <label for="ponenteNombre">Nombre *</label>
+            <input type="text" id="ponenteNombre" required placeholder="Nombre y apellido">
           </div>
           <div class="campo">
-            <label for="bloqueTipo">Tipo de bloque</label>
-            <select id="bloqueTipo" required>
-              <option value="break">Descanso / Comida</option>
-              <option value="inauguracion">Inauguración</option>
+            <label for="ponenteTipo">Tipo</label>
+            <select id="ponenteTipo">
               <option value="ponencia">Ponencia</option>
+              <option value="taller">Taller</option>
               <option value="conversatorio">Conversatorio</option>
-              <option value="obra">Obra de teatro</option>
-              <option value="talleres">Talleres</option>
-              <option value="general">General</option>
             </select>
           </div>
           <div class="campo">
-            <label for="bloqueTitulo">Título</label>
-            <input type="text" id="bloqueTitulo" maxlength="200" required>
+            <label for="ponenteCupo">Cupo (solo si es Taller)</label>
+            <input type="number" id="ponenteCupo" min="0" value="20">
           </div>
           <div class="campo">
-            <label for="bloqueIcono">Icono (emoji)</label>
-            <input type="text" id="bloqueIcono" maxlength="10" placeholder="☕ 🎤 💬 🎬 🛠️">
+            <label for="ponenteDia">Día de presentación</label>
+            <input type="number" id="ponenteDia" min="1" value="1">
           </div>
           <div class="campo">
-            <label for="bloqueHoraInicio">Hora inicio</label>
-            <input type="time" id="bloqueHoraInicio" required>
+            <label for="ponenteHorario">Horario</label>
+            <input type="text" id="ponenteHorario" placeholder="Ej: 10:00 hs">
           </div>
           <div class="campo">
-            <label for="bloqueHoraFin">Hora fin</label>
-            <input type="time" id="bloqueHoraFin" required>
+            <label for="ponenteDia2">Día de presentación 2</label>
+            <input type="number" id="ponenteDia2" min="1" placeholder="Dejar vacío si no aplica">
+          </div>
+          <div class="campo">
+            <label for="ponenteHorario2">Horario 2</label>
+            <input type="text" id="ponenteHorario2" placeholder="Ej: 09:00 hs">
           </div>
           <div class="campo" style="grid-column:1/-1;">
-            <label for="bloqueDescripcion">Descripción</label>
-            <textarea id="bloqueDescripcion" rows="3" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;"></textarea>
+            <label for="ponenteTitulo">Título de la actividad</label>
+            <input type="text" id="ponenteTitulo" placeholder="Ej: Teatro y Trastornos del Espectro Autista">
           </div>
           <div class="campo" style="grid-column:1/-1;">
-            <label for="bloqueOrden">Orden (posición en el día)</label>
-            <input type="number" id="bloqueOrden" min="0" value="0" style="width:80px;">
+            <label for="ponenteDescripcion">Descripción</label>
+            <textarea id="ponenteDescripcion" rows="3" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;"></textarea>
           </div>
-          <div id="campoPonencias" class="campo" style="grid-column:1/-1;" hidden>
-            <label>Ponencias (una por línea: hora | título | ponente)</label>
-            <textarea id="bloquePonencias" rows="4" placeholder="14:30 a 14:45 | Título charla | Nombre Ponente" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;"></textarea>
+          <div class="campo" style="grid-column:1/-1;">
+            <label for="ponenteFoto">Fotografía</label>
+            <input type="file" id="ponenteFoto" accept="image/*">
+            <div class="ponente-foto-preview" style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+              <img id="ponenteFotoPreview" alt="Vista previa" style="width:72px;height:72px;border-radius:10px;object-fit:cover;border:1px solid var(--color-borde);display:none;">
+              <span class="ayuda-campo" id="ponenteFotoLabel">Sin fotografía</span>
+            </div>
+          </div>
+          <div class="campo" style="grid-column:1/-1;">
+            <label for="ponenteFotoPos">Encuadre del rostro</label>
+            <select id="ponenteFotoPos">
+              <option value="">Automático (favorece la parte superior)</option>
+              <option value="top">Superior</option>
+              <option value="center">Centro</option>
+              <option value="bottom">Inferior</option>
+            </select>
           </div>
         </div>
         <div class="modal-acciones">
-          <button type="submit" class="boton boton-modal" id="botonGuardarBloque">Guardar</button>
-          <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarBloque">Cancelar</button>
+          <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarPonente">Cancelar</button>
+          <button type="submit" class="boton boton-modal" id="botonGuardarPonente">Guardar</button>
         </div>
       </form>
     </div>
   </div>
 
   <script src="/js/darkmode.js"></script>
-  <script src="/js/programa.js"></script>
-  <script src="/js/admin.js?v=3"></script>
+  <script src="/js/admin.js?v=4"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ const ProgramaUI = (() => {
   let mode = 'public';
   let bloques = [];
   let talleres = [];
+  let ponentes = [];
   let capacidad = 0;
   let asistentes = 0;
   let dias = [];
@@ -80,6 +81,30 @@ const ProgramaUI = (() => {
       </div>`;
   }
 
+  function fotoDisertante(disertante) {
+    if (!disertante || !ponentes.length) return null;
+    const d = disertante.toLowerCase();
+    const dWords = d.split(/[\s,–\-\/]+/).filter(w => w.length > 2);
+    let best = null;
+    let bestScore = 0;
+    for (const p of ponentes) {
+      const n = (p.nombre || '').toLowerCase();
+      if (n === d || n.includes(d) || d.includes(n)) {
+        if (p.foto) return p.foto;
+        best = p;
+      }
+      if (bestScore < 2 && dWords.length > 0) {
+        const nWords = n.split(/[\s,–\-\/]+/).filter(w => w.length > 2);
+        const matches = dWords.filter(w => nWords.some(nw => nw.includes(w) || w.includes(nw)));
+        if (matches.length > bestScore && p.foto) {
+          bestScore = matches.length;
+          best = p;
+        }
+      }
+    }
+    return best && best.foto ? best.foto : null;
+  }
+
   function renderWorkshops(bloque) {
     const fecha = bloque.dia;
     const turnoBloque = turnoDesdeHora(bloque.hora_inicio);
@@ -95,8 +120,11 @@ const ProgramaUI = (() => {
       const botonInscribirse = mode === 'seleccion' && !lleno
         ? `<button type="button" class="ws-inscribir-btn" data-taller-id="${t.id}" onclick="ProgramaUI.seleccionarTaller(${t.id})">Inscribirme</button>`
         : '';
+      const foto = fotoDisertante(t.disertante);
+      const fotoHtml = foto ? `<img class="ws-foto" src="${escapeHtml(foto)}" alt="${escapeHtml(t.disertante || '')}">` : '';
       html += `
         <div class="programa-workshop-card${lleno ? ' ws-lleno' : ''}" data-taller-id="${t.id}">
+          ${fotoHtml}
           <div class="ws-header">
             <span class="ws-duracion">${duracionEtiqueta}</span>
             ${t.pareja_id ? '<span class="ws-dias">2 días</span>' : ''}
@@ -114,34 +142,72 @@ const ProgramaUI = (() => {
     return html;
   }
 
+  function ponentesDeBloque(bloque, tipo) {
+    const fecha = bloque.dia;
+    return ponentes.filter((p) => p.tipo === tipo && p.fecha_dia === fecha);
+  }
+
   function renderPonencias(bloque) {
-    let datos = [];
-    try { datos = JSON.parse(bloque.datos || '[]'); } catch (e) { datos = []; }
-    if (datos.length === 0) return '<p style="color:var(--pg-text-muted);font-size:0.85rem;">Sin ponentes confirmados.</p>';
+    const lista = ponentesDeBloque(bloque, 'ponencia');
+    if (lista.length === 0) return '<p style="color:var(--pg-text-muted);font-size:0.85rem;">Sin ponentes confirmados.</p>';
     let html = '';
-    datos.forEach((p, i) => {
+    lista.forEach((p, i) => {
       if (i > 0) html += '<hr class="programa-ponencia-divider">';
+      const foto = p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '';
       html += `<div class="programa-ponencia-item">
-        <strong>${p.hora ? p.hora + ': ' : ''}${escapeHtml(p.titulo || '')}</strong><br>
-        <em>Ponente: ${escapeHtml(p.ponente || '')}</em>
+        <div class="programa-ponencia-linea">
+          ${foto}
+          <div>
+            ${p.horario ? `<span class="programa-ponencia-hora">${escapeHtml(p.horario)}</span>` : ''}
+            <strong>${escapeHtml(p.titulo || p.nombre || '')}</strong><br>
+            <em>${escapeHtml(p.nombre || '')}</em>
+          </div>
+        </div>
       </div>`;
     });
     return html;
+  }
+
+  function renderConversatorio(bloque) {
+    const lista = ponentesDeBloque(bloque, 'conversatorio');
+    let html = '';
+    if (lista.length > 0) {
+      lista.forEach((p, i) => {
+        if (i > 0) html += '<hr class="programa-ponencia-divider">';
+        const foto = p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '';
+        html += `<div class="programa-ponencia-item">
+          <div class="programa-ponencia-linea">
+            ${foto}
+            <div>
+              ${p.horario ? `<span class="programa-ponencia-hora">${escapeHtml(p.horario)}</span>` : ''}
+              <strong>${escapeHtml(p.nombre || '')}</strong><br>
+              ${p.titulo ? `<em>${escapeHtml(p.titulo)}</em>` : ''}
+            </div>
+          </div>
+        </div>`;
+      });
+    }
+    if (bloque.descripcion) html += (html ? '<br>' : '') + `<p>${escapeHtml(bloque.descripcion)}</p>`;
+    return html || '<p style="color:var(--pg-text-muted);font-size:0.85rem;">Sin invitados confirmados.</p>';
   }
 
   function renderContenido(bloque) {
     switch (bloque.tipo) {
       case 'talleres': return renderWorkshops(bloque);
       case 'ponencia': return renderPonencias(bloque);
+      case 'conversatorio': return renderConversatorio(bloque);
       default: return bloque.descripcion ? `<p>${escapeHtml(bloque.descripcion)}</p>` : '';
     }
   }
 
   function renderSubtitulo(bloque) {
     if (bloque.tipo === 'ponencia') {
-      let datos = [];
-      try { datos = JSON.parse(bloque.datos || '[]'); } catch (e) { datos = []; }
-      return datos.map(p => p.ponente).filter(Boolean).join(' • ');
+      const lista = ponentesDeBloque(bloque, 'ponencia');
+      return lista.map(p => p.nombre).filter(Boolean).join(' • ');
+    }
+    if (bloque.tipo === 'conversatorio') {
+      const lista = ponentesDeBloque(bloque, 'conversatorio');
+      return lista.map(p => p.nombre).filter(Boolean).join(' • ');
     }
     if (bloque.tipo === 'talleres') {
       const fecha = bloque.dia;
@@ -407,15 +473,17 @@ const ProgramaUI = (() => {
 
   async function cargarPublico() {
     try {
-      const [progRes, diasRes, tRes] = await Promise.all([
+      const [progRes, diasRes, tRes, pRes] = await Promise.all([
         fetch('/api/programa'),
         fetch('/api/programa/dias'),
         fetch('/api/talleres'),
+        fetch('/api/ponentes'),
       ]);
       if (!progRes.ok) return false;
       bloques = await progRes.json();
       dias = await diasRes.json();
       talleres = tRes.ok ? await tRes.json() : [];
+      ponentes = pRes.ok ? await pRes.json() : [];
       return true;
     } catch (e) {
       return false;

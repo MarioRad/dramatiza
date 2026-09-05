@@ -2,12 +2,20 @@ require('dotenv').config();
 
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const multer = require('multer');
+const jwt = require('jsonwebtoken');
 const db = require('./db');
 const notificaciones = require('./notificaciones');
 const acreditacion = require('./acreditacion');
 const whatsapp = require('./whatsapp');
+const { supabaseAdmin } = require('./supabase');
+
+const STORAGE_BUCKET = 'ponentes-fotos';
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const EN_VERCEL = String(process.env.VERCEL || '').toLowerCase() === '1';
 
 const app = express();
 
@@ -23,8 +31,20 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 }));
 
 const DURACION_SESION_MS = 12 * 60 * 60 * 1000;
-const sesiones = new Map();
 const ROLES_VALIDOS = ['admin', 'operador'];
+
+function firmarToken(payload, duracionMs) {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: Math.floor(duracionMs / 1000) });
+}
+
+function verificarToken(token) {
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -40,25 +60,16 @@ function verificarPassword(password, almacenado) {
 }
 
 function crearSesion(usuario) {
-  const token = crypto.randomBytes(32).toString('hex');
-  sesiones.set(token, {
-    usuario: usuario.username,
-    nombre: usuario.nombre,
-    rol: usuario.rol,
-    expira: Date.now() + DURACION_SESION_MS,
-  });
-  return token;
+  return firmarToken(
+    { usuario: usuario.username, nombre: usuario.nombre, rol: usuario.rol },
+    DURACION_SESION_MS
+  );
 }
 
 function sesionValida(token) {
-  if (!token) return null;
-  const s = sesiones.get(token);
-  if (!s) return null;
-  if (Date.now() > s.expira) {
-    sesiones.delete(token);
-    return null;
-  }
-  return s;
+  const s = verificarToken(token);
+  if (!s || !s.usuario) return null;
+  return { usuario: s.usuario, nombre: s.nombre, rol: s.rol };
 }
 
 function requireAuth(req, res, next) {
@@ -288,6 +299,30 @@ app.get('/api/talleres', async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
     res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), duracion_hs: Number(t.duracion_hs) })));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/ponentes', async (req, res, next) => {
+  try {
+    const filas = await db.listarPonentesConFecha();
+    res.json(
+      filas.map((p) => ({
+        id: Number(p.id),
+        nombre: p.nombre,
+        tipo: p.tipo,
+        dia: Number(p.dia),
+        horario: p.horario || '',
+        dia2: p.dia2 ? Number(p.dia2) : null,
+        horario2: p.horario2 || '',
+        titulo: p.titulo || '',
+        descripcion: p.descripcion || '',
+        foto: getFotoUrl(p.foto),
+        cupo: Number(p.cupo) || 20,
+        fecha_dia: db.convertirFechaDia ? db.convertirFechaDia(p.fecha_dia) : p.fecha_dia,
+      }))
+    );
   } catch (e) {
     next(e);
   }
@@ -582,7 +617,6 @@ app.post('/api/admin/login', async (req, res, next) => {
 });
 
 app.post('/api/admin/logout', (req, res) => {
-  if (req.cookies.admin_token) sesiones.delete(req.cookies.admin_token);
   res.clearCookie('admin_token');
   res.json({ ok: true });
 });
@@ -670,7 +704,6 @@ app.put('/api/admin/usuarios/:id', requireAdmin, async (req, res, next) => {
       passwordHash: password ? hashPassword(password) : null,
       permInscripciones: body.perm_inscripciones !== false && body.perm_inscripciones !== 0,
       permTalleres: body.perm_talleres !== false && body.perm_talleres !== 0,
-      permPrograma: body.perm_programa !== false && body.perm_programa !== 0,
       permEncuentro: body.perm_encuentro !== false && body.perm_encuentro !== 0,
       permAcreditacion: body.perm_acreditacion !== false && body.perm_acreditacion !== 0,
     });
@@ -703,39 +736,6 @@ app.get('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), asy
   try {
     const talleres = await db.listarTalleres();
     res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), duracion_hs: Number(t.duracion_hs) })));
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.post('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
-  try {
-    const datos = validarTaller(req.body || {});
-    const id = await db.crearTaller(datos);
-    res.status(201).json({ ok: true, id });
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.put('/api/admin/talleres/:id', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
-    const datos = validarTaller(req.body || {});
-    await db.actualizarTaller(id, datos);
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.delete('/api/admin/talleres/:id', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
-    const resultado = await db.eliminarTaller(id);
-    res.json({ ok: true, ...resultado });
   } catch (e) {
     next(e);
   }
@@ -934,8 +934,6 @@ app.post('/api/admin/acreditacion/:dni/reenviar', requireAuth, requirePermiso('p
 
 // ── API móvil de acreditación (app escáner QR) ────────────────────────
 
-const tokensMoviles = new Map();
-
 function tokenMovilDesdeRequest(req) {
   const m = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : '';
@@ -943,13 +941,8 @@ function tokenMovilDesdeRequest(req) {
 
 function sesionMovilValida(req) {
   const token = tokenMovilDesdeRequest(req);
-  if (!token) return null;
-  const s = tokensMoviles.get(token);
-  if (!s) return null;
-  if (Date.now() > s.expira) {
-    tokensMoviles.delete(token);
-    return null;
-  }
+  const s = verificarToken(token);
+  if (!s || !s.usuario) return null;
   return { token, usuario: s.usuario };
 }
 
@@ -979,11 +972,10 @@ app.post('/api/mobile/login', async (req, res, next) => {
     if (!usuario.perm_acreditacion) {
       return res.status(403).json({ error: 'El usuario no tiene permiso de acreditación.' });
     }
-    const token = crypto.randomBytes(32).toString('hex');
-    tokensMoviles.set(token, {
-      usuario: usuario.username,
-      expira: Date.now() + DURACION_SESION_MS,
-    });
+    const token = firmarToken(
+      { usuario: usuario.username, nombre: usuario.nombre, rol: usuario.rol },
+      DURACION_SESION_MS
+    );
     res.json({ ok: true, token, nombre: usuario.nombre, rol: usuario.rol });
   } catch (e) {
     next(e);
@@ -991,8 +983,6 @@ app.post('/api/mobile/login', async (req, res, next) => {
 });
 
 app.post('/api/mobile/logout', (req, res) => {
-  const token = tokenMovilDesdeRequest(req);
-  if (token) tokensMoviles.delete(token);
   res.json({ ok: true });
 });
 
@@ -1319,83 +1309,168 @@ app.get('/api/programa/dias', async (req, res, next) => {
   }
 });
 
-// ── Programa (admin CRUD) ─────────────────────────────────────────────
+// ── Ponentes (catálogo admin) ────────────────────────────────────────
 
-app.get('/api/admin/programa', requireAuth, async (req, res, next) => {
+const uploadPonente = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Solo se permiten archivos de imagen'));
+  },
+});
+
+function supabaseFotoPath(filename) {
+  return `ponentes/${filename}`;
+}
+
+async function uploadFotoToStorage(file) {
+  const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+  const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+  const storagePath = supabaseFotoPath(name);
+  const { error } = await supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+  if (error) throw new Error(`Error subiendo foto: ${error.message}`);
+  return name;
+}
+
+async function deleteFotoPonente(foto) {
+  if (!foto) return;
+  const storagePath = supabaseFotoPath(foto);
   try {
-    const bloques = await db.listarPrograma();
-    const config = await db.obtenerTodaConfig();
-    const asistentes = await db.contarAsistentesUnicos();
-    const capacidad = Number(config.capacidad_locacion) || 0;
-    res.json({ bloques, capacidad, asistentes, config });
+    await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
+  } catch (_) { /* noop */ }
+}
+
+function getFotoUrl(foto) {
+  if (!foto) return null;
+  const { data } = supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(supabaseFotoPath(foto));
+  return data?.publicUrl || null;
+}
+
+const parseDiaValido = (v, def) => {
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : def;
+};
+
+app.get('/api/admin/ponentes', requireAuth, async (req, res, next) => {
+  try {
+    const ponentes = await db.listarPonentes();
+    res.json(ponentes.map((p) => ({ ...p, foto: getFotoUrl(p.foto) })));
   } catch (e) {
     next(e);
   }
 });
 
-app.post('/api/admin/programa/bloques', requireAuth, async (req, res, next) => {
+app.post('/api/admin/ponentes', requireAuth, uploadPonente.single('foto'), async (req, res, next) => {
   try {
     const body = req.body || {};
-    const dia = String(body.dia || '').trim();
-    const hora_inicio = String(body.hora_inicio || '').trim();
-    const hora_fin = String(body.hora_fin || '').trim();
-    const tipo = String(body.tipo || '').trim();
-    const titulo = String(body.titulo || '').trim();
-    const descripcion = String(body.descripcion || '').trim();
-    const icono = String(body.icono || '').trim();
-    const orden = Number(body.orden) || 0;
-    const datos = body.datos ? JSON.stringify(body.datos) : null;
-
-    if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new db.HttpError(400, 'Fecha del día inválida (usar AAAA-MM-DD).');
-    if (!hora_inicio || !hora_fin) throw new db.HttpError(400, 'Horarios requeridos.');
-    if (!tipo) throw new db.HttpError(400, 'Tipo de bloque requerido.');
-    if (!titulo || titulo.length < 2) throw new db.HttpError(400, 'Título requerido (mínimo 2 caracteres).');
-
-    const id = await db.crearBloque({ dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos });
-    await db.registrarEvento('programa_bloque_creado', `Bloque creado: "${titulo}" (${tipo}) - ${dia} ${hora_inicio}-${hora_fin}`, req.sesion.usuario);
+    const nombre = String(body.nombre || '').trim();
+    if (!nombre) {
+      return res.status(400).json({ error: 'El nombre es obligatorio.' });
+    }
+    const dia = parseDiaValido(body.dia, 1);
+    const dia2Raw = body.dia2 !== undefined && String(body.dia2).trim() === ''
+      ? null
+      : parseDiaValido(body.dia2, null);
+    const cupo = Math.max(0, Number.parseInt(body.cupo, 10) || 20);
+    let foto = null;
+    if (req.file) {
+      foto = await uploadFotoToStorage(req.file);
+    }
+    const id = await db.crearPonente({
+      nombre,
+      tipo: String(body.tipo || 'ponencia').trim(),
+      dia,
+      horario: String(body.horario || '').trim(),
+      dia2: dia2Raw,
+      horario2: String(body.horario2 || '').trim(),
+      titulo: String(body.titulo || '').trim(),
+      descripcion: String(body.descripcion || '').trim(),
+      foto,
+      fotoPos: String(body.foto_pos || '').trim(),
+      cupo,
+    });
+    await db.sincronizarTalleresDesdePonentes();
+    await db.registrarEvento('ponente_creado', `Ponente creado: "${nombre}"`, req.sesion.usuario);
     res.status(201).json({ ok: true, id });
   } catch (e) {
     next(e);
   }
 });
 
-app.put('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) => {
+app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de ponente inválido.');
     const body = req.body || {};
-    const dia = String(body.dia || '').trim();
-    const hora_inicio = String(body.hora_inicio || '').trim();
-    const hora_fin = String(body.hora_fin || '').trim();
-    const tipo = String(body.tipo || '').trim();
-    const titulo = String(body.titulo || '').trim();
-    const descripcion = String(body.descripcion || '').trim();
-    const icono = String(body.icono || '').trim();
-    const orden = Number(body.orden) || 0;
-    const datos = body.datos ? JSON.stringify(body.datos) : null;
-
-    if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new db.HttpError(400, 'Fecha del día inválida.');
-    if (!hora_inicio || !hora_fin) throw new db.HttpError(400, 'Horarios requeridos.');
-    if (!tipo) throw new db.HttpError(400, 'Tipo de bloque requerido.');
-    if (!titulo || titulo.length < 2) throw new db.HttpError(400, 'Título requerido.');
-
-    await db.actualizarBloque(id, { dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos });
-    await db.registrarEvento('programa_bloque_modificado', `Bloque actualizado: "${titulo}" (${tipo}) - ${dia} ${hora_inicio}-${hora_fin}`, req.sesion.usuario);
+    const existente = await db.obtenerPonente(id);
+    if (!existente) {
+      return res.status(404).json({ error: 'Ponente no encontrado.' });
+    }
+    const nombre = String(body.nombre ?? existente.nombre).trim();
+    const dia2Cleared = body.dia2 !== undefined && String(body.dia2).trim() === '';
+    const dia2 = dia2Cleared ? null : parseDiaValido(body.dia2, existente.dia2);
+    let nuevaFoto = existente.foto;
+    if (req.file) {
+      nuevaFoto = await uploadFotoToStorage(req.file);
+      if (existente.foto && existente.foto !== nuevaFoto) {
+        await deleteFotoPonente(existente.foto);
+      }
+    }
+    await db.actualizarPonente(id, {
+      nombre,
+      tipo: String(body.tipo ?? existente.tipo).trim(),
+      dia: parseDiaValido(body.dia, existente.dia),
+      horario: String(body.horario ?? existente.horario).trim(),
+      dia2,
+      horario2: dia2Cleared ? '' : String(body.horario2 ?? existente.horario2).trim(),
+      titulo: String(body.titulo ?? existente.titulo).trim(),
+      descripcion: String(body.descripcion ?? existente.descripcion).trim(),
+      foto: nuevaFoto,
+      fotoPos: String(body.foto_pos ?? existente.foto_pos).trim(),
+      cupo: Math.max(0, Number.parseInt(body.cupo, 10) || existente.cupo || 20),
+    });
+    await db.sincronizarTalleresDesdePonentes();
+    await db.registrarEvento('ponente_modificado', `Ponente actualizado: "${nombre}"`, req.sesion.usuario);
     res.json({ ok: true });
   } catch (e) {
     next(e);
   }
 });
 
-app.delete('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) => {
+app.delete('/api/admin/ponentes/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
-    const bloque = await db.obtenerBloque(id);
-    if (!bloque) throw new db.HttpError(404, 'Bloque no encontrado.');
-    await db.eliminarBloque(id);
-    await db.registrarEvento('programa_bloque_eliminado', `Bloque eliminado: "${bloque.titulo}" (${bloque.tipo}) - ${bloque.dia}`, req.sesion.usuario);
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de ponente inválido.');
+    const existente = await db.obtenerPonente(id);
+    if (!existente) throw new db.HttpError(404, 'Ponente no encontrado.');
+    await db.eliminarPonente(id);
+    await db.sincronizarTalleresDesdePonentes();
+    await deleteFotoPonente(existente.foto);
+    await db.registrarEvento('ponente_eliminado', `Ponente eliminado: "${existente.nombre}"`, req.sesion.usuario);
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/admin/ponentes/dias', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await db.listarDiasPonentes());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/ponentes/dias', requireAuth, async (req, res, next) => {
+  try {
+    const fechas = Array.isArray(req.body) ? req.body : [];
+    await db.guardarDiasPonentes(fechas);
+    res.json(await db.listarDiasPonentes());
   } catch (e) {
     next(e);
   }
@@ -1568,20 +1643,25 @@ app.use((err, _req, res, _next) => {
 
 const PORT = Number(process.env.PORT || 3000);
 
-db.init()
-  .then(async () => {
-    if (!(await db.hayUsuarios())) {
-      const username = (process.env.ADMIN_USER || 'admin').trim().toLowerCase();
-      const password = process.env.ADMIN_PASSWORD || 'admin';
-      await db.crearUsuario({ username, passwordHash: hashPassword(password), nombre: 'Administrador', rol: 'admin' });
-      console.log(`Usuario administrador creado: ${username}`);
-    }
-    whatsapp.iniciar().catch((e) => console.error('[WhatsApp] Error al iniciar:', e.message));
-    app.listen(PORT, () => {
-      console.log(`Sistema de inscripciones disponible en http://localhost:${PORT}`);
+if (!EN_VERCEL) {
+  db.initPool()
+    .then(async () => {
+      if (!(await db.hayUsuarios())) {
+        const username = (process.env.ADMIN_USER || 'admin').trim().toLowerCase();
+        const password = process.env.ADMIN_PASSWORD || 'admin';
+        await db.crearUsuario({ username, passwordHash: hashPassword(password), nombre: 'Administrador', rol: 'admin' });
+        console.log(`Usuario administrador creado: ${username}`);
+      }
+      await db.sincronizarTalleresDesdePonentes?.();
+      whatsapp.iniciar().catch((e) => console.error('[WhatsApp] Error al iniciar:', e.message));
+      app.listen(PORT, () => {
+        console.log(`Sistema de inscripciones disponible en http://localhost:${PORT}`);
+      });
+    })
+    .catch((e) => {
+      console.error('No se pudo inicializar la base de datos:', e.message);
+      process.exit(1);
     });
-  })
-  .catch((e) => {
-    console.error('No se pudo inicializar la base de datos:', e.message);
-    process.exit(1);
-  });
+}
+
+module.exports = app;
