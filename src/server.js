@@ -1433,6 +1433,7 @@ app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), as
       foto: nuevaFoto,
       fotoPos: String(body.foto_pos ?? existente.foto_pos).trim(),
       cupo: Math.max(0, Number.parseInt(body.cupo, 10) || existente.cupo || 20),
+      orden: existente.orden ?? 0,
     });
     await db.sincronizarTalleresDesdePonentes();
     await db.registrarEvento('ponente_modificado', `Ponente actualizado: "${nombre}"`, req.sesion.usuario);

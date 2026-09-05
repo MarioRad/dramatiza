@@ -630,6 +630,10 @@ async function crearPonente({ nombre, tipo = 'ponencia', dia = 1, horario = '', 
 }
 
 async function actualizarPonente(id, { nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo = 20, orden }) {
+  if (orden === undefined) {
+    const actual = await obtenerPonente(id);
+    orden = actual?.orden ?? 0;
+  }
   const res = await mutation(
     `UPDATE ponentes SET nombre = ?, tipo = ?, dia = ?, horario = ?, dia2 = ?, horario2 = ?, titulo = ?, descripcion = ?, foto = ?, foto_pos = ?, cupo = ?, orden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo, orden, id]
