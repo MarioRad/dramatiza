@@ -493,8 +493,11 @@
   </div>
 
   <div id="modalPonente" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-contenido-medio" role="dialog" aria-modal="true" aria-labelledby="modalPonenteTitulo">
-      <h3 id="modalPonenteTitulo">Nuevo ponente</h3>
+    <div class="modal-contenido modal-contenido-medio modal-contenido-con-scroll" role="dialog" aria-modal="true" aria-labelledby="modalPonenteTitulo">
+      <div class="modal-encabezado">
+        <h3 id="modalPonenteTitulo">Nuevo ponente</h3>
+        <button type="button" class="modal-cerrar" id="botonCerrarPonente" aria-label="Cerrar" title="Cerrar">×</button>
+      </div>
       <div id="mensajePonente" class="mensaje" role="alert"></div>
       <form id="formPonente">
         <input type="hidden" id="ponenteId">

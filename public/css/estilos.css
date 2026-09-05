@@ -590,6 +590,38 @@ td {
   color: var(--color-primario-oscuro);
 }
 
+.modal-contenido-con-scroll {
+  overflow-y: auto;
+}
+
+.modal-encabezado {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.modal-encabezado h3 {
+  margin: 0;
+}
+
+.modal-cerrar {
+  border: 0;
+  background: transparent;
+  color: var(--color-texto-suave);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.modal-cerrar:hover {
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--color-primario-oscuro);
+}
+
 .modal-contenido-amplio { max-width: 560px; }
 
 .modal-aviso {

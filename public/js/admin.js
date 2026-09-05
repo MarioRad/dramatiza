@@ -1212,6 +1212,7 @@ function cerrarModalPonente() {
 }
 
 botonCancelarPonente.addEventListener('click', cerrarModalPonente);
+el('botonCerrarPonente').addEventListener('click', cerrarModalPonente);
 
 botonNuevoPonente.addEventListener('click', () => abrirModalPonente(null));
 
