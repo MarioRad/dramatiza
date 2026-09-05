@@ -122,7 +122,11 @@ const ALIMENTACIONES_VALIDAS = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_la
 const ESTADOS_PAGO = ['no_pagado', 'pago_parcial', 'pago_completo'];
 
 function normalizarEtiqueta(valor) {
-  return String(valor || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(valor || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
 }
 
 function dividirCampos(linea, delim) {
@@ -187,9 +191,13 @@ function parsearCsv(texto) {
   const esCabecera = normalizadas.some((c) => c.includes('dni') || c.includes('documento'));
   const inicio = esCabecera ? 1 : 0;
 
-  const indexar = (claves, porDefecto) => {
-    const i = normalizadas.findIndex((c) => claves.some((k) => c.includes(k)));
-    return i === -1 ? porDefecto : i;
+  const indexar = (claves, porDefecto, excluir = []) => {
+    for (let i = 0; i < normalizadas.length; i++) {
+      const c = normalizadas[i];
+      if (excluir.some((k) => c.includes(k))) continue;
+      if (claves.some((k) => c.includes(k))) return i;
+    }
+    return porDefecto;
   };
 
   const columnas = esCabecera
@@ -199,9 +207,15 @@ function parsearCsv(texto) {
         telefono: indexar(['telefono', 'celular', 'cel', 'movil'], -1),
         apellido: indexar(['apellido'], -1),
         nombre: indexar(['nombre'], -1),
-        pago: indexar(['pago', 'pagado', 'abono', 'abonado'], -1),
+        marcaTemporal: indexar(['marcatemporal'], -1),
+        nacimiento: indexar(['fechadenacimiento', 'nacimiento'], -1),
+        provincia: indexar(['provincia'], -1),
+        ciudad: indexar(['ciudadlocalidad', 'ciudad', 'localidad'], -1),
+        ocupacion: indexar(['ocupacion'], -1),
+        pago: indexar(['pago', 'pagado', 'abono', 'abonado'], -1, ['cuota']),
+        opcionPago: indexar(['opcionenpagocuotas', 'opcionpago', 'cuota'], -1),
       }
-    : { dni: 0, apellido: 1, nombre: 2, email: 3, telefono: -1, pago: -1 };
+    : { dni: 0, apellido: 1, nombre: 2, email: 3, telefono: -1, pago: -1, marcaTemporal: -1, nacimiento: -1, provincia: -1, ciudad: -1, ocupacion: -1, opcionPago: -1 };
 
   const apellidoYNombreCombinados = esCabecera && columnas.apellido !== -1 && columnas.apellido === columnas.nombre;
 
@@ -224,7 +238,20 @@ function parsearCsv(texto) {
     const email = columnas.email !== -1 ? campos[columnas.email] || '' : '';
     const telefono = columnas.telefono !== -1 ? String(campos[columnas.telefono] || '').replace(/\D/g, '') : '';
     const pago = columnas.pago !== -1 ? normalizarEstadoPago(campos[columnas.pago]) : '';
-    personas.push({ dni, apellido, nombre, email, telefono, pago });
+    personas.push({
+      dni,
+      apellido,
+      nombre,
+      email,
+      telefono,
+      pago,
+      marcaTemporal: columnas.marcaTemporal !== -1 ? campos[columnas.marcaTemporal] || '' : '',
+      fechaNacimiento: columnas.nacimiento !== -1 ? campos[columnas.nacimiento] || '' : '',
+      provincia: columnas.provincia !== -1 ? campos[columnas.provincia] || '' : '',
+      ciudad: columnas.ciudad !== -1 ? campos[columnas.ciudad] || '' : '',
+      ocupacion: columnas.ocupacion !== -1 ? campos[columnas.ocupacion] || '' : '',
+      opcionPago: columnas.opcionPago !== -1 ? campos[columnas.opcionPago] || '' : '',
+    });
   }
   return { personas, invalidos };
 }
@@ -1256,7 +1283,8 @@ app.delete('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripci
 
 app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
-    res.json({ total: await db.contarEncuentro() });
+    const personas = await db.listarEncuentro();
+    res.json({ total: personas.length, personas });
   } catch (e) {
     next(e);
   }
@@ -1275,6 +1303,54 @@ app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), a
     }
     const { importados, existentes } = await db.importarEncuentro(personas);
     res.json({ ok: true, importados, existentes, invalidos, total: await db.contarEncuentro() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/encuentro/:id', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const body = req.body || {};
+    await db.actualizarEncuentroPersona(id, {
+      nombre: body.nombre,
+      apellido: body.apellido,
+      email: body.email,
+      telefono: body.telefono,
+      fechaNacimiento: body.fecha_nacimiento,
+      provincia: body.provincia,
+      ciudad: body.ciudad,
+      ocupacion: body.ocupacion,
+      opcionPago: body.opcion_pago,
+      marcaTemporal: body.marca_temporal,
+    });
+    const fila = await db.queryOne('SELECT dni, nombre, apellido FROM encuentro_inscripciones WHERE id = ?', [id]);
+    await db.registrarEvento(
+      'encuentro_modificado',
+      `Registro del encuentro actualizado: ${fila ? `${fila.nombre} ${fila.apellido} (DNI ${fila.dni})` : `id ${id}`}`,
+      req.sesion.usuario
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/encuentro/:id', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const fila = await db.queryOne('SELECT dni, nombre, apellido FROM encuentro_inscripciones WHERE id = ?', [id]);
+    await db.ocultarEncuentroPersona(id);
+    if (fila) {
+      await db.registrarEvento(
+        'encuentro_ocultado',
+        `Registro del encuentro ocultado: ${fila.nombre} ${fila.apellido} (DNI ${fila.dni})`,
+        req.sesion.usuario
+      );
+    }
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

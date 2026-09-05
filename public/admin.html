@@ -47,7 +47,7 @@
         <nav id="tabsPanel" class="tabs" aria-label="Secciones">
           <button type="button" class="tab" data-vista="inscripciones">Inscripciones</button>
           <button type="button" class="tab" data-vista="ponentes">Ponentes</button>
-          <button type="button" class="tab" data-vista="encuentro">Encuentro</button>
+          <button type="button" class="tab" data-vista="encuentro">Importar listado</button>
           <button type="button" class="tab" data-vista="pagos">Pagos y cuotas</button>
           <button type="button" class="tab" data-vista="notificaciones">Notificaciones</button>
           <button type="button" class="tab tab-acreditacion" data-vista="acreditaciones" hidden>Acreditaciones</button>
@@ -62,7 +62,7 @@
 
       <div id="vistaEncuentro" class="tab-contenido" hidden>
         <div class="cabecera-panel">
-          <h3>Listado del encuentro</h3>
+          <h3>Importar listado</h3>
           <button id="botonVaciarEncuentro" class="boton boton-peligro boton-chico" type="button">Vaciar listado</button>
         </div>
         <p class="ayuda">Importá el archivo CSV o Excel (por ejemplo, la exportación de Google Forms). Las columnas de DNI, apellido/nombre y correo se detectan automáticamente por su encabezado; si el archivo no tiene encabezado, el DNI debe ir en la primera columna.</p>
@@ -78,41 +78,83 @@
       </div>
 
       <div id="vistaInscripciones" class="tab-contenido" hidden>
-        <h3>Inscripciones</h3>
-        <p class="ayuda" id="resumenInscripciones"></p>
-        <div class="filtros-barra">
-          <div class="campo">
-            <label for="buscarDni">Buscar por DNI</label>
-            <input type="text" id="buscarDni" inputmode="numeric" maxlength="8" placeholder="Ej: 30123456">
+        <div class="sub-tabs" id="subTabsInscripciones">
+          <button type="button" class="sub-tab activo" data-sub="talleres">Inscripciones a talleres</button>
+          <button type="button" class="sub-tab" data-sub="encuentro">Importadas del encuentro</button>
+        </div>
+
+        <div id="subInscripcionesTalleres">
+          <h3>Inscripciones a talleres</h3>
+          <p class="ayuda" id="resumenInscripciones"></p>
+          <div class="filtros-barra">
+            <div class="campo">
+              <label for="buscarDni">Buscar por DNI</label>
+              <input type="text" id="buscarDni" inputmode="numeric" maxlength="8" placeholder="Ej: 30123456">
+            </div>
+            <div class="campo">
+              <label for="filtroPago">Estado de pago</label>
+              <select id="filtroPago">
+                <option value="">Todos</option>
+                <option value="pago_completo">Pago completo</option>
+                <option value="pago_parcial">Pago parcial</option>
+                <option value="no_pagado">No pagado</option>
+              </select>
+            </div>
           </div>
-          <div class="campo">
-            <label for="filtroPago">Estado de pago</label>
-            <select id="filtroPago">
-              <option value="">Todos</option>
-              <option value="pago_completo">Pago completo</option>
-              <option value="pago_parcial">Pago parcial</option>
-              <option value="no_pagado">No pagado</option>
-            </select>
+          <div class="tabla-envoltura">
+            <table id="tablaInscripciones">
+              <thead>
+                <tr>
+                  <th>DNI</th>
+                  <th>Nombre y apellido</th>
+                  <th>Correo</th>
+                  <th>Teléfono</th>
+                  <th>Alimentación</th>
+                  <th>Taller</th>
+                  <th>Encuentro</th>
+                  <th>Pago</th>
+                  <th>Fecha</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
-        <div class="tabla-envoltura">
-          <table id="tablaInscripciones">
-            <thead>
-              <tr>
-                <th>DNI</th>
-                <th>Nombre y apellido</th>
-                <th>Correo</th>
-                <th>Teléfono</th>
-                <th>Alimentación</th>
-                <th>Taller</th>
-                <th>Encuentro</th>
-                <th>Pago</th>
-                <th>Fecha</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+
+        <div id="subInscripcionesEncuentro" hidden>
+          <div class="cabecera-panel">
+            <h3>Personas importadas del encuentro</h3>
+            <button id="botonActualizarEncuentro" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+          </div>
+          <p class="ayuda" id="resumenEncuentroLista"></p>
+          <div class="filtros-barra">
+            <div class="campo">
+              <label for="buscarEncuentro">Buscar por DNI, nombre o correo</label>
+              <input type="text" id="buscarEncuentro" placeholder="Ej: 30123456 o apellido…">
+            </div>
+          </div>
+          <div class="tabla-envoltura">
+            <table id="tablaEncuentroPersonas">
+              <thead>
+                <tr>
+                  <th>Estado</th>
+                  <th>Marca temporal</th>
+                  <th>Dirección de correo electrónico</th>
+                  <th>Apellido y Nombre</th>
+                  <th>Nº D.N.I</th>
+                  <th>Fecha de Nacimiento</th>
+                  <th>Teléfono</th>
+                  <th>Provincia</th>
+                  <th>Ciudad / Localidad</th>
+                  <th>Ocupación</th>
+                  <th>Opción en pago cuotas</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -407,6 +449,63 @@
     </div>
   </div>
 
+  <div id="modalEncuentro" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-edicion" role="dialog" aria-modal="true" aria-labelledby="modalEncuentoTitulo">
+      <h3 id="modalEncuentoTitulo">Editar persona importada</h3>
+      <div id="mensajeEncuentroModal" class="mensaje" role="alert"></div>
+      <div class="campos">
+        <div class="campo">
+          <label for="encuentroDni">Nº D.N.I</label>
+          <input type="text" id="encuentroDni" disabled>
+        </div>
+        <div class="campo">
+          <label for="encuentroMarcaTemporal">Marca temporal (fecha de inscripción)</label>
+          <input type="text" id="encuentroMarcaTemporal" placeholder="Ej: 09/10/2026 14:30:00">
+        </div>
+        <div class="campo">
+          <label for="encuentroApellido">Apellido</label>
+          <input type="text" id="encuentroApellido" required>
+        </div>
+        <div class="campo">
+          <label for="encuentroNombre">Nombre</label>
+          <input type="text" id="encuentroNombre" required>
+        </div>
+        <div class="campo">
+          <label for="encuentroEmail">Dirección de correo electrónico</label>
+          <input type="email" id="encuentroEmail">
+        </div>
+        <div class="campo">
+          <label for="encuentroNacimiento">Fecha de Nacimiento</label>
+          <input type="text" id="encuentroNacimiento" placeholder="Ej: DD/MM/AAAA">
+        </div>
+        <div class="campo">
+          <label for="encuentroTelefono">Teléfono</label>
+          <input type="text" id="encuentroTelefono" inputmode="numeric">
+        </div>
+        <div class="campo">
+          <label for="encuentroProvincia">Provincia</label>
+          <input type="text" id="encuentroProvincia">
+        </div>
+        <div class="campo">
+          <label for="encuentroCiudad">Ciudad / Localidad</label>
+          <input type="text" id="encuentroCiudad">
+        </div>
+        <div class="campo">
+          <label for="encuentroOcupacion">Ocupación</label>
+          <input type="text" id="encuentroOcupacion">
+        </div>
+        <div class="campo">
+          <label for="encuentroOpcionPago">Opción en pago cuotas</label>
+          <input type="text" id="encuentroOpcionPago">
+        </div>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarEncuentro">Guardar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEncuentro">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modalUsuario" class="modal" hidden aria-hidden="true">
     <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalUsuarioTitulo">
       <h3 id="modalUsuarioTitulo">Nuevo usuario</h3>
@@ -569,6 +668,6 @@
   </div>
 
   <script src="/js/darkmode.js"></script>
-  <script src="/js/admin.js?v=4"></script>
+  <script src="/js/admin.js?v=5"></script>
 </body>
 </html>

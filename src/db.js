@@ -242,19 +242,47 @@ async function importarEncuentro(personas) {
       const previa = await run('SELECT id FROM encuentro_inscripciones WHERE dni = ?', [p.dni]);
       if (previa.length > 0) {
         existentes++;
-        await run('UPDATE encuentro_inscripciones SET nombre = ?, apellido = ?, email = ?, telefono = ?, pago = ? WHERE dni = ?', [
-          p.nombre,
-          p.apellido,
-          p.email,
-          p.telefono,
-          p.pago || '',
-          p.dni,
-        ]);
+        await run(
+          `UPDATE encuentro_inscripciones
+           SET nombre = ?, apellido = ?, email = ?, telefono = ?, pago = ?,
+               marca_temporal = ?, fecha_nacimiento = ?, provincia = ?, ciudad = ?,
+               ocupacion = ?, opcion_pago = ?, oculto = FALSE
+           WHERE dni = ?`,
+          [
+            p.nombre,
+            p.apellido,
+            p.email,
+            p.telefono,
+            p.pago || '',
+            p.marcaTemporal || '',
+            p.fechaNacimiento || '',
+            p.provincia || '',
+            p.ciudad || '',
+            p.ocupacion || '',
+            p.opcionPago || '',
+            p.dni,
+          ]
+        );
       } else {
         importados++;
         await run(
-          'INSERT INTO encuentro_inscripciones (dni, nombre, apellido, email, telefono, pago) VALUES (?, ?, ?, ?, ?, ?)',
-          [p.dni, p.nombre, p.apellido, p.email, p.telefono, p.pago || '']
+          `INSERT INTO encuentro_inscripciones
+             (dni, nombre, apellido, email, telefono, pago, marca_temporal, fecha_nacimiento, provincia, ciudad, ocupacion, opcion_pago)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            p.dni,
+            p.nombre,
+            p.apellido,
+            p.email,
+            p.telefono,
+            p.pago || '',
+            p.marcaTemporal || '',
+            p.fechaNacimiento || '',
+            p.provincia || '',
+            p.ciudad || '',
+            p.ocupacion || '',
+            p.opcionPago || '',
+          ]
         );
       }
       if (p.pago) {
@@ -265,8 +293,50 @@ async function importarEncuentro(personas) {
   });
 }
 
+async function listarEncuentro() {
+  return query(
+    `SELECT e.id, e.dni, e.nombre, e.apellido, e.email, e.telefono, e.pago,
+            e.marca_temporal, e.fecha_nacimiento, e.provincia, e.ciudad, e.ocupacion,
+            e.opcion_pago, e.creado_en, e.oculto,
+       EXISTS (SELECT 1 FROM inscripciones i WHERE i.dni = e.dni) AS tiene_talleres
+     FROM encuentro_inscripciones e
+     WHERE e.oculto = FALSE
+     ORDER BY e.creado_en DESC, e.id DESC`
+  );
+}
+
+async function actualizarEncuentroPersona(id, campos = {}) {
+  const fila = await queryOne('SELECT id FROM encuentro_inscripciones WHERE id = ?', [id]);
+  if (!fila) throw new HttpError(404, 'Registro del encuentro no encontrado.');
+  await mutation(
+    `UPDATE encuentro_inscripciones
+     SET nombre = ?, apellido = ?, email = ?, telefono = ?, fecha_nacimiento = ?,
+         provincia = ?, ciudad = ?, ocupacion = ?, opcion_pago = ?, marca_temporal = ?
+     WHERE id = ?`,
+    [
+      String(campos.nombre || '').trim(),
+      String(campos.apellido || '').trim(),
+      String(campos.email || '').trim(),
+      String(campos.telefono || '').trim(),
+      String(campos.fechaNacimiento || '').trim(),
+      String(campos.provincia || '').trim(),
+      String(campos.ciudad || '').trim(),
+      String(campos.ocupacion || '').trim(),
+      String(campos.opcionPago || '').trim(),
+      String(campos.marcaTemporal || '').trim(),
+      id,
+    ]
+  );
+}
+
+async function ocultarEncuentroPersona(id) {
+  const res = await mutation('UPDATE encuentro_inscripciones SET oculto = TRUE WHERE id = ? AND oculto = FALSE', [id]);
+  if (res.filasAfectadas === 0) throw new HttpError(404, 'Registro del encuentro no encontrado.');
+  return true;
+}
+
 async function contarEncuentro() {
-  const filasRes = await query('SELECT COUNT(*) AS n FROM encuentro_inscripciones');
+  const filasRes = await query('SELECT COUNT(*) AS n FROM encuentro_inscripciones WHERE oculto = FALSE');
   return Number(filasRes[0].n);
 }
 
@@ -1170,6 +1240,9 @@ module.exports = {
   buscarEncuentroPorDni,
   listarInscripcionesPorDni,
   importarEncuentro,
+  listarEncuentro,
+  actualizarEncuentroPersona,
+  ocultarEncuentroPersona,
   contarEncuentro,
   vaciarEncuentro,
   listarPrograma,

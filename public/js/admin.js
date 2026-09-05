@@ -18,6 +18,8 @@ const ETIQUETAS_EVENTO = {
   notificacion_modificada: 'Notificación modificada',
   notificacion_eliminada: 'Notificación eliminada',
   config_modificada: 'Configuración modificada',
+  encuentro_modificado: 'Registro del encuentro modificado',
+  encuentro_ocultado: 'Registro del encuentro ocultado',
 };
 const ETIQUETAS_ALIMENTACION = {
   sin_restriccion: 'Sin restricción',
@@ -29,7 +31,7 @@ const ETIQUETAS_ALIMENTACION = {
 const TITULOS_VISTA = {
   inscripciones: 'Inscripciones',
   ponentes: 'Ponentes',
-  encuentro: 'Listado del encuentro',
+  encuentro: 'Importar listado',
   pagos: 'Gestión de pagos y cuotas',
   notificaciones: 'Notificaciones a la app móvil',
   acreditaciones: 'Acreditaciones',
@@ -89,6 +91,23 @@ const buscarDni = el('buscarDni');
 const filtroPago = el('filtroPago');
 const modalPonente = el('modalPonente');
 const formPonente = el('formPonente');
+const resumenEncuentroLista = el('resumenEncuentroLista');
+const buscarEncuentro = el('buscarEncuentro');
+const modalEncuentro = el('modalEncuentro');
+const modalEncuentroDni = el('encuentroDni');
+const modalEncuentroMarcaTemporal = el('encuentroMarcaTemporal');
+const modalEncuentroApellido = el('encuentroApellido');
+const modalEncuentroNombre = el('encuentroNombre');
+const modalEncuentroEmail = el('encuentroEmail');
+const modalEncuentroNacimiento = el('encuentroNacimiento');
+const modalEncuentroTelefono = el('encuentroTelefono');
+const modalEncuentroProvincia = el('encuentroProvincia');
+const modalEncuentroCiudad = el('encuentroCiudad');
+const modalEncuentroOcupacion = el('encuentroOcupacion');
+const modalEncuentroOpcionPago = el('encuentroOpcionPago');
+const botonGuardarEncuentro = el('botonGuardarEncuentro');
+const botonCancelarEncuentro = el('botonCancelarEncuentro');
+const mensajeEncuentroModal = el('mensajeEncuentroModal');
 
 let talleresActuales = [];
 let inscripcionEditando = null;
@@ -98,6 +117,8 @@ let miSesion = null;
 let vistaActiva = 'inscripciones';
 let dniQrActual = null;
 let ponenteEditandoId = null;
+let encuentroPersonas = [];
+let encuentroEditando = null;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -186,6 +207,7 @@ function cambiarVista(vista) {
   }
   if (vista === 'inscripciones') {
     cargarInscripciones();
+    if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
   }
   if (vista === 'pagos') {
     cargarPagos();
@@ -198,6 +220,25 @@ function cambiarVista(vista) {
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => cambiarVista(tab.dataset.vista));
 }
+
+function subTabInscripcionActiva() {
+  return (document.querySelector('#subTabsInscripciones .sub-tab.activo') || {}).dataset?.sub || 'talleres';
+}
+
+function activarSubTabInscripcion(sub) {
+  const activa = subTabInscripcionActiva();
+  if (activa === sub) return;
+  for (const btn of document.querySelectorAll('#subTabsInscripciones .sub-tab')) {
+    btn.classList.toggle('activo', btn.dataset.sub === sub);
+  }
+  el('subInscripcionesTalleres').hidden = sub !== 'talleres';
+  el('subInscripcionesEncuentro').hidden = sub !== 'encuentro';
+  if (sub === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
+}
+
+document.querySelectorAll('#subTabsInscripciones .sub-tab').forEach((btn) => {
+  btn.addEventListener('click', () => activarSubTabInscripcion(btn.dataset.sub));
+});
 
 
 function bloquesHorario(t) {
@@ -466,6 +507,215 @@ function renderInscripciones(inscripciones) {
     cuerpo.appendChild(tr);
   }
 }
+
+function formatearMarcaTemporal(valor) {
+  if (!valor) return '—';
+  const texto = String(valor).trim();
+  const pad = (n) => String(n).padStart(2, '0');
+  const mFechaHora = texto.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\s+(\d{1,2}):(\d{2})/);
+  if (mFechaHora) {
+    const [, d, m, y, h, min] = mFechaHora;
+    const anio = y.length === 2 ? `20${y}` : y;
+    return `${pad(d)}/${pad(m)}/${anio} ${pad(h)}:${min}`;
+  }
+  const d = new Date(texto);
+  if (!Number.isNaN(d.getTime())) {
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  return texto;
+}
+
+function renderEncuentroPersonas(lista) {
+  encuentroPersonas = Array.isArray(lista) ? lista : [];
+  const cuerpo = document.querySelector('#tablaEncuentroPersonas tbody');
+  cuerpo.innerHTML = '';
+
+  const conTalleres = encuentroPersonas.filter((p) => p.tiene_talleres).length;
+  resumenEncuentroLista.textContent =
+    `Personas importadas: ${encuentroPersonas.length} · inscriptas a talleres: ${conTalleres} · sin talleres: ${encuentroPersonas.length - conTalleres}.`;
+
+  const q = buscarEncuentro.value.trim().toLowerCase();
+  const visibles = encuentroPersonas.filter(
+    (p) =>
+      !q ||
+      String(p.dni || '').includes(q) ||
+      String(p.apellido || '').toLowerCase().includes(q) ||
+      String(p.nombre || '').toLowerCase().includes(q) ||
+      `${p.nombre || ''} ${p.apellido || ''}`.toLowerCase().includes(q) ||
+      String(p.email || '').toLowerCase().includes(q)
+  );
+
+  if (visibles.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 12;
+    td.textContent = q ? 'Sin resultados para el filtro.' : 'No hay personas importadas del encuentro.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpo.appendChild(tr);
+    return;
+  }
+
+  for (const p of visibles) {
+    const tr = document.createElement('tr');
+
+    const tdEstado = document.createElement('td');
+    const spanEstado = document.createElement('span');
+    spanEstado.textContent = p.tiene_talleres ? 'Inscripto a talleres' : 'Sin inscribir a talleres';
+    spanEstado.className = p.tiene_talleres ? 'encuentro-si' : 'encuentro-no';
+    tdEstado.appendChild(spanEstado);
+
+    const tdMarca = document.createElement('td');
+    tdMarca.textContent = formatearMarcaTemporal(p.marca_temporal || p.creado_en);
+
+    const tdEmail = document.createElement('td');
+    tdEmail.textContent = p.email || '—';
+
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = [p.apellido, p.nombre].filter(Boolean).join(', ') || '—';
+
+    const tdDni = document.createElement('td');
+    tdDni.className = 'celda-dni';
+    tdDni.textContent = p.dni;
+
+    const tdNacimiento = document.createElement('td');
+    tdNacimiento.textContent = p.fecha_nacimiento || '—';
+
+    const tdTelefono = document.createElement('td');
+    tdTelefono.textContent = p.telefono || '—';
+
+    const tdProvincia = document.createElement('td');
+    tdProvincia.textContent = p.provincia || '—';
+
+    const tdCiudad = document.createElement('td');
+    tdCiudad.textContent = p.ciudad || '—';
+
+    const tdOcupacion = document.createElement('td');
+    tdOcupacion.textContent = p.ocupacion || '—';
+
+    const tdOpcionPago = document.createElement('td');
+    tdOpcionPago.textContent = p.opcion_pago || '—';
+
+    const tdAccion = document.createElement('td');
+    const contenedorAcciones = document.createElement('div');
+    contenedorAcciones.className = 'acciones-fila';
+
+    const botonEditar = document.createElement('button');
+    botonEditar.type = 'button';
+    botonEditar.className = 'boton boton-chico';
+    botonEditar.textContent = 'Editar';
+    botonEditar.addEventListener('click', () => abrirModalEncuentro(p));
+    contenedorAcciones.appendChild(botonEditar);
+
+    const botonOcultar = document.createElement('button');
+    botonOcultar.type = 'button';
+    botonOcultar.className = 'boton boton-peligro boton-chico';
+    botonOcultar.textContent = 'Eliminar';
+    botonOcultar.addEventListener('click', async () => {
+      const nombre = [p.apellido, p.nombre].filter(Boolean).join(', ') || p.dni;
+      if (!window.confirm(`¿Ocultar el registro de ${nombre}? No se borra, solo se oculta del listado.`)) return;
+      botonOcultar.disabled = true;
+      const res = await api(`/api/admin/encuentro/${p.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        mostrarMensaje(mensajePanel, res.data.error || 'No se pudo ocultar el registro.', 'error');
+      } else {
+        mostrarMensaje(mensajePanel, 'Registro ocultado del listado.', 'ok');
+        await cargarDatos();
+      }
+      botonOcultar.disabled = false;
+    });
+    contenedorAcciones.appendChild(botonOcultar);
+
+    tdAccion.appendChild(contenedorAcciones);
+
+    tr.append(
+      tdEstado,
+      tdMarca,
+      tdEmail,
+      tdNombre,
+      tdDni,
+      tdNacimiento,
+      tdTelefono,
+      tdProvincia,
+      tdCiudad,
+      tdOcupacion,
+      tdOpcionPago,
+      tdAccion
+    );
+    cuerpo.appendChild(tr);
+  }
+}
+
+function abrirModalEncuentro(persona) {
+  encuentroEditando = persona;
+  mostrarMensaje(mensajeEncuentroModal, '', '');
+  modalEncuentroDni.value = persona.dni || '';
+  modalEncuentroMarcaTemporal.value = persona.marca_temporal || '';
+  modalEncuentroApellido.value = persona.apellido || '';
+  modalEncuentroNombre.value = persona.nombre || '';
+  modalEncuentroEmail.value = persona.email || '';
+  modalEncuentroNacimiento.value = persona.fecha_nacimiento || '';
+  modalEncuentroTelefono.value = persona.telefono || '';
+  modalEncuentroProvincia.value = persona.provincia || '';
+  modalEncuentroCiudad.value = persona.ciudad || '';
+  modalEncuentroOcupacion.value = persona.ocupacion || '';
+  modalEncuentroOpcionPago.value = persona.opcion_pago || '';
+  modalEncuentro.hidden = false;
+  modalEncuentro.setAttribute('aria-hidden', 'false');
+}
+
+function cerrarModalEncuentro() {
+  modalEncuentro.hidden = true;
+  modalEncuentro.setAttribute('aria-hidden', 'true');
+  encuentroEditando = null;
+  mostrarMensaje(mensajeEncuentroModal, '', '');
+}
+
+botonCancelarEncuentro.addEventListener('click', cerrarModalEncuentro);
+
+modalEncuentro.addEventListener('click', (e) => {
+  if (e.target === modalEncuentro) cerrarModalEncuentro();
+});
+
+botonGuardarEncuentro.addEventListener('click', async () => {
+  if (!encuentroEditando) return;
+  botonGuardarEncuentro.disabled = true;
+  const res = await api(`/api/admin/encuentro/${encuentroEditando.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      nombre: modalEncuentroNombre.value.trim(),
+      apellido: modalEncuentroApellido.value.trim(),
+      email: modalEncuentroEmail.value.trim(),
+      telefono: modalEncuentroTelefono.value.trim(),
+      marca_temporal: modalEncuentroMarcaTemporal.value.trim(),
+      fecha_nacimiento: modalEncuentroNacimiento.value.trim(),
+      provincia: modalEncuentroProvincia.value.trim(),
+      ciudad: modalEncuentroCiudad.value.trim(),
+      ocupacion: modalEncuentroOcupacion.value.trim(),
+      opcion_pago: modalEncuentroOpcionPago.value.trim(),
+    }),
+  });
+  if (!res.ok) {
+    mostrarMensaje(mensajeEncuentroModal, res.data.error || 'No se pudo guardar el registro.', 'error');
+  } else {
+    mostrarMensaje(mensajeEncuentroModal, 'Registro actualizado.', 'ok');
+    cerrarModalEncuentro();
+    await cargarDatos();
+    if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
+  }
+  botonGuardarEncuentro.disabled = false;
+});
+
+buscarEncuentro.addEventListener('input', () => renderEncuentroPersonas(encuentroPersonas));
+
+el('botonActualizarEncuentro').addEventListener('click', async () => {
+  const res = await api('/api/admin/encuentro');
+  if (!res.ok) {
+    mostrarMensaje(mensajePanel, res.data.error || 'No se pudieron cargar las personas importadas.', 'error');
+    return;
+  }
+  renderEncuentroPersonas(res.data.personas || []);
+});
 
 function renderEventos(eventos) {
   const cuerpo = document.querySelector('#tablaEventos tbody');
@@ -843,7 +1093,9 @@ async function cargarDatos() {
   talleresActuales = talleres.data;
   window.__inscripcionesActuales = inscripciones.data;
   renderInscripciones(inscripciones.data);
-  resumenEncuentro.textContent = `Personas cargadas: ${encuentro.data.total ?? 0}.`;
+  encuentroPersonas = Array.isArray(encuentro.data?.personas) ? encuentro.data.personas : [];
+  resumenEncuentro.textContent = `Personas cargadas: ${encuentro.data.total ?? encuentroPersonas.length}.`;
+  if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
   if (esAdmin) {
     const [, , , eventos, usuarios, config] = respuestas;
     renderEventos(eventos.data || []);
