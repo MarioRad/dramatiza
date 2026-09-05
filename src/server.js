@@ -110,6 +110,21 @@ function requirePermiso(permiso) {
   };
 }
 
+function requireApiKey(req, res, next) {
+  const claveEsperada = process.env.GOOGLE_SHEETS_API_KEY || '';
+  if (!claveEsperada) {
+    return res.status(503).json({ error: 'El servidor no tiene configurada la API key de Google Sheets.' });
+  }
+  const recibida = String(req.get('x-api-key') || '').trim();
+  const a = Buffer.from(recibida);
+  const b = Buffer.from(claveEsperada);
+  const coincide = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!coincide) {
+    return res.status(401).json({ error: 'API key inválida.' });
+  }
+  next();
+}
+
 function validarEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -266,6 +281,81 @@ function parsearArchivo(nombre, contenido, base64) {
     return parsearCsv(XLSX.utils.sheet_to_csv(hoja));
   }
   return parsearCsv(contenido);
+}
+
+const ORDEN_COLUMNAS_SHEETS = {
+  dni: 0, nombre: 1, apellido: 2, email: 3, telefono: 4,
+  pago: 5, marcaTemporal: 6, fechaNacimiento: 7,
+  provincia: 8, ciudad: 9, ocupacion: 10, opcionPago: 11,
+};
+
+function filasSheetsAObjetos(datos) {
+  const filas = Array.isArray(datos)
+    ? datos.filter((f) => Array.isArray(f) && f.some((c) => String(c || '').trim() !== ''))
+    : [];
+  if (filas.length === 0) return { personas: [], invalidos: 0, conCabecera: false };
+
+  const normalizadas = filas[0].map(normalizarEtiqueta);
+  const esCabecera = normalizadas.some((c) => c.includes('dni') || c.includes('documento'));
+  const inicio = esCabecera ? 1 : 0;
+
+  let columnas = ORDEN_COLUMNAS_SHEETS;
+  if (esCabecera) {
+    const indexar = (claves, excluir = []) => {
+      for (let i = 0; i < normalizadas.length; i++) {
+        const c = normalizadas[i];
+        if (excluir.some((k) => c.includes(k))) continue;
+        if (claves.some((k) => c.includes(k))) return i;
+      }
+      return -1;
+    };
+    columnas = {
+      dni: indexar(['dni', 'documento']),
+      nombre: indexar(['nombre']),
+      apellido: indexar(['apellido']),
+      email: indexar(['correo', 'email', 'mail']),
+      telefono: indexar(['telefono', 'celular', 'cel', 'movil']),
+      pago: indexar(['pago', 'pagado', 'abono', 'abonado'], ['cuota']),
+      marcaTemporal: indexar(['marcatemporal', 'fechadeinscripcion']),
+      fechaNacimiento: indexar(['fechadenacimiento', 'nacimiento']),
+      provincia: indexar(['provincia']),
+      ciudad: indexar(['ciudadlocalidad', 'ciudad', 'localidad']),
+      ocupacion: indexar(['ocupacion']),
+      opcionPago: indexar(['opcionenpagocuotas', 'opcionpago', 'cuota']),
+    };
+  }
+
+  const celda = (fila, clave) => {
+    const idx = columnas[clave];
+    if (idx === undefined || idx === -1 || idx >= fila.length) return '';
+    return String(fila[idx] || '');
+  };
+
+  const personas = [];
+  let invalidos = 0;
+  for (let i = inicio; i < filas.length; i++) {
+    const fila = filas[i];
+    const dni = celda(fila, 'dni').replace(/\D/g, '');
+    if (!/^\d{7,8}$/.test(dni)) {
+      invalidos++;
+      continue;
+    }
+    personas.push({
+      dni,
+      nombre: celda(fila, 'nombre').trim(),
+      apellido: celda(fila, 'apellido').trim(),
+      email: celda(fila, 'email').trim(),
+      telefono: celda(fila, 'telefono').replace(/\D/g, ''),
+      pago: normalizarEstadoPago(celda(fila, 'pago')),
+      marcaTemporal: celda(fila, 'marcaTemporal').trim(),
+      fechaNacimiento: celda(fila, 'fechaNacimiento').trim(),
+      provincia: celda(fila, 'provincia').trim(),
+      ciudad: celda(fila, 'ciudad').trim(),
+      ocupacion: celda(fila, 'ocupacion').trim(),
+      opcionPago: celda(fila, 'opcionPago').trim(),
+    });
+  }
+  return { personas, invalidos, conCabecera: esCabecera };
 }
 
 function validarTaller(body) {
@@ -1316,23 +1406,35 @@ app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuen
   }
 });
 
-// Ruta que recibirá los datos desde Google Sheets
-app.post('/api/admin/insertar-datos', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
-  const { datos } = req.body; 
-  // 'datos' será un array con los valores de la fila, ej: ['Juan', 'Perez', 'juan@email.com']
-
-  if (!datos || datos.length === 0) {
-    return res.status(400).json({ error: 'No se recibieron datos' });
-  }
-
+// Ruta que recibe los datos desde Google Sheets
+app.post('/api/admin/insertar-datos', requireApiKey, async (req, res, next) => {
   try {
-    const query = 'INSERT INTO encuentro_inscripciones (dni,nombre, apellido, email,telefono,pago,creado_en,marca_temporal,fecha_de_nacimiento, provincia,ciudad,ocupacion,opcion_pago) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)';
-    await pool.query(query, datos);
-    
-    res.status(200).json({ message: 'Datos insertados correctamente' });
-  } catch (error) {
-    console.error('Error al insertar en Postgres:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    const { datos } = req.body || {};
+    if (!Array.isArray(datos) || datos.length === 0) {
+      return res.status(400).json({ error: 'No se recibieron datos.' });
+    }
+    const { personas, invalidos, conCabecera } = filasSheetsAObjetos(datos);
+    if (personas.length === 0) {
+      return res.status(400).json({
+        error: `No se encontraron DNIs válidos en los datos recibidos${invalidos ? ` (${invalidos} inválidos)` : ''}.`,
+      });
+    }
+    const { importados, existentes } = await db.importarEncuentro(personas);
+    db.registrarEvento(
+      'encuentro_importado_sheet',
+      `Importación desde Google Sheets: ${importados} nuevos, ${existentes} actualizados, ${invalidos} inválidos`,
+      'google_sheets'
+    ).catch((e) => console.error('Error al registrar evento:', e.message));
+    res.json({
+      ok: true,
+      importados,
+      existentes,
+      invalidos,
+      conCabecera,
+      total: await db.contarEncuentro(),
+    });
+  } catch (e) {
+    next(e);
   }
 });
 
