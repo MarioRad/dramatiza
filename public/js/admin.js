@@ -2082,6 +2082,15 @@ formNotificacion.addEventListener('submit', async (e) => {
 botonCancelarNotif.addEventListener('click', resetFormNotificacion);
 
 (async () => {
+  try {
+    const resVersion = await fetch('/api/version', { credentials: 'include' });
+    if (resVersion.ok) {
+      const datosVersion = await resVersion.json();
+      if (datosVersion && datosVersion.version) el('versionApp').textContent = datosVersion.version;
+    }
+  } catch (_e) {
+    /* la versión es informativa */
+  }
   const res = await api('/api/admin/perfil');
   if (res.ok) {
     miSesion = {

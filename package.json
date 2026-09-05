@@ -1,6 +1,6 @@
 {
   "name": "inscripciones-talleres",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sistema de inscripciones a talleres (mañana y tarde) con cupos limitados",
   "main": "src/server.js",
   "scripts": {

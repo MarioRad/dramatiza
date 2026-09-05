@@ -1711,6 +1711,11 @@ app.post('/api/mobile/notificaciones/:id/leer', async (req, res, next) => {
   }
 });
 
+app.get('/api/version', (_req, res) => {
+  const pkg = require('../package.json');
+  res.json({ app: pkg.name, version: pkg.version });
+});
+
 app.use((err, _req, res, _next) => {
   const status = err.status || 500;
   const message = err.message || 'Error interno del servidor.';
