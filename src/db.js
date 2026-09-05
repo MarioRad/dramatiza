@@ -235,7 +235,7 @@ async function listarInscripcionesPorDni(dni) {
 
 async function importarEncuentro(personas) {
   if (personas.length === 0) return { importados: 0, existentes: 0 };
-  return transaction(async (run) => {
+  const resultado = await transaction(async (run) => {
     let importados = 0;
     let existentes = 0;
     for (const p of personas) {
@@ -291,6 +291,8 @@ async function importarEncuentro(personas) {
     }
     return { importados, existentes };
   });
+  await asignarPlanesAutomaticos(personas.map((p) => ({ dni: p.dni, marca_temporal: p.marcaTemporal })));
+  return resultado;
 }
 
 async function listarEncuentro() {
@@ -998,26 +1000,178 @@ function formatearMonto(v) {
   return Number(v ?? 0);
 }
 
+// ── Planes automáticos según fecha de inscripción (marca temporal) ────
+
+function parsearMarcaTemporal(valor) {
+  const texto = String(valor || '').trim();
+  if (!texto) return null;
+  const m = texto.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    let [, d, mes, y, h, min, s] = m;
+    if (Number(mes) > 12) {
+      const tmp = d;
+      d = mes;
+      mes = tmp;
+    }
+    const anio = y.length === 2 ? `20${y}` : y;
+    const fecha = new Date(Number(anio), Number(mes) - 1, Number(d), Number(h) || 0, Number(min) || 0, Number(s) || 0);
+    if (!Number.isNaN(fecha.getTime())) return fecha;
+  }
+  const fechaIso = new Date(texto);
+  if (!Number.isNaN(fechaIso.getTime())) return fechaIso;
+  return null;
+}
+
+function definirPlanAutomatico(fecha) {
+  const mes = fecha.getMonth() + 1;
+  const anio = fecha.getFullYear();
+  if (mes === 5 || mes === 6) {
+    return {
+      nombre: 'Inscripción Mayo – Junio',
+      descripcion: '3 cuotas de $30.000. Total $90.000.',
+      montoTotal: 90000,
+      cuotas: [
+        { numero: 1, monto: 30000 },
+        { numero: 2, monto: 30000 },
+        { numero: 3, monto: 30000 },
+      ],
+    };
+  }
+  if (mes === 7 || mes === 8) {
+    return {
+      nombre: 'Inscripción Julio – Agosto',
+      descripcion: '3 cuotas: 2 de $35.000 y 1 de $40.000. Total $110.000.',
+      montoTotal: 110000,
+      cuotas: [
+        { numero: 1, monto: 35000 },
+        { numero: 2, monto: 35000 },
+        { numero: 3, monto: 40000 },
+      ],
+    };
+  }
+  if (mes === 9 || mes === 10) {
+    return {
+      nombre: 'Inscripción Septiembre – Octubre',
+      descripcion: '2 cuotas de $65.000. Total $130.000. Fecha tope de la 2ª cuota: 05/10.',
+      montoTotal: 130000,
+      cuotas: [
+        { numero: 1, monto: 65000 },
+        { numero: 2, monto: 65000, fecha_tope: `${anio}-10-05` },
+      ],
+    };
+  }
+  return null;
+}
+
+const NOMBRES_PLANES_AUTOMATICOS = ['Inscripción Mayo – Junio', 'Inscripción Julio – Agosto', 'Inscripción Septiembre – Octubre'];
+
+function normalizarDetalleCuotas(cuotasCol, cantidadCuotas, montoTotal) {
+  let arr = null;
+  if (Array.isArray(cuotasCol)) arr = cuotasCol;
+  else if (typeof cuotasCol === 'string') {
+    try { arr = JSON.parse(cuotasCol); } catch (_) { arr = null; }
+  }
+  if (!Array.isArray(arr) || arr.length === 0) {
+    const n = Math.max(1, Number(cantidadCuotas) || 1);
+    const m = Number(montoTotal) || 0;
+    arr = Array.from({ length: n }, (_, i) => ({ numero: i + 1, monto: n ? m / n : 0 }));
+  }
+  return arr.map((c, i) => ({
+    numero: Number(c.numero) || i + 1,
+    monto: Number(c.monto) || 0,
+    fecha_tope: c.fecha_tope || '',
+  }));
+}
+
+async function asegurarPlanAutomatico(def) {
+  const plan = await queryOne('SELECT id FROM planes_pago WHERE nombre = ? ORDER BY id LIMIT 1', [def.nombre]);
+  if (!plan) {
+    const res = await query(
+      `INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo)
+       VALUES (?, ?, ?, ?, ?, TRUE) RETURNING id`,
+      [def.nombre, def.descripcion, formatearMonto(def.montoTotal), def.cuotas.length, JSON.stringify(def.cuotas)]
+    );
+    return { id: Number(res[0].id), nombre: def.nombre };
+  }
+  await mutation(
+    `UPDATE planes_pago SET descripcion = ?, monto_total = ?, cantidad_cuotas = ?, cuotas = ?, activo = TRUE WHERE id = ?`,
+    [def.descripcion, formatearMonto(def.montoTotal), def.cuotas.length, JSON.stringify(def.cuotas), plan.id]
+  );
+  return { id: Number(plan.id), nombre: def.nombre };
+}
+
+async function asignarPlanAutomaticoAsistente(dni, marcaTemporal) {
+  const dniLimpio = String(dni || '').trim();
+  if (!/^\d{7,8}$/.test(dniLimpio)) return null;
+  const fecha = parsearMarcaTemporal(marcaTemporal);
+  if (!fecha) return null;
+  const def = definirPlanAutomatico(fecha);
+  const existentes = await query(
+    `SELECT ap.id, p.nombre FROM asistente_planes ap JOIN planes_pago p ON p.id = ap.plan_id WHERE ap.dni = ?`,
+    [dniLimpio]
+  );
+  const tienePlanManual = existentes.length > 0 && existentes.every((e) => !NOMBRES_PLANES_AUTOMATICOS.includes(e.nombre));
+  if (tienePlanManual) return { planId: null, nombre: null, manual: true };
+  const plan = def ? await asegurarPlanAutomatico(def) : null;
+  await transaction(async (run) => {
+    for (const e of existentes) {
+      if (NOMBRES_PLANES_AUTOMATICOS.includes(e.nombre)) {
+        await run('DELETE FROM asistente_planes WHERE id = ?', [e.id]);
+      }
+    }
+    if (plan) {
+      await run(
+        `INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas, cuotas)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (dni, plan_id) DO UPDATE
+           SET monto_total = EXCLUDED.monto_total,
+               cantidad_cuotas = EXCLUDED.cantidad_cuotas,
+               cuotas = EXCLUDED.cuotas`,
+        [dniLimpio, plan.id, formatearMonto(def.montoTotal), def.cuotas.length, JSON.stringify(def.cuotas)]
+      );
+    }
+  });
+  await sincronizarEstadoPagoPorDni(dniLimpio);
+  return plan ? { planId: Number(plan.id), nombre: def.nombre, manual: false } : { planId: null, nombre: null, manual: false };
+}
+
+async function asignarPlanesAutomaticos(personas) {
+  for (const p of personas || []) {
+    try {
+      await asignarPlanAutomaticoAsistente(p.dni, p.marca_temporal);
+    } catch (e) {
+      console.error('[Plan automático] No se pudo asignar a DNI', p.dni, ':', e.message);
+    }
+  }
+}
+
 async function listarPlanesPago() {
-  return query(
-    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, activo, creado_en
+  const planes = await query(
+    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, creado_en
      FROM planes_pago ORDER BY id`
   );
+  return planes.map((p) => ({
+    ...p,
+    id: Number(p.id),
+    monto_total: Number(p.monto_total),
+    cantidad_cuotas: Number(p.cantidad_cuotas),
+    cuotas: normalizarDetalleCuotas(p.cuotas, p.cantidad_cuotas, p.monto_total),
+  }));
 }
 
-async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1 }) {
+async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1, cuotas = null }) {
   return mutation(
-    'INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas) VALUES (?, ?, ?, ?)',
-    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1]
+    `INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas, cuotas) VALUES (?, ?, ?, ?, ?)`,
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null]
   );
 }
 
-async function actualizarPlanPago(id, { nombre, descripcion, montoTotal, cantidadCuotas, activo }) {
+async function actualizarPlanPago(id, { nombre, descripcion, montoTotal, cantidadCuotas, activo, cuotas = null }) {
   const existe = await queryOne('SELECT id FROM planes_pago WHERE id = ?', [id]);
   if (!existe) throw new HttpError(404, 'Plan no encontrado.');
   await mutation(
-    'UPDATE planes_pago SET nombre = ?, descripcion = ?, monto_total = ?, cantidad_cuotas = ?, activo = ? WHERE id = ?',
-    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, activo ? true : false, id]
+    'UPDATE planes_pago SET nombre = ?, descripcion = ?, monto_total = ?, cantidad_cuotas = ?, cuotas = ?, activo = ? WHERE id = ?',
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null, activo ? true : false, id]
   );
 }
 
@@ -1027,19 +1181,31 @@ async function eliminarPlanPago(id) {
 
 async function asignarPlanAsistente(dni, planId) {
   if (!/^\d{7,8}$/.test(String(dni || '').trim())) throw new HttpError(400, 'DNI inválido.');
-  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas FROM planes_pago WHERE id = ?', [planId]);
+  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas, cuotas FROM planes_pago WHERE id = ?', [planId]);
   if (!plan) throw new HttpError(404, 'Plan no encontrado.');
-  await mutation(
-    'INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas) VALUES (?, ?, ?, ?)',
-    [String(dni).trim(), planId, formatearMonto(plan.monto_total), Number(plan.cantidad_cuotas) || 1]
-  );
-  await sincronizarEstadoPagoPorDni(String(dni).trim());
+  const dniLimpio = String(dni).trim();
+  await transaction(async (run) => {
+    const previos = await run(
+      `SELECT ap.id, p.nombre FROM asistente_planes ap JOIN planes_pago p ON p.id = ap.plan_id WHERE ap.dni = ?`,
+      [dniLimpio]
+    );
+    for (const pr of previos) {
+      if (NOMBRES_PLANES_AUTOMATICOS.includes(pr.nombre)) {
+        await run('DELETE FROM asistente_planes WHERE id = ?', [pr.id]);
+      }
+    }
+    await run(
+      'INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas, cuotas) VALUES (?, ?, ?, ?, ?)',
+      [dniLimpio, planId, formatearMonto(plan.monto_total), Number(plan.cantidad_cuotas) || 1, plan.cuotas ? JSON.stringify(plan.cuotas) : null]
+    );
+  });
+  await sincronizarEstadoPagoPorDni(dniLimpio);
 }
 
 async function listarPagos() {
   const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas FROM planes_pago`);
   const asistentes = query(
-    `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas,
+    `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas,
             COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
             COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
      FROM asistente_planes a
@@ -1071,6 +1237,7 @@ async function listarPagos() {
     planNombre: planPorId.get(Number(a.plan_id))?.nombre || '',
     montoTotal: formatearMonto(a.monto_total),
     cantidadCuotas: Number(a.cantidad_cuotas) || 1,
+    cuotasDetalle: normalizarDetalleCuotas(a.cuotas, a.cantidad_cuotas, a.monto_total),
     cuotas: pagosPorPlan.get(Number(a.asistente_plan_id)) || [],
   }));
 }
@@ -1284,6 +1451,11 @@ module.exports = {
   registrarPagoCuota,
   eliminarPagoCuota,
   sincronizarEstadoPagoPorDni,
+  parsearMarcaTemporal,
+  definirPlanAutomatico,
+  asegurarPlanAutomatico,
+  asignarPlanAutomaticoAsistente,
+  asignarPlanesAutomaticos,
   listarNotificaciones,
   listarNotificacionesActivas,
   contarNotificacionesSinLeer,

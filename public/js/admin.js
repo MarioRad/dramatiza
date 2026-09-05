@@ -512,15 +512,21 @@ function formatearMarcaTemporal(valor) {
   if (!valor) return '—';
   const texto = String(valor).trim();
   const pad = (n) => String(n).padStart(2, '0');
-  const mFechaHora = texto.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\s+(\d{1,2}):(\d{2})/);
+  const mFechaHora = texto.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (mFechaHora) {
-    const [, d, m, y, h, min] = mFechaHora;
+    const [, d, m, y, h, min, s] = mFechaHora;
     const anio = y.length === 2 ? `20${y}` : y;
-    return `${pad(d)}/${pad(m)}/${anio} ${pad(h)}:${min}`;
+    return `${pad(d)}/${pad(m)}/${anio} ${pad(h)}:${pad(min)}:${pad(s || 0)}`;
+  }
+  const mFecha = texto.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})$/);
+  if (mFecha) {
+    const [, d, m, y] = mFecha;
+    const anio = y.length === 2 ? `20${y}` : y;
+    return `${pad(d)}/${pad(m)}/${anio} 00:00:00`;
   }
   const d = new Date(texto);
   if (!Number.isNaN(d.getTime())) {
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
   return texto;
 }
@@ -1607,9 +1613,17 @@ function formatearMoneda(n) {
   return Number(n ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function pagarPorCuota(ap) {
-  const n = Number(ap.cantidadCuotas) || 1;
-  return (Number(ap.montoTotal) || 0) / n;
+function formatearFechaTope(valor) {
+  const m = String(valor || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/);
+  if (m) return `${Number(m[3])}/${Number(m[2])}/${m[1]}`;
+  return String(valor || '');
+}
+
+function montoCuota(a, numero) {
+  const det = (a.cuotasDetalle || []).find((c) => Number(c.numero) === Number(numero));
+  if (det && det.monto != null) return Number(det.monto);
+  const n = Number(a.cantidadCuotas) || 1;
+  return (Number(a.montoTotal) || 0) / n;
 }
 
 function cuotaPagadaSet(ap) {
@@ -1666,7 +1680,13 @@ function renderPlanesPago() {
     const tdMonto = document.createElement('td');
     tdMonto.textContent = formatearMoneda(p.monto_total);
     const tdCuotas = document.createElement('td');
-    tdCuotas.textContent = p.cantidad_cuotas;
+    const detalleCuotas = p.cuotas || [];
+    const cuotasIguales = detalleCuotas.length > 0 && detalleCuotas.every((c) => Number(c.monto) === Number(detalleCuotas[0].monto));
+    tdCuotas.textContent = detalleCuotas.length
+      ? cuotasIguales
+        ? `${detalleCuotas.length} × ${formatearMoneda(detalleCuotas[0].monto)}`
+        : detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' + ')
+      : String(p.cantidad_cuotas);
     const tdActivo = document.createElement('td');
     tdActivo.textContent = p.activo ? 'Sí' : 'No';
     tdActivo.className = p.activo ? 'encuentro-si' : 'encuentro-no';
@@ -1793,7 +1813,7 @@ function renderPagos() {
     const tr = document.createElement('tr');
     const pagadas = cuotaPagadaSet(a);
     const n = Number(a.cantidadCuotas) || 1;
-    const cuota = pagarPorCuota(a);
+    const detalleCuotas = a.cuotasDetalle || [];
 
     const tdDni = document.createElement('td');
     tdDni.className = 'celda-dni';
@@ -1803,7 +1823,9 @@ function renderPagos() {
     const tdPlan = document.createElement('td');
     tdPlan.textContent = a.planNombre || '—';
     const tdTotal = document.createElement('td');
-    tdTotal.textContent = `${formatearMoneda(a.montoTotal)} / ${formatearMoneda(cuota)}`;
+    tdTotal.textContent = detalleCuotas.length
+      ? `${formatearMoneda(a.montoTotal)} · ${detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' / ')}`
+      : `${formatearMoneda(a.montoTotal)} / ${formatearMoneda(montoCuota(a, 1))}`;
     tdTotal.className = 'pagos-total';
 
     const tdCuotas = document.createElement('td');
@@ -1813,8 +1835,12 @@ function renderPagos() {
       const chip = document.createElement('button');
       chip.type = 'button';
       const pagada = pagadas.has(i);
+      const infoCuota = detalleCuotas.find((c) => Number(c.numero) === i);
+      const montoEsperado = infoCuota ? Number(infoCuota.monto) : montoCuota(a, i);
+      const tope = infoCuota && infoCuota.fecha_tope ? ` · vence ${formatearFechaTope(infoCuota.fecha_tope)}` : '';
       chip.className = 'pagos-cuota' + (pagada ? ' pagos-cuota-pagada' : '');
       chip.textContent = pagada ? `✓ ${i}` : `${i}`;
+      chip.title = `Cuota ${i} · ${formatearMoneda(montoEsperado)}${tope}`;
       chip.addEventListener('click', () => abrirModalCuota(a, i, pagada));
       caja.appendChild(chip);
     }
@@ -1836,12 +1862,15 @@ function renderPagos() {
 function abrirModalCuota(a, numero, pagada) {
   cuotaContexto = { asistentePlanId: a.asistentePlanId, numero, pagada };
   const pagoPrevio = a.cuotas.find((c) => c.numero === numero);
+  const det = (a.cuotasDetalle || []).find((c) => Number(c.numero) === Number(numero));
+  const montoEsperado = det ? Number(det.monto) : montoCuota(a, numero);
   modalCuotaPlanId.value = a.asistentePlanId;
   modalCuotaNumero.value = numero;
-  modalCuotaMonto.value = pagada ? (pagoPrevio ? pagoPrevio.monto : pagarPorCuota(a)) : pagarPorCuota(a);
+  modalCuotaMonto.value = pagada ? (pagoPrevio ? pagoPrevio.monto : montoEsperado) : montoEsperado;
   modalCuotaFecha.value = pagada ? (pagoPrevio && pagoPrevio.fecha ? pagoPrevio.fecha : '') : new Date().toISOString().slice(0, 10);
   const nombre = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
-  modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}`;
+  const tope = det && det.fecha_tope ? ` · vence ${formatearFechaTope(det.fecha_tope)}` : '';
+  modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}${tope}`;
   document.getElementById('modalCuotaTitulo').textContent = pagada ? 'Quitar pago de cuota' : 'Registrar pago de cuota';
   botonGuardarCuota.textContent = pagada ? 'Quitar pago' : 'Registrar pago';
   modalCuota.hidden = false;

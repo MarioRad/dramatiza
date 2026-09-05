@@ -1214,12 +1214,17 @@ app.put('/api/admin/pagos/planes/:id', requireAuth, requirePermiso('perm_inscrip
     const { id } = req.params;
     if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
     const body = req.body || {};
+    if (body.cuotas === undefined || body.cuotas === null) {
+      const existente = await db.queryOne('SELECT cuotas FROM planes_pago WHERE id = ?', [id]);
+      body.cuotas = (existente && existente.cuotas) || null;
+    }
     await db.actualizarPlanPago(id, {
       nombre: String(body.nombre || '').trim(),
       descripcion: String(body.descripcion || ''),
       montoTotal: Number(body.monto_total) || 0,
       cantidadCuotas: Math.max(1, Number(body.cantidad_cuotas) || 1),
       activo: body.activo !== false,
+      cuotas: body.cuotas,
     });
     res.json({ ok: true });
   } catch (e) {
@@ -1284,6 +1289,7 @@ app.delete('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripci
 app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     const personas = await db.listarEncuentro();
+    await db.asignarPlanesAutomaticos(personas);
     res.json({ total: personas.length, personas });
   } catch (e) {
     next(e);
@@ -1313,6 +1319,7 @@ app.put('/api/admin/encuentro/:id', requireAuth, requirePermiso('perm_encuentro'
     const { id } = req.params;
     if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
     const body = req.body || {};
+    const fila = await db.queryOne('SELECT dni, nombre, apellido, marca_temporal FROM encuentro_inscripciones WHERE id = ?', [id]);
     await db.actualizarEncuentroPersona(id, {
       nombre: body.nombre,
       apellido: body.apellido,
@@ -1325,7 +1332,7 @@ app.put('/api/admin/encuentro/:id', requireAuth, requirePermiso('perm_encuentro'
       opcionPago: body.opcion_pago,
       marcaTemporal: body.marca_temporal,
     });
-    const fila = await db.queryOne('SELECT dni, nombre, apellido FROM encuentro_inscripciones WHERE id = ?', [id]);
+    await db.asignarPlanAutomaticoAsistente(fila ? fila.dni : '', body.marca_temporal);
     await db.registrarEvento(
       'encuentro_modificado',
       `Registro del encuentro actualizado: ${fila ? `${fila.nombre} ${fila.apellido} (DNI ${fila.dni})` : `id ${id}`}`,
