@@ -1,12 +1,12 @@
 # Sistema de Inscripciones a Talleres
 
-Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 talleres (5 de mañana y 5 de tarde), cada uno se dicta durante 3 días consecutivos. Una persona puede inscribirse a un taller de mañana **y** a otro de tarde.
+Aplicación web para inscribir personas a talleres con cupos limitados. Hay 25 talleres repartidos en 3 días. Una persona puede inscribirse a los talleres que desee, verificando que no se superpongan en horario.
 
 ## Características
 
-- Formulario público de registro: nombre, apellido, DNI, correo y selección de talleres (mañana y/o tarde).
+- Formulario público de registro: nombre, apellido, DNI, correo y selección de talleres.
 - Control de cupos por taller con protección ante inscripciones simultáneas (transacciones con bloqueo de fila).
-- Una inscripción por DNI por turno (no se puede repetir turno).
+- Validación de superposición de horarios al inscribir.
 - Panel de administración protegido con contraseña: **CRUD completo de talleres**, ver inscriptos y eliminar inscripciones.
 - Base de datos MySQL **o** PostgreSQL (configurable por variables de entorno).
 - Al primer arranque crea las tablas automáticamente. Los talleres se cargan desde el panel (opcionalmente, `SEED_ON_START=true` carga 10 talleres de ejemplo).
@@ -51,6 +51,11 @@ Aplicación web para inscribir personas a talleres con cupos limitados. Hay 10 t
    ```
 
    (También funcionan las variables `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`.)
+
+> **Zona horaria:** el sistema almacena los timestamps en UTC y los muestra en
+> `America/Argentina/Salta` (el server formatea las fechas de notificaciones; el panel
+> muestra la zona horaria del navegador). Con PostgreSQL la sesión se fuerza a `UTC`
+> automáticamente, por lo que no hace falta configurar la zona en la base.
 
 4. Definir la clave del panel de administración:
 
@@ -99,12 +104,16 @@ src/
 | POST | `/api/admin/logout` | Cierra la sesión |
 | GET | `/api/admin/talleres` | Lista talleres (requiere sesión) |
 | POST | `/api/admin/talleres` | Crea un taller (requiere sesión) |
-| PUT | `/api/admin/talleres/:id` | Actualiza nombre, descripción, turno o cupo (requiere sesión) |
+| PUT | `/api/admin/talleres/:id` | Actualiza nombre, descripción, fecha/hora o cupo (requiere sesión) |
 | DELETE | `/api/admin/talleres/:id` | Elimina un taller y sus inscripciones (requiere sesión) |
 | GET | `/api/admin/inscripciones` | Lista todas las inscripciones (requiere sesión) |
 | DELETE | `/api/admin/inscripciones/:id` | Elimina una inscripción (requiere sesión) |
+| GET | `/api/admin/notificaciones` | Lista las notificaciones a la app móvil (requiere sesión) |
+| POST | `/api/admin/notificaciones` | Crea una notificación `{ titulo, mensaje, tipo, activa }` (requiere sesión) |
+| PUT | `/api/admin/notificaciones/:id` | Edita una notificación (requiere sesión) |
+| DELETE | `/api/admin/notificaciones/:id` | Elimina una notificación (requiere sesión) |
 
-Los talleres se crean con `{ nombre, descripcion, turno: "manana"|"tarde", cupo }`. No se puede bajar el cupo por debajo de la cantidad de inscriptos actuales.
+Los talleres se crean con `{ nombre, descripcion, cupo, parts: [{ fecha, hora, duracion_hs }]`. No se puede bajar el cupo por debajo de la cantidad de inscriptos actuales.
 
 ### Ejemplo de inscripción
 
@@ -116,12 +125,11 @@ curl -X POST http://localhost:3000/api/inscripciones \
     "apellido": "Pérez",
     "dni": "30123456",
     "email": "juan@example.com",
-    "tallerManana": 1,
-    "tallerTarde": 6
+    "tallerIds": "1,6"
   }'
 ```
 
-Los campos `tallerManana` y `tallerTarde` son opcionales (puede elegirse uno solo), pero al menos uno es obligatorio.
+El campo `tallerIds` es obligatorio: una lista de IDs de talleres separados por comas.
 
 ## Notas
 
@@ -129,3 +137,24 @@ Los campos `tallerManana` y `tallerTarde` son opcionales (puede elegirse uno sol
 - Si un taller llega a su cupo, deja de aceptar inscripciones (respuesta `409`).
 - No se puede bajar el cupo de un taller por debajo de su cantidad de inscriptos actuales.
 - Los talleres de ejemplo y sus cupos iniciales (20) se pueden cambiar directamente en la base de datos o desde el panel.
+
+## App móvil de acreditación
+
+La app móvil (React Native/Expo) vive en **su propio repositorio** separado de este
+backend. Consume esta API por HTTP (`POST /api/mobile/login` y `/api/mobile/acreditar`),
+así que el backend tiene que estar accesible desde el teléfono (misma red Wi-Fi o IP pública).
+Ver los endpoints en `src/server.js`.
+
+### Endpoints móviles
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| POST | `/api/mobile/login` | Inicia sesión (`{ username, password }`) → `{ token }` |
+| POST | `/api/mobile/logout` | Cierra la sesión |
+| POST | `/api/mobile/acreditar` | Escanea/acredita un QR (`{ codigo }`) |
+| GET | `/api/mobile/notificaciones` | Lista las notificaciones activas creadas desde el panel → `{ notificaciones: [{ id, titulo, mensaje, tipo, creado_en }] }` |
+
+Las notificaciones se crean desde la pestaña **Notificaciones** del panel de
+administración. La app debe consultar `GET /api/mobile/notificaciones` (con el token
+`Bearer` de la sesión móvil) al iniciar o periódicamente para mostrar avisos a los
+operadores. Tipos disponibles: `info`, `alerta`, `urgente`, `recordatorio`.

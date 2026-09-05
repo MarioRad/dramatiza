@@ -1,8 +1,0 @@
-node_modules
-.env
-logs
-.whatsapp-session
-.git
-Dockerfile
-docker-compose.yml
-.dockerignore

@@ -1,4 +1,86 @@
-const ETIQUETAS_TURNO = { manana: 'mañana', tarde: 'tarde' };
+function bloquesHorarioCliente(t) {
+  const fechaStr = String(t.fecha || '').trim();
+  const horaStr = String(t.hora || '').trim();
+  const mFecha = fechaStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const mHora = horaStr.match(/(\d{1,2}):(\d{2})/);
+  if (!mFecha || !mHora) return [];
+  const durHs = Number(t.duracion_hs) || 3;
+  const numDias = durHs >= 6 ? 2 : 1;
+  const inicio = new Date(Number(mFecha[1]), Number(mFecha[2]) - 1, Number(mFecha[3]), Number(mHora[1]), Number(mHora[2]));
+  if (Number.isNaN(inicio.getTime())) return [];
+  const durMs = durHs * 3600 * 1000;
+  const bloques = [];
+  for (let i = 0; i < numDias; i++) {
+    const s = new Date(inicio.getTime() + i * 86400000);
+    bloques.push([s.getTime(), s.getTime() + durMs]);
+  }
+  return bloques;
+}
+
+function diasDelTallerCliente(t) {
+  const m = String(t.fecha || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return [];
+  const durHs = Number(t.duracion_hs) || 3;
+  const numDias = durHs >= 6 ? 2 : 1;
+  const base = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const dias = [];
+  for (let i = 0; i < numDias; i++) {
+    const d = new Date(base.getTime() + i * 86400000);
+    dias.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+  return dias;
+}
+
+function talleresSeSuperponenCliente(a, b) {
+  const ba = bloquesHorarioCliente(a);
+  const bb = bloquesHorarioCliente(b);
+  for (const x of ba) {
+    for (const y of bb) {
+      if (x[0] < y[1] && y[0] < x[1]) return true;
+    }
+  }
+  return false;
+}
+
+function buscarConflictoCliente(seleccionados) {
+  for (let i = 0; i < seleccionados.length; i++) {
+    for (let j = i + 1; j < seleccionados.length; j++) {
+      if (talleresSeSuperponenCliente(seleccionados[i], seleccionados[j])) {
+        return [seleccionados[i], seleccionados[j]];
+      }
+    }
+  }
+  return null;
+}
+
+/* ── Tabs públicos (Inscripción / Programa) ─────────────────────── */
+(function () {
+  const vistaInscripcion = document.getElementById('vistaInscripcion');
+  const vistaPrograma = document.getElementById('vistaPrograma');
+  const tabs = document.querySelectorAll('.programa-public-tab');
+  let programaCargado = false;
+
+  function cambiarVistaPublica(vista) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.vista === vista));
+    vistaInscripcion.hidden = vista !== 'inscripcion';
+    vistaPrograma.hidden = vista !== 'programa';
+    if (vista === 'programa' && !programaCargado) {
+      ProgramaUI.init({ container: '#vistaPrograma', mode: 'public' });
+      ProgramaUI.cargar().then(() => { ProgramaUI.render(); programaCargado = true; });
+    }
+  }
+
+  tabs.forEach(t => t.addEventListener('click', () => cambiarVistaPublica(t.dataset.vista)));
+})();
+
+function formatoFecha(fechaStr) {
+  const partes = String(fechaStr || '').trim().split('-');
+  if (partes.length < 3) return fechaStr || '';
+  const d = partes[2].padStart(2, '0');
+  const m = partes[1].padStart(2, '0');
+  const a = partes[0].slice(-2);
+  return `${d}/${m}/${a}`;
+}
 
 function etiquetaDuracion(duracionHs) {
   return Number(duracionHs) === 6 ? '6hs · 2 días' : '3hs · 1 día';
@@ -10,16 +92,13 @@ function etiquetaCupo(t) {
 }
 
 const formulario = document.getElementById('formInscripcion');
-const botonEnviar = document.getElementById('botonEnviar');
 const botonContinuar = document.getElementById('botonContinuar');
 const mensaje = document.getElementById('mensaje');
-const selectManana = document.getElementById('tallerManana');
-const selectTarde = document.getElementById('tallerTarde');
-const listaTalleres = document.getElementById('listaTalleres');
+const hiddenTallerIds = document.getElementById('tallerIds');
+const seleccionPrograma = document.getElementById('seleccionPrograma');
 const inputDni = document.getElementById('dni');
 const pasoDni = document.getElementById('pasoDni');
 const pasoDatos = document.getElementById('pasoDatos');
-const cambiarDni = document.getElementById('cambiarDni');
 const modalEncuentro = document.getElementById('modalEncuentro');
 const botonInscribirse = document.getElementById('botonInscribirse');
 const botonCancelar = document.getElementById('botonCancelar');
@@ -32,10 +111,31 @@ const botonConfirmacion = document.getElementById('botonConfirmacion');
 const modalInscripcionPrevia = document.getElementById('modalInscripcionPrevia');
 const inscripcionPreviaContenido = document.getElementById('inscripcionPreviaContenido');
 const botonInscripcionPreviaContinuar = document.getElementById('botonInscripcionPreviaContinuar');
-const botonInscripcionPreviaCancelar = document.getElementById('botonInscripcionPreviaCancelar');
+const datosParticipante = document.getElementById('datosParticipante');
+const seleccionTaller = document.getElementById('seleccionTaller');
+const dpNombre = document.getElementById('dpNombre');
+const dpApellido = document.getElementById('dpApellido');
+const dpDni = document.getElementById('dpDni');
+const dpEmail = document.getElementById('dpEmail');
+const dpTelefono = document.getElementById('dpTelefono');
+const dpAlimentacion = document.getElementById('dpAlimentacion');
+const botonAceptarDatos = document.getElementById('botonAceptarDatos');
+const botonCancelarDatos = document.getElementById('botonCancelarDatos');
+const botonCancelarTaller = document.getElementById('botonCancelarTaller');
+const accionesInscripcion = document.getElementById('accionesInscripcion');
+const botonConfirmarInscripcion = document.getElementById('botonConfirmarInscripcion');
+const modalSolapamiento = document.getElementById('modalSolapamiento');
+const solapamientoContenido = document.getElementById('solapamientoContenido');
+const botonSolapamiento = document.getElementById('botonSolapamiento');
+const botonAnularInscripcion = document.getElementById('botonAnularInscripcion');
+const botonReenviarConstancia = document.getElementById('botonReenviarConstancia');
 
 let urlEncuentro = '';
 let inscripcionPrevia = null;
+let talleresData = [];
+let programaSeleccion = false;
+let pendingDni = '';
+let pendingDniYaInscripto = '';
 
 const ETIQUETAS_ALIMENTACION = {
   sin_restriccion: 'Sin restricción',
@@ -48,7 +148,59 @@ const ETIQUETAS_ALIMENTACION = {
 function mostrarPasoDatos() {
   pasoDni.hidden = true;
   pasoDatos.hidden = false;
+  seleccionTaller.hidden = true;
+  accionesInscripcion.hidden = true;
 }
+
+function mostrarDatosParticipante(d) {
+  const dni = inputDni.value.trim();
+  dpNombre.value = (d && d.nombre) || '';
+  dpApellido.value = (d && d.apellido) || '';
+  dpDni.value = dni;
+  dpEmail.value = (d && d.email) || '';
+  dpTelefono.value = (d && d.telefono) || '';
+  dpAlimentacion.value = (d && d.alimentacion) || 'sin_restriccion';
+  datosParticipante.hidden = false;
+  setTimeout(() => dpNombre.focus(), 100);
+}
+
+function aceptarDatos() {
+  const nombre = dpNombre.value.trim();
+  const apellido = dpApellido.value.trim();
+  const email = dpEmail.value.trim();
+  if (nombre.length < 2) { mostrarMensaje('Ingresá un nombre válido.', 'error'); dpNombre.focus(); return; }
+  if (apellido.length < 2) { mostrarMensaje('Ingresá un apellido válido.', 'error'); dpApellido.focus(); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { mostrarMensaje('Ingresá un correo electrónico válido.', 'error'); dpEmail.focus(); return; }
+  mostrarMensaje('', '');
+  datosParticipante.hidden = true;
+  seleccionTaller.hidden = false;
+  accionesInscripcion.hidden = true;
+  cargarProgramaSeleccion();
+}
+
+function confirmarInscripcion() {
+  if (!hiddenTallerIds.value) {
+    mostrarMensaje('Seleccioná al menos un taller.', 'error');
+    return;
+  }
+  mostrarMensaje('', '');
+  formulario.requestSubmit();
+}
+
+botonAceptarDatos.addEventListener('click', aceptarDatos);
+botonCancelarDatos.addEventListener('click', () => { window.location.reload(); });
+botonCancelarTaller.addEventListener('click', () => {
+  seleccionTaller.hidden = true;
+  datosParticipante.hidden = false;
+  dpNombre.focus();
+});
+botonConfirmarInscripcion.addEventListener('click', confirmarInscripcion);
+botonCancelar.addEventListener('click', () => { window.location.href = '/index.html'; });
+
+botonSolapamiento.addEventListener('click', () => {
+  modalSolapamiento.hidden = true;
+  modalSolapamiento.setAttribute('aria-hidden', 'true');
+});
 
 function abrirModal(modal) {
   modal.hidden = false;
@@ -58,37 +210,99 @@ function abrirModal(modal) {
 function volverAlPasoDni() {
   pasoDatos.hidden = true;
   pasoDni.hidden = false;
-  formulario.nombre.value = '';
-  formulario.apellido.value = '';
-  formulario.email.value = '';
-  formulario.telefono.value = '';
-  formulario.alimentacion.value = 'sin_restriccion';
-  formulario.tallerManana.value = '';
-  formulario.tallerTarde.value = '';
+  datosParticipante.hidden = true;
+  seleccionTaller.hidden = true;
+  accionesInscripcion.hidden = true;
+  dpAlimentacion.value = 'sin_restriccion';
+  hiddenTallerIds.value = '';
   inscripcionPrevia = null;
-  reiniciarTurnos();
+  programaSeleccion = false;
   mostrarMensaje('', '');
   inputDni.focus();
   inputDni.select();
 }
 
-function reiniciarTurnos() {
-  selectManana.disabled = false;
-  selectTarde.disabled = false;
-  selectManana.classList.remove('select-tomado');
-  selectTarde.classList.remove('select-tomado');
+function cambioSeleccionTaller(cbCambiado) {
+  const checks = seleccionPrograma.querySelectorAll('.taller-checkbox');
+  hiddenTallerIds.value = '';
+
+  if (cbCambiado && cbCambiado.checked) {
+    const seleccionadas = [];
+    checks.forEach(cb => {
+      if (!cb.checked) return;
+      const id = Number(cb.dataset.tallerId);
+      const t = talleresData.find(x => x.id === id);
+      if (!t) return;
+      const partes = [t];
+      if (t.pareja_id) {
+        const pareja = talleresData.find(x => x.id === t.pareja_id);
+        if (pareja) partes.push(pareja);
+      }
+      const hijos = talleresData.filter(x => x.pareja_id === t.id);
+      partes.push(...hijos);
+      partes.forEach(p => { if (!seleccionadas.find(s => s.id === p.id)) seleccionadas.push(p); });
+    });
+
+    const conflicto = buscarConflictoCliente(seleccionadas);
+    if (conflicto) {
+      cbCambiado.checked = false;
+      const nombreA = conflicto[0].nombre || 'Taller A';
+      const nombreB = conflicto[1].nombre || 'Taller B';
+      solapamientoContenido.innerHTML = '';
+      const p = document.createElement('p');
+      p.textContent = `Los talleres "${nombreA}" y "${nombreB}" se superponen en horario. Elegí solamente uno de ellos.`;
+      solapamientoContenido.appendChild(p);
+      abrirModal(modalSolapamiento);
+      return;
+    }
+  }
+
+  const ids = [];
+  checks.forEach(cb => {
+    if (!cb.checked) return;
+    const id = Number(cb.dataset.tallerId);
+    const t = talleresData.find(x => x.id === id);
+    if (!t) return;
+    const partes = [t, ...talleresData.filter(x => x.pareja_id === t.id)];
+    for (const parte of partes) {
+      if (!ids.includes(parte.id)) ids.push(parte.id);
+    }
+  });
+
+  hiddenTallerIds.value = ids.join(',');
+  accionesInscripcion.hidden = !hiddenTallerIds.value;
 }
 
-function configurarTurnosTomados(turnosTomados) {
-  for (const turno of turnosTomados) {
-    const select = turno === 'manana' ? selectManana : selectTarde;
-    select.disabled = true;
-    select.classList.add('select-tomado');
+window.__cambioSeleccionTaller = cambioSeleccionTaller;
+
+async function cargarProgramaSeleccion() {
+  if (programaSeleccion) return;
+  seleccionPrograma.innerHTML = '<p class="cargando">Cargando programa…</p>';
+  try {
+    if (!talleresData.length) await cargarTalleres();
+    const container = document.createElement('div');
+    seleccionPrograma.innerHTML = '';
+    seleccionPrograma.appendChild(container);
+    ProgramaUI.init({ container, mode: 'seleccion', renderType: 'tabla' });
+    await ProgramaUI.cargar();
+    ProgramaUI.render();
+    programaSeleccion = true;
+    deshabilitarSinCupo(container);
+  } catch (e) {
+    seleccionPrograma.innerHTML = '<p class="cargando">No se pudo cargar el programa.</p>';
   }
 }
 
+function deshabilitarSinCupo(container) {
+  container.querySelectorAll('.taller-checkbox').forEach(cb => {
+    const t = talleresData.find(x => x.id === Number(cb.dataset.tallerId));
+    if (!t) return;
+    if (t.inscriptos >= t.cupo) cb.disabled = true;
+  });
+}
+
 botonCancelar.addEventListener('click', () => {
-  window.location.reload();
+  window.location.href = '/index.html';
 });
 
 botonInscribirse.addEventListener('click', () => {
@@ -98,35 +312,104 @@ botonInscribirse.addEventListener('click', () => {
 });
 
 botonYaInscripto.addEventListener('click', () => {
-  window.location.reload();
+  pendingDniYaInscripto = '';
+  window.location.href = '/index.html';
 });
 
-botonConfirmacion.addEventListener('click', () => {
+botonReenviarConstancia.addEventListener('click', async () => {
+  if (!pendingDniYaInscripto) return;
+  botonReenviarConstancia.disabled = true;
+  botonReenviarConstancia.textContent = 'Enviando…';
+  try {
+    const res = await fetch('/api/inscripciones/reenviar-constancia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dni: pendingDniYaInscripto }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      mostrarMensaje(data.error || 'No se pudo reenviar la constancia.', 'error');
+      botonReenviarConstancia.disabled = false;
+      botonReenviarConstancia.textContent = 'Reenviar Constancia';
+      return;
+    }
+    modalYaInscripto.hidden = true;
+    modalYaInscripto.setAttribute('aria-hidden', 'true');
+    pendingDniYaInscripto = '';
+    window.location.href = '/index.html';
+  } catch (e) {
+    mostrarMensaje('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+    botonReenviarConstancia.disabled = false;
+    botonReenviarConstancia.textContent = 'Reenviar Constancia';
+  }
+});
+
+botonConfirmacion.addEventListener('click', async () => {
+  if (!pendingDni) return;
+  botonConfirmacion.disabled = true;
+  botonConfirmacion.textContent = 'Finalizando…';
+  try {
+    const res = await fetch('/api/inscripciones/finalizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dni: pendingDni }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      mostrarMensaje(data.error || 'No se pudo finalizar la inscripción.', 'error');
+      botonConfirmacion.disabled = false;
+      botonConfirmacion.textContent = 'Finalizar';
+      return;
+    }
+    if (data.qrDataUrl) {
+      const contQr = document.createElement('div');
+      contQr.className = 'qr-detalle';
+      const img = document.createElement('img');
+      img.src = data.qrDataUrl;
+      img.alt = 'Código QR de acreditación';
+      const p = document.createElement('p');
+      p.textContent = 'Mostrá este código QR el día de la acreditación para confirmar tu asistencia.';
+      contQr.append(img, p);
+      confirmacionContenido.appendChild(contQr);
+    }
+    botonConfirmacion.textContent = 'Finalizado';
+    botonConfirmacion.disabled = true;
+    botonAnularInscripcion.hidden = true;
+    pendingDni = '';
+    setTimeout(() => { window.location.href = '/index.html'; }, 1500);
+  } catch (e) {
+    mostrarMensaje('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+    botonConfirmacion.disabled = false;
+    botonConfirmacion.textContent = 'Finalizar';
+  }
+});
+
+botonAnularInscripcion.addEventListener('click', async () => {
+  if (!pendingDni) return;
+  botonAnularInscripcion.disabled = true;
+  botonAnularInscripcion.textContent = 'Anulando…';
+  try {
+    await fetch('/api/inscripciones/anular', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dni: pendingDni }),
+    });
+  } catch (_) { /* noop */ }
   modalConfirmacion.hidden = true;
   modalConfirmacion.setAttribute('aria-hidden', 'true');
-  volverAlPasoDni();
-});
-
-botonInscripcionPreviaCancelar.addEventListener('click', () => {
-  window.location.reload();
+  inscripcionPrevia = null;
+  pendingDni = '';
+  pendingDniYaInscripto = '';
+  sessionStorage.clear();
+  window.location.href = '/index.html';
 });
 
 botonInscripcionPreviaContinuar.addEventListener('click', () => {
   modalInscripcionPrevia.hidden = true;
   modalInscripcionPrevia.setAttribute('aria-hidden', 'true');
   const d = inscripcionPrevia || {};
-  formulario.nombre.value = d.nombre || '';
-  formulario.apellido.value = d.apellido || '';
-  formulario.email.value = d.email || '';
-  formulario.telefono.value = d.telefono || '';
-  configurarTurnosTomados(d.turnosTomados || []);
-  for (const t of d.inscripciones || []) {
-    const select = t.turno === 'manana' ? selectManana : selectTarde;
-    if (t.tallerId) select.value = String(t.tallerId);
-  }
+  mostrarDatosParticipante(d);
   mostrarPasoDatos();
-  const selectLibre = (d.turnosTomados || []).includes('manana') ? selectTarde : selectManana;
-  selectLibre.focus();
 });
 
 function crearFila(etiqueta, valor) {
@@ -145,15 +428,14 @@ function crearFila(etiqueta, valor) {
 function crearTallerDetalle(t) {
   const div = document.createElement('div');
   div.className = 'taller-detalle';
-  const turno = ETIQUETAS_TURNO[t.turno] || t.turno;
   const nombre = document.createElement('div');
   nombre.className = 'nombre-taller';
-  nombre.textContent = `${t.taller || t.nombre} (Turno ${turno})`;
+  nombre.textContent = t.taller || t.nombre;
   div.appendChild(nombre);
   const metas = [];
   const duracion = t.duracion_hs ?? t.duracionHs;
   if (duracion) metas.push(etiquetaDuracion(duracion));
-  if (t.fecha) metas.push(`Fecha: ${t.fecha}`);
+  if (t.fecha) metas.push(`Fecha: ${formatoFecha(t.fecha)}`);
   if (t.hora) metas.push(`Hora: ${t.hora}`);
   if (t.lugar) metas.push(`Lugar: ${t.lugar}`);
   if (metas.length) {
@@ -167,19 +449,33 @@ function crearTallerDetalle(t) {
 
 function mostrarModalYaInscripto(data) {
   yaInscriptoContenido.innerHTML = '';
-  yaInscriptoContenido.append(document.createTextNode('Tu DNI ya figura con las siguientes inscripciones a los talleres:'));
+
+  const nombre = data.nombre || '';
+  const apellido = data.apellido || '';
+  if (nombre || apellido) {
+    const nombreDiv = document.createElement('div');
+    nombreDiv.className = 'ya-inscripto-nombre';
+    nombreDiv.textContent = `${nombre} ${apellido}`.trim();
+    yaInscriptoContenido.appendChild(nombreDiv);
+  }
+
+  const intro = document.createElement('p');
+  intro.textContent = 'Tu DNI ya figura con las siguientes inscripciones a los talleres:';
+  yaInscriptoContenido.appendChild(intro);
+
   const lista = document.createElement('div');
   lista.style.marginTop = '0.75rem';
   for (const t of data.inscripciones || []) lista.appendChild(crearTallerDetalle(t));
   yaInscriptoContenido.appendChild(lista);
+
+  pendingDniYaInscripto = inputDni.value.trim();
   abrirModal(modalYaInscripto);
 }
 
 function mostrarModalInscripcionPrevia(data) {
-  const turnoFaltante = (data.turnosTomados || []).includes('manana') ? 'tarde' : 'manana';
   inscripcionPreviaContenido.innerHTML = '';
   const p = document.createElement('p');
-  p.textContent = `Ya tenés taller(es) registrados. Podés sumar uno del turno ${ETIQUETAS_TURNO[turnoFaltante]}.`;
+  p.textContent = 'Ya tenés una inscripción previa. Podés completar la inscripción con los datos que ya tenés registrados.';
   inscripcionPreviaContenido.appendChild(p);
   const lista = document.createElement('div');
   lista.style.marginTop = '0.75rem';
@@ -190,7 +486,6 @@ function mostrarModalInscripcionPrevia(data) {
 
 function mostrarModalConfirmacion(insc) {
   confirmacionContenido.innerHTML = '';
-  confirmacionContenido.append(crearFila('Código único', insc.codigo));
   confirmacionContenido.append(crearFila('Nombre', `${insc.nombre} ${insc.apellido}`.trim()));
   confirmacionContenido.append(crearFila('DNI', insc.dni));
   confirmacionContenido.append(crearFila('Correo', insc.email));
@@ -204,17 +499,11 @@ function mostrarModalConfirmacion(insc) {
 
   confirmacionContenido.append(crearFila('Alimentación', ETIQUETAS_ALIMENTACION[insc.alimentacion] || insc.alimentacion));
 
-  if (insc.qrDataUrl) {
-    const contQr = document.createElement('div');
-    contQr.className = 'qr-detalle';
-    const img = document.createElement('img');
-    img.src = insc.qrDataUrl;
-    img.alt = 'Código QR de acreditación';
-    const p = document.createElement('p');
-    p.textContent = 'Mostrá este código QR al ingresar para confirmar tu asistencia.';
-    contQr.append(img, p);
-    confirmacionContenido.appendChild(contQr);
-  }
+  pendingDni = insc.dni || '';
+  botonConfirmacion.disabled = false;
+  botonConfirmacion.textContent = 'Finalizar';
+  botonAnularInscripcion.disabled = false;
+  botonAnularInscripcion.textContent = 'Anular Inscripción';
   abrirModal(modalConfirmacion);
 }
 
@@ -246,12 +535,8 @@ async function verificarDni() {
       abrirModal(modalEncuentro);
       return;
     }
-    formulario.nombre.value = data.nombre || '';
-    formulario.apellido.value = data.apellido || '';
-    formulario.email.value = data.email || '';
-    formulario.telefono.value = data.telefono || '';
+    mostrarDatosParticipante(data);
     mostrarPasoDatos();
-    selectManana.focus();
   } catch (e) {
     mostrarMensaje('No se pudo verificar el DNI. Intentá de nuevo.', 'error');
   } finally {
@@ -267,11 +552,6 @@ inputDni.addEventListener('keydown', (e) => {
     e.preventDefault();
     verificarDni();
   }
-});
-
-cambiarDni.addEventListener('click', (e) => {
-  e.preventDefault();
-  volverAlPasoDni();
 });
 
 function mostrarMensaje(texto, tipo) {
@@ -293,91 +573,28 @@ function mostrarMensajeConAviso(texto, tipo, aviso) {
   }
 }
 
-function opcionVacia() {
-  const opcion = document.createElement('option');
-  opcion.value = '';
-  opcion.textContent = '— Sin taller —';
-  return opcion;
-}
-
-function renderLista(talleres) {
-  const porTurno = { manana: [], tarde: [] };
-  for (const t of talleres) porTurno[t.turno].push(t);
-
-  listaTalleres.innerHTML = '';
-  for (const turno of ['manana', 'tarde']) {
-    const grupo = document.createElement('div');
-    grupo.className = 'grupo-turno';
-    const titulo = document.createElement('h3');
-    titulo.textContent = `Turno ${ETIQUETAS_TURNO[turno]}`;
-    const ul = document.createElement('ul');
-    for (const t of porTurno[turno]) {
-      const li = document.createElement('li');
-      const contenedor = document.createElement('div');
-      const nombre = document.createElement('span');
-      nombre.textContent = t.nombre;
-      const duracion = document.createElement('span');
-      duracion.className = 'duracion-taller';
-      duracion.textContent = etiquetaDuracion(t.duracion_hs);
-      contenedor.append(nombre, duracion);
-      const lleno = t.inscriptos >= t.cupo;
-      const badge = document.createElement('span');
-      badge.className = `estado-cupo${lleno ? ' lleno' : ''}`;
-      badge.textContent = etiquetaCupo(t);
-      li.append(contenedor, badge);
-      ul.appendChild(li);
-    }
-    grupo.append(titulo, ul);
-    listaTalleres.appendChild(grupo);
-  }
-}
-
 async function cargarTalleres() {
   try {
     const res = await fetch('/api/talleres');
     if (!res.ok) throw new Error();
-    const talleres = await res.json();
-
-    for (const select of [selectManana, selectTarde]) {
-      select.innerHTML = '';
-      select.appendChild(opcionVacia());
-    }
-
-    for (const t of talleres) {
-      const select = t.turno === 'manana' ? selectManana : selectTarde;
-      const opcion = document.createElement('option');
-      opcion.value = t.id;
-      const lleno = t.inscriptos >= t.cupo;
-      const etiqueta = lleno
-        ? `${t.nombre} (lleno)`
-        : `${t.nombre} — ${etiquetaDuracion(t.duracion_hs)} (${t.cupo - t.inscriptos} cupos)`;
-      opcion.textContent = etiqueta;
-      opcion.disabled = lleno;
-      select.appendChild(opcion);
-    }
-
-    renderLista(talleres);
-  } catch (e) {
-    listaTalleres.innerHTML = '<p class="cargando">No se pudieron cargar los talleres.</p>';
-  }
+    talleresData = await res.json();
+  } catch (e) { /* noop */ }
 }
 
 formulario.addEventListener('submit', async (e) => {
   e.preventDefault();
   mostrarMensaje('', '');
-  botonEnviar.disabled = true;
-  botonEnviar.textContent = 'Enviando…';
+  botonConfirmarInscripcion.disabled = true;
+  botonConfirmarInscripcion.textContent = 'Enviando…';
 
-  const turnosTomados = inscripcionPrevia && inscripcionPrevia.turnosTomados ? inscripcionPrevia.turnosTomados : [];
   const payload = {
-    nombre: formulario.nombre.value.trim(),
-    apellido: formulario.apellido.value.trim(),
-    dni: formulario.dni.value.trim(),
-    email: formulario.email.value.trim(),
-    telefono: formulario.telefono.value.trim(),
-    alimentacion: formulario.alimentacion.value,
-    tallerManana: turnosTomados.includes('manana') ? null : formulario.tallerManana.value || null,
-    tallerTarde: turnosTomados.includes('tarde') ? null : formulario.tallerTarde.value || null,
+    nombre: dpNombre.value.trim(),
+    apellido: dpApellido.value.trim(),
+    dni: dpDni.value.trim(),
+    email: dpEmail.value.trim(),
+    telefono: dpTelefono.value.trim(),
+    alimentacion: dpAlimentacion.value,
+    tallerIds: hiddenTallerIds.value || null,
   };
 
   try {
@@ -393,8 +610,10 @@ formulario.addEventListener('submit', async (e) => {
       return;
     }
 
-    formulario.reset();
-    await cargarTalleres();
+    hiddenTallerIds.value = '';
+    programaSeleccion = false;
+    accionesInscripcion.hidden = true;
+    seleccionTaller.hidden = true;
     if (data.inscripcion) {
       mostrarModalConfirmacion(data.inscripcion);
       if (data.aviso && data.aviso.url) {
@@ -414,8 +633,8 @@ formulario.addEventListener('submit', async (e) => {
   } catch (e) {
     mostrarMensaje('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
   } finally {
-    botonEnviar.disabled = false;
-    botonEnviar.textContent = 'Inscribirme';
+    botonConfirmarInscripcion.disabled = false;
+    botonConfirmarInscripcion.textContent = 'Confirmar inscripción';
   }
 });
 
