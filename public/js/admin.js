@@ -531,6 +531,23 @@ function formatearMarcaTemporal(valor) {
   return texto;
 }
 
+function formatearFechaNacimiento(valor) {
+  if (!valor) return '—';
+  const texto = String(valor).trim();
+  const pad = (n) => String(n).padStart(2, '0');
+  const mIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (mIso) {
+    const [, y, m, d] = mIso;
+    return `${pad(d)}-${pad(m)}-${y.slice(-2)}`;
+  }
+  const mFecha = texto.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (mFecha) {
+    const [, d, m, y] = mFecha;
+    return `${pad(d)}-${pad(m)}-${y.slice(-2)}`;
+  }
+  return texto;
+}
+
 function renderEncuentroPersonas(lista) {
   encuentroPersonas = Array.isArray(lista) ? lista : [];
   const cuerpo = document.querySelector('#tablaEncuentroPersonas tbody');
@@ -585,7 +602,7 @@ function renderEncuentroPersonas(lista) {
     tdDni.textContent = p.dni;
 
     const tdNacimiento = document.createElement('td');
-    tdNacimiento.textContent = p.fecha_nacimiento || '—';
+    tdNacimiento.textContent = formatearFechaNacimiento(p.fecha_nacimiento);
 
     const tdTelefono = document.createElement('td');
     tdTelefono.textContent = p.telefono || '—';
