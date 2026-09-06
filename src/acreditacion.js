@@ -5,6 +5,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const PDFDocument = require('pdfkit');
+const logs = require('./logs');
 
 function generarCodigo() {
   return 'ENC-' + crypto.randomBytes(5).toString('hex').toUpperCase();
@@ -169,9 +170,7 @@ let y = 105;
 }
 
 function carpetaEntradas() {
-  const carpeta = path.join(__dirname, '..', 'logs', 'entradas');
-  fs.mkdirSync(carpeta, { recursive: true });
-  return carpeta;
+  return logs.carpetaLogs('entradas');
 }
 
 module.exports = {

@@ -5,6 +5,7 @@ const fs = require('fs');
 const nodemailer = require('nodemailer');
 const acreditacion = require('./acreditacion');
 const whatsapp = require('./whatsapp');
+const logs = require('./logs');
 
 function formatoFecha(fechaStr) {
   const partes = String(fechaStr || '').trim().split('-');
@@ -43,16 +44,7 @@ function obtenerTransporter() {
 
 function registrarLog(contenido) {
   console.log(`\n[MAIL SIMULADO]\n${contenido}\n[FIN MAIL SIMULADO]\n`);
-  try {
-    const carpeta = path.join(__dirname, '..', 'logs');
-    fs.mkdirSync(carpeta, { recursive: true });
-    fs.appendFileSync(
-      path.join(carpeta, 'emails.log'),
-      `\n--- ${new Date().toISOString()} ---\n${contenido}\n`
-    );
-  } catch (e) {
-    /* noop */
-  }
+  logs.escribirLog('', 'emails.log', `\n--- ${new Date().toISOString()} ---\n${contenido}\n`);
 }
 
 function escaparHtml(texto) {
@@ -101,7 +93,7 @@ function construirHtml({ datos, talleres, qrDataUrl, modoCid = false }) {
     : (logo ? imagenDataUrl(logo, acreditacion.tipoMime(logo)) : null);
   const personajeSrc = modoCid ? 'cid:personaje@inscripciones'
     : (personaje ? imagenDataUrl(personaje, acreditacion.tipoMime(personaje)) : null);
-  const qrSrc = modoCid ? 'cid:qr@inscripciones' : qrDataUrl;
+  const qrSrc = qrDataUrl || (modoCid ? 'cid:qr@inscripciones' : null);
 
   const sesionesHtml = (datos.sesiones || [])
     .map((s) => {
@@ -217,7 +209,7 @@ async function notificarInscripcion(datos) {
       const htmlCid = construirHtml({
         datos: datosPayload,
         talleres: datosPayload.sesiones || [],
-        qrDataUrl: null,
+        qrDataUrl,
         modoCid: true,
       });
 
@@ -234,11 +226,7 @@ async function notificarInscripcion(datos) {
       salida += `\nImágenes en el cuerpo: logo ${logo ? 'sí' : 'no'}, personaje ${personaje ? 'sí' : 'no'}, QR ${pngBuffer ? 'sí' : 'no'}`;
       console.log(`[Mail] Email enviado a ${datos.email} (${info.messageId})`);
       try {
-        const carpeta = path.join(__dirname, '..', 'logs');
-        fs.appendFileSync(
-          path.join(carpeta, 'emails.log'),
-          `\n--- ${new Date().toISOString()} ---\n${salida}\n`
-        );
+        logs.escribirLog('', 'emails.log', `\n--- ${new Date().toISOString()} ---\n${salida}\n`);
       } catch (e) {
         /* noop */
       }
