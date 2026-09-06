@@ -39,6 +39,297 @@ const ProgramaUI = (() => {
     return `Día ${idx + 1} — ${formatoFechaCorto(fechaStr)}`;
   }
 
+  /* ── Disertantes/Talleristas + PDF/imprimir (estilo cronograma) ─── */
+
+  const TIPOS_LABEL = { ponencia: 'Ponencia', taller: 'Taller', conversatorio: 'Conversatorio' };
+
+  function rolPonente(p) {
+    return TIPOS_LABEL[p.tipo] || p.tipo || '';
+  }
+
+  function getInitials(nombre) {
+    return String(nombre || '')
+      .split(/[\s–-]+/)
+      .filter((w) => w.length > 0)
+      .map((w) => w[0].toUpperCase())
+      .slice(0, 2)
+      .join('');
+  }
+
+  function horaMin(h) {
+    if (!h) return null;
+    const m = String(h).match(/(\d{1,2}):(\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  }
+
+  function apellido(nombre) {
+    const parts = String(nombre || '').split(/[\s–-]+/).filter((w) => w.length > 0);
+    return parts[parts.length - 1] || nombre || '';
+  }
+
+  function sortDisertantes(lista) {
+    return [...lista].sort((a, b) => {
+      if ((a.dia || 1) !== (b.dia || 1)) return (a.dia || 1) - (b.dia || 1);
+      const ha = horaMin(a.horario);
+      const hb = horaMin(b.horario);
+      if (ha !== hb) return (ha ?? Infinity) - (hb ?? Infinity);
+      const ap = apellido(a.nombre).localeCompare(apellido(b.nombre), 'es');
+      if (ap !== 0) return ap;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es') || ((a.id || 0) - (b.id || 0));
+    });
+  }
+
+  function expandirDias(lista) {
+    const rows = [];
+    lista.forEach((p) => {
+      if (!p.dia) return;
+      const base = { ...p };
+      rows.push({ ...base });
+      if (p.dia2) {
+        rows.push({ ...base, dia: p.dia2, horario: p.horario2 || '', dia2: null, horario2: '' });
+      }
+    });
+    return sortDisertantes(rows);
+  }
+
+  function fechaDeDia(dia) {
+    const p = ponentes.find((x) => Number(x.dia) === Number(dia) && x.fecha_dia);
+    return p ? String(p.fecha_dia) : '';
+  }
+
+  function fechaCortaDDMM(fechaISO) {
+    const m = String(fechaISO || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    return `${Number(m[3])}/${Number(m[2])}`;
+  }
+
+  function lineaHoraDia(p, dia, hora) {
+    const f = fechaCortaDDMM(fechaDeDia(dia));
+    return `Día ${dia}${f ? ' - ' + f : ''} - ${hora} hs`;
+  }
+
+  function setHorarioLines(el, p) {
+    const h1 = String(p.horario || '').trim();
+    if (!p.dia2) {
+      el.textContent = '\u{1F550} ' + h1 + ' hs';
+      return;
+    }
+    const lines = ['\u{1F550} ' + lineaHoraDia(p, p.dia, h1), lineaHoraDia(p, p.dia2, String(p.horario2 || '').trim())];
+    el.textContent = '';
+    lines.forEach((text) => {
+      const div = document.createElement('div');
+      div.textContent = text;
+      el.appendChild(div);
+    });
+  }
+
+  function tarjetaDisertanteHtml(p) {
+    const tipos = ['taller', 'ponencia', 'conversatorio'];
+    const cls = tipos.includes(p.tipo) ? p.tipo : 'general';
+    const horario = String(p.horario || '').trim();
+    const iniciales = `<span class="programa-sd-iniciales">${escapeHtml(getInitials(p.nombre))}</span>`;
+    const foto = p.foto
+      ? `<img class="programa-sd-foto" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre || '')}" loading="lazy" onerror="this.remove()">`
+      : '';
+    const sello = p.dia2
+      ? '<span class="programa-sd-badge"><span class="n">2</span><span class="t">días</span></span>'
+      : '';
+    const desc = String(p.descripcion || '').trim();
+    return `
+      <div class="programa-sd-card type-${cls}">
+        <div class="programa-sd-card-foto">${iniciales}${foto}${sello}</div>
+        <div class="programa-sd-card-info">
+          <div class="programa-sd-nombre">${escapeHtml(p.nombre || '')}</div>
+          <div class="programa-sd-rol">${escapeHtml(rolPonente(p))}</div>
+          ${horario ? `<div class="programa-sd-horario">\u{1F550} ${escapeHtml(horario)} hs</div>` : ''}
+          ${p.titulo ? `<div class="programa-sd-titulo">${escapeHtml(p.titulo)}</div>` : ''}
+          ${desc ? `<div class="programa-sd-desc">${escapeHtml(desc.length > 140 ? desc.slice(0, 140) + '…' : desc)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function renderDisertantesSeccion() {
+    if (mode === 'admin') return '';
+    const lista = expandirDias(ponentes);
+    if (lista.length === 0) return '';
+    let html = '<section class="programa-sd-seccion"><div class="programa-sd-seccion-titulo">Disertantes y Talleristas</div>';
+    let currentDia = null;
+    let abierta = false;
+    lista.forEach((p) => {
+      if (p.dia !== currentDia) {
+        if (abierta) html += '</div></div>';
+        currentDia = p.dia;
+        abierta = true;
+        const f = fechaCortaDDMM(fechaDeDia(currentDia));
+        html += `<div class="programa-sd-dia">
+          <div class="programa-sd-dia-titulo"><span class="programa-sd-chip">Día ${currentDia}</span>${f ? `<span class="programa-sd-dia-fecha">· ${f}</span>` : ''}</div>
+          <div class="programa-sd-grid">`;
+      }
+      html += tarjetaDisertanteHtml(p);
+    });
+    if (abierta) html += '</div></div>';
+    html += '</section>';
+    return html;
+  }
+
+  function buildPdfArea() {
+    const holder = container ? container.querySelector('.programa-pdf-holder') : null;
+    const el = holder ? holder.querySelector('.programa-pdf-area') : null;
+    if (!el) return;
+    const lista = expandirDias(ponentes);
+    if (lista.length === 0) { el.innerHTML = ''; return; }
+
+    const header = `
+      <div class="programa-pdf-header">
+        <img class="programa-pdf-logo" src="/logo.png" alt="Encuentro Nacional de Profesores de Teatro - Dramatiza Salta 2026">
+        <div class="programa-pdf-header-center">
+          <div class="programa-pdf-title">Disertantes y Talleristas del Encuentro</div>
+          <div class="programa-pdf-subtitle">26º Encuentro Nacional de Profesores de Teatro - Dramatiza Salta 2026</div>
+        </div>
+        <img class="programa-pdf-mascot" src="/personaje.png" alt="Mascota">
+      </div>`;
+    const leyenda = `
+      <div class="programa-pdf-leyenda">
+        <span class="leyenda-item"><span class="leyenda-color color-taller"></span>Taller</span>
+        <span class="leyenda-item"><span class="leyenda-color color-ponencia"></span>Ponencia</span>
+        <span class="leyenda-item"><span class="leyenda-color color-conversatorio"></span>Conversatorio</span>
+      </div>`;
+
+    const pages = [];
+    let dayCards = [];
+    let currentDia = null;
+
+    const pushDay = () => {
+      if (currentDia === null) return;
+      const f = fechaCortaDDMM(fechaDeDia(currentDia));
+      pages.push(`
+        <div class="programa-pdf-page">
+          ${header}
+          <div class="programa-pdf-day-title"><span class="programa-pdf-day-chip">Día ${currentDia}</span>Presentación del día ${currentDia}${f ? ` · ${f}` : ''}</div>
+          <div class="programa-pdf-cards">${dayCards.join('')}</div>
+          ${leyenda}
+        </div>`);
+    };
+
+    lista.forEach((p) => {
+      if (p.dia !== currentDia) {
+        pushDay();
+        currentDia = p.dia;
+        dayCards = [];
+      }
+      const horario = String(p.horario || '').trim();
+      const fotoInner = p.foto
+        ? `<img class="programa-pdf-foto" src="${escapeHtml(p.foto)}" alt="">`
+        : `<div class="programa-pdf-no-foto">${escapeHtml(getInitials(p.nombre))}</div>`;
+      const sello = p.dia2
+        ? '<span class="programa-pdf-badge"><span class="n">2</span><span class="t">días</span></span>'
+        : '';
+      dayCards.push(`
+        <div class="programa-pdf-card type-${escapeHtml(p.tipo || 'general')}">
+          <div class="programa-pdf-foto-wrap">${fotoInner}${sello}</div>
+          <div class="programa-pdf-card-info">
+            <div class="programa-pdf-name"></div>
+            <div class="programa-pdf-role"></div>
+            <div class="programa-pdf-titulo"></div>
+            ${horario ? '<div class="programa-pdf-horario"></div>' : ''}
+          </div>
+        </div>`);
+    });
+    pushDay();
+
+    el.innerHTML = pages.join('');
+
+    el.querySelectorAll('.programa-pdf-card').forEach((card, i) => {
+      const p = lista[i];
+      card.querySelector('.programa-pdf-name').textContent = p.nombre || '';
+      card.querySelector('.programa-pdf-role').textContent = rolPonente(p);
+      card.querySelector('.programa-pdf-titulo').textContent = p.titulo || '';
+      const h = card.querySelector('.programa-pdf-horario');
+      if (h) setHorarioLines(h, p);
+    });
+  }
+
+  async function esperarImagenes(el) {
+    const imgs = [...el.querySelectorAll('img')].filter((i) => !i.complete);
+    await Promise.all(imgs.map((i) => new Promise((resolve) => {
+      i.addEventListener('load', resolve, { once: true });
+      i.addEventListener('error', resolve, { once: true });
+    })));
+  }
+
+  async function descargarPDF() {
+    const holder = container ? container.querySelector('.programa-pdf-holder') : null;
+    const root = holder ? holder.querySelector('.programa-pdf-area') : null;
+    const btn = document.getElementById('btnDescargarPdfPrograma');
+    if (!root || !root.querySelector('.programa-pdf-page') || !window.html2canvas || !window.jspdf) {
+      alert('No se pudo generar el PDF (falta la librería o no hay días). Verificá la conexión a internet.');
+      return;
+    }
+
+    await esperarImagenes(root);
+    if (btn) btn.disabled = true;
+    document.body.classList.add('pdf-export');
+    window.scrollTo(0, 0);
+
+    try {
+      const pages = [...root.querySelectorAll('.programa-pdf-page')];
+      const holderRect = root.getBoundingClientRect();
+      const rects = pages.map((pageEl) => pageEl.getBoundingClientRect());
+
+      const canvas = await window.html2canvas(root, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        x: 0,
+        y: 0,
+        width: holderRect.width,
+        height: holderRect.height,
+        windowWidth: holderRect.width + 50,
+        windowHeight: holderRect.height + 300,
+      });
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = 210;
+      const pageH = 297;
+      const S = 2;
+      const top0 = holderRect.top;
+      const left0 = holderRect.left;
+
+      pages.forEach((pageEl, i) => {
+        const r = rects[i];
+        const px = Math.max(0, Math.round((r.left - left0) * S) - 4);
+        const py = Math.max(0, Math.round((r.top - top0) * S) - 4);
+        const pw = Math.min(canvas.width - px, Math.round(r.width * S) + 8);
+        const ph = Math.min(canvas.height - py, Math.round(r.height * S) + 8);
+
+        const seg = document.createElement('canvas');
+        seg.width = pw;
+        seg.height = ph;
+        seg.getContext('2d').drawImage(canvas, px, py, pw, ph, 0, 0, pw, ph);
+
+        const imgData = seg.toDataURL('image/jpeg', 0.95);
+        if (i > 0) pdf.addPage();
+        const ratio = Math.min(pageW / pw, pageH / ph);
+        const imgW = pw * ratio;
+        const imgH = ph * ratio;
+        pdf.addImage(imgData, 'JPEG', (pageW - imgW) / 2, (pageH - imgH) / 2, imgW, imgH);
+      });
+
+      pdf.save('Dramatiza_Salta_2026.pdf');
+    } catch (err) {
+      alert('Error al generar el PDF: ' + err.message);
+    } finally {
+      document.body.classList.remove('pdf-export');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function imprimirPrograma() {
+    window.print();
+  }
+
   function toggleAccordion(header) {
     header.closest('.programa-accordion').classList.toggle('open');
   }
@@ -409,7 +700,10 @@ const ProgramaUI = (() => {
     } else {
       html += `
         <div class="programa-controls">
-          <div class="programa-controls-left"></div>
+          <div class="programa-controls-left">
+            <button type="button" class="programa-action-btn" id="btnDescargarPdfPrograma" onclick="ProgramaUI.descargarPDF()">⬇️ Descargar PDF</button>
+            <button type="button" class="programa-action-btn" id="btnImprimirPrograma" onclick="ProgramaUI.imprimirPrograma()">🖨️ Imprimir</button>
+          </div>
           <div class="programa-controls-right"></div>
         </div>`;
     }
@@ -427,6 +721,14 @@ const ProgramaUI = (() => {
       html += `<div class="programa-day-panel${idx === diaActivo ? ' active' : ''}" data-day-idx="${idx}">${renderPanel(dia, idx)}</div>`;
     });
     html += '</div>';
+
+    if (mode !== 'admin') {
+      html += renderDisertantesSeccion();
+      html += `
+        <div class="programa-pdf-holder" aria-hidden="true">
+          <div class="programa-pdf-area"></div>
+        </div>`;
+    }
 
     container.innerHTML = html;
 
@@ -447,6 +749,10 @@ const ProgramaUI = (() => {
           if (onDelete) onDelete(id);
         });
       });
+    }
+
+    if (mode !== 'admin') {
+      buildPdfArea();
     }
   }
 
@@ -518,6 +824,9 @@ const ProgramaUI = (() => {
     },
 
     render,
+
+    descargarPDF,
+    imprimirPrograma,
 
     seleccionarTaller(id) {
       if (typeof window.__seleccionarTaller === 'function') {

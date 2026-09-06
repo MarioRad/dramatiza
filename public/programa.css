@@ -651,3 +651,466 @@ body.dark .programa-workshop-card .ws-dias {
     gap: 6px;
   }
 }
+
+/* ── Disertantes y Talleristas (sección con tarjetas) ─────────────── */
+
+.programa-sd-seccion {
+  max-width: 800px;
+  margin: 30px auto 20px;
+  padding: 0 15px;
+}
+
+.programa-sd-seccion-titulo {
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--pg-text);
+}
+
+.programa-sd-dia {
+  margin-bottom: 18px;
+}
+
+.programa-sd-dia-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.programa-sd-chip {
+  background: var(--pg-blue);
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 6px;
+}
+
+.programa-sd-dia-fecha {
+  font-size: 0.85rem;
+  color: var(--pg-text-muted);
+}
+
+.programa-sd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.programa-sd-card {
+  background: var(--pg-card);
+  border: 1px solid var(--pg-border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.programa-sd-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+body.dark .programa-sd-card:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.programa-sd-card-foto {
+  position: relative;
+  height: 130px;
+  background: var(--pg-card-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--pg-border);
+  overflow: hidden;
+}
+
+.programa-sd-card.type-taller .programa-sd-card-foto { border-top: 4px solid var(--pg-green); }
+.programa-sd-card.type-ponencia .programa-sd-card-foto { border-top: 4px solid var(--pg-blue); }
+.programa-sd-card.type-conversatorio .programa-sd-card-foto { border-top: 4px solid var(--pg-purple); }
+
+.programa-sd-iniciales {
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--pg-text-muted);
+}
+
+.programa-sd-foto {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.programa-sd-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(247, 185, 15, 0.95);
+  color: #fff;
+  border: 2px solid #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-8deg);
+  line-height: 1;
+  font-family: 'Poppins', sans-serif;
+  z-index: 1;
+}
+
+.programa-sd-badge .n { font-size: 13px; font-weight: 800; }
+.programa-sd-badge .t { font-size: 6.5px; font-weight: 700; text-transform: uppercase; }
+
+.programa-sd-card-info {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.programa-sd-nombre {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--pg-text);
+  line-height: 1.2;
+}
+
+.programa-sd-rol {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--pg-text-muted);
+}
+
+.programa-sd-horario {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--pg-accent);
+  margin-top: 2px;
+}
+
+.programa-sd-titulo {
+  font-size: 0.8rem;
+  color: var(--pg-text-muted);
+  line-height: 1.3;
+}
+
+.programa-sd-desc {
+  font-size: 0.75rem;
+  color: var(--pg-text-muted);
+  line-height: 1.35;
+}
+
+/* ── Exportación PDF (html2canvas) ────────────────────────────────── */
+
+.programa-pdf-holder {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.programa-pdf-area {
+  width: 794px;
+  background: #ffffff;
+  color: #1e293b;
+  font-family: 'Roboto', system-ui, sans-serif;
+}
+
+body.pdf-export .programa-pdf-holder {
+  position: relative;
+  width: auto;
+  height: auto;
+  overflow: visible;
+}
+
+body.pdf-export .encabezado,
+body.pdf-export .programa-public-tabs,
+body.pdf-export #vistaInscripcion,
+body.pdf-export .programa-controls,
+body.pdf-export .programa-tabs-sticky,
+body.pdf-export .programa-main,
+body.pdf-export .programa-sd-seccion,
+body.pdf-export .pie {
+  display: none !important;
+}
+
+.programa-pdf-page {
+  width: 794px;
+  min-height: 1123px;
+  box-sizing: border-box;
+  padding: 18px 22px 14px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.programa-pdf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 3px solid #ff7043;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.programa-pdf-header-center {
+  flex: 1;
+  text-align: center;
+}
+
+.programa-pdf-logo {
+  width: 150px;
+  height: auto;
+}
+
+.programa-pdf-mascot {
+  width: 76px;
+  height: auto;
+}
+
+.programa-pdf-title {
+  font-family: 'Poppins', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.programa-pdf-subtitle {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.programa-pdf-day-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+  background: #f1f5f9;
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+.programa-pdf-day-chip {
+  background: #4ca2c5;
+  color: #fff;
+  padding: 2px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.programa-pdf-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 10px;
+  flex-grow: 1;
+  align-content: stretch;
+  min-height: 0;
+  padding-top: 6px;
+}
+
+.programa-pdf-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-top: 3px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.programa-pdf-card.type-taller { border-top-color: #f8a11c; }
+.programa-pdf-card.type-ponencia { border-top-color: #4ca2c5; }
+.programa-pdf-card.type-conversatorio { border-top-color: #5b9846; }
+
+.programa-pdf-foto-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.programa-pdf-foto {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  object-fit: cover;
+  object-position: center;
+}
+
+.programa-pdf-no-foto {
+  font-family: 'Poppins', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.programa-pdf-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(247, 185, 15, 0.95);
+  color: #fff;
+  border: 2px solid #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-8deg);
+  line-height: 1;
+  font-family: 'Poppins', sans-serif;
+  z-index: 1;
+}
+
+.programa-pdf-badge .n { font-size: 12px; font-weight: 800; }
+.programa-pdf-badge .t { font-size: 6px; font-weight: 700; text-transform: uppercase; }
+
+.programa-pdf-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.programa-pdf-name {
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #1e293b;
+}
+
+.programa-pdf-role {
+  font-size: 9.5px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+}
+
+.programa-pdf-titulo {
+  font-size: 10px;
+  color: #334155;
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+.programa-pdf-horario {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff7043;
+  margin-top: 4px;
+}
+
+.programa-pdf-leyenda {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.leyenda-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.leyenda-color {
+  width: 20px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.leyenda-color.color-taller { background: #f8a11c; }
+.leyenda-color.color-ponencia { background: #4ca2c5; }
+.leyenda-color.color-conversatorio { background: #5b9846; }
+
+/* ── Impresión ────────────────────────────────────────────────────── */
+
+@page {
+  size: A4;
+  margin: 8mm;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .encabezado,
+  .programa-public-tabs,
+  #vistaInscripcion,
+  .programa-controls,
+  .programa-tabs-sticky,
+  .programa-main,
+  .programa-sd-seccion,
+  .pie {
+    display: none !important;
+  }
+
+  .programa-pdf-holder {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .programa-pdf-area {
+    width: 100% !important;
+  }
+
+  .programa-pdf-page {
+    width: 100% !important;
+    min-height: 280mm;
+    height: 280mm;
+    break-after: page;
+    page-break-after: always;
+    page-break-inside: avoid;
+  }
+
+  .programa-pdf-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
