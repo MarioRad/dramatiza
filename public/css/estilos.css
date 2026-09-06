@@ -404,6 +404,16 @@ td {
   overflow-wrap: anywhere;
 }
 
+#tablaEncuentroPersonas {
+  table-layout: fixed;
+  font-size: 0.82rem;
+}
+
+#tablaEncuentroPersonas th,
+#tablaEncuentroPersonas td {
+  padding: 0.45rem 0.5rem;
+}
+
 .celda-dni { white-space: nowrap; }
 
 .acciones-fila {

@@ -13,7 +13,7 @@ function generarCodigo() {
 function formatoFecha(fechaStr) {
   const partes = String(fechaStr || '').trim().split('-');
   if (partes.length < 3) return fechaStr || '';
-  return `${partes[2].padStart(2, '0')}/${partes[1].padStart(2, '0')}/${partes[0].slice(-2)}`;
+  return `${partes[2].padStart(2, '0')}/${partes[1].padStart(2, '0')}/${partes[0].length === 2 ? `20${partes[0]}` : partes[0]}`;
 }
 
 function construirPayload({ id, dni, nombre, apellido, email, sesiones }) {

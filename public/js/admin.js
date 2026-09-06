@@ -145,20 +145,20 @@ function formatearFecha(valor) {
   if (!valor) return '';
   const iso = String(valor).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) {
-    return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1].slice(-2)}`;
+    return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1]}`;
   }
   const partes = String(valor).split(/[/\-]/);
   if (partes.length >= 3) {
     const d = partes[0].padStart(2, '0');
     const m = partes[1].padStart(2, '0');
-    const y = partes[2].slice(-2);
+    const y = partes[2].length === 2 ? `20${partes[2]}` : partes[2];
     return `${d}/${m}/${y}`;
   }
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return valor;
   const dd = String(fecha.getDate()).padStart(2, '0');
   const mm = String(fecha.getMonth() + 1).padStart(2, '0');
-  const yy = String(fecha.getFullYear()).slice(-2);
+  const yy = String(fecha.getFullYear());
   return `${dd}/${mm}/${yy}`;
 }
 
@@ -538,12 +538,13 @@ function formatearFechaNacimiento(valor) {
   const mIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (mIso) {
     const [, y, m, d] = mIso;
-    return `${pad(d)}-${pad(m)}-${y.slice(-2)}`;
+    return `${pad(d)}/${pad(m)}/${y}`;
   }
   const mFecha = texto.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (mFecha) {
     const [, d, m, y] = mFecha;
-    return `${pad(d)}-${pad(m)}-${y.slice(-2)}`;
+    const anio = y.length === 2 ? `20${y}` : y;
+    return `${pad(d)}/${pad(m)}/${anio}`;
   }
   return texto;
 }
@@ -1964,7 +1965,7 @@ function formatearFechaCompleta(valor) {
   const d = new Date(valor);
   if (Number.isNaN(d.getTime())) return valor || '';
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 async function cargarNotificaciones() {

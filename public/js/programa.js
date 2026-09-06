@@ -31,7 +31,7 @@ const ProgramaUI = (() => {
     if (partes.length < 3) return fechaStr;
     const d = partes[2].padStart(2, '0');
     const m = partes[1].padStart(2, '0');
-    const a = partes[0].slice(-2);
+    const a = partes[0].length === 2 ? `20${partes[0]}` : partes[0];
     return `${d}/${m}/${a}`;
   }
 

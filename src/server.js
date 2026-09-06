@@ -590,7 +590,7 @@ app.post('/api/inscripciones/finalizar', async (req, res, next) => {
 
     const inscripciones = await db.listarInscripcionesPorDni(dni);
     if (inscripciones.length === 0) {
-      throw new db.HttpError(404, 'No se encontraron inscripciones para este DNI.');
+      throw new db.HttpError(404, 'No se encontraron inscripciones para este DNI. ');
     }
 
     const primera = inscripciones[0];
@@ -1396,7 +1396,6 @@ app.delete('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripci
 app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     const personas = await db.listarEncuentro();
-    await db.asignarPlanesAutomaticos(personas);
     res.json({ total: personas.length, personas });
   } catch (e) {
     next(e);
