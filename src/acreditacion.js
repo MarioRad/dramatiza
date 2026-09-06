@@ -82,87 +82,70 @@ async function generarPdf(payload) {
   const datos = parsearPayload(payload);
   if (!datos) throw new Error('Payload de acreditación inválido.');
 
-
   const qrBuffer = await generarPng(payload, { size: 420 });
-  const doc = new PDFDocument({ size: 'A5', layout: 'landscape', margin: 30 });
+  const W = 311.81; // 110 mm
+  const H = 198.43; // 70 mm
+  const doc = new PDFDocument({ size: [W, H], margin: 0 });
   const buffers = [];
   doc.on('data', (c) => buffers.push(c));
   const terminado = new Promise((resolve) => doc.on('end', resolve));
 
   const colorPrimario = '#323136';
+  const colorTexto = '#0f172a';
+  const colorMutado = '#334155';
   const logo = resolverImagen('ENCUENTRO_LOGO_IMG', 'public/logo.png');
   const personaje = resolverImagen('ENCUENTRO_PERSONAJE_IMG', 'public/personaje.png');
 
-  const anchoPagina = doc.page.width;
-
-  const MARGIN = 30;
-
-  //doc.rect(0, 0, doc.page.width, HEADER_HEIGHT).fill(colorPrimario);
-  doc
-  .roundedRect(10, 10, doc.page.width - 20, 80, 10).fill(colorPrimario);
-
-
+  doc.rect(0, 0, W, 46).fill(colorPrimario);
   if (logo) {
-    doc.image(logo, MARGIN, 30, { height: 48 });
+    doc.image(logo, 8, 8, { fit: [150, 30] });
   }
-  
-
   if (personaje) {
-    const anchoP = 90;
-    doc.image(personaje, anchoPagina - MARGIN - anchoP, 30, { width: anchoP });
-  } 
-let y = 105;
-  doc.font('Helvetica-Bold').fontSize(16).fillColor(colorPrimario).text('ACREDITACIÓN AL ENCUENTRO', 30, y, {
-    align: 'center',
-    width: anchoPagina - 60,
-  });
-  y += 20;
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(colorPrimario).text('Encuentro Nacional Dramatiza Salta 2026', 30, y, {
-    align: 'center',
-    width: anchoPagina - 60,
-  });
-  y += 20;
-  doc.font('Helvetica').fontSize(11).fillColor('#334155').text(`Código único: ${datos.id}`, 30, y, {
-    align: 'center',
-    width: anchoPagina - 60,
-  });
-
-  const inicioX = 30;
-  y = 170;
-  doc.font('Helvetica-Bold').fontSize(12).fillColor('#0f172a');
-  doc.text(`Apellido y Nombre: ${datos.apellido || ''} ${datos.nombre || ''}`.trim(), inicioX, y);
-  y += 18;
-  doc.font('Helvetica').fontSize(11).fillColor('#334155');
-  doc.text(`DNI: ${datos.dni || ''}`, inicioX, y);
-  y += 16;
-  if (datos.email) {
-    doc.text(`Correo: ${datos.email}`, inicioX, y);
-    y += 16;
+    doc.image(personaje, W - 8 - 60, 2, { fit: [60, 42] });
   }
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#ffffff')
+    .text('ACREDITACIÓN AL ENCUENTRO', 10, 11, { align: 'center', width: W - 20 });
+  doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#ffffff')
+    .text('Encuentro Nacional Dramatiza Salta 2026', 10, 24, { align: 'center', width: W - 20 });
 
+  const anchoTexto = 198;
+  let y = 52;
+  const lineaNombre = `Apellido y Nombre: ${datos.apellido || ''} ${datos.nombre || ''}`.trim();
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(colorTexto)
+    .text(lineaNombre, 10, y, { width: anchoTexto });
+  y += doc.heightOfString(lineaNombre, { width: anchoTexto }) + 3;
+
+  doc.font('Helvetica').fontSize(8).fillColor(colorMutado);
+  doc.text(`DNI: ${datos.dni || ''}`, 10, y);
+  y += 11;
+  if (datos.email) {
+    doc.text(`Correo: ${datos.email}`, 10, y);
+    y += 11;
+  }
+  doc.text(`Código único: ${datos.id}`, 10, y);
+  y += 12;
+
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(colorPrimario);
+  doc.text('Talleres:', 10, y);
   y += 10;
-  doc.font('Helvetica-Bold').fontSize(11).fillColor(colorPrimario);
-  doc.text('Talleres:', inicioX, y);
-  y += 16;
-  doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
+  doc.font('Helvetica').fontSize(7).fillColor(colorTexto);
   const sesiones = datos.sesiones || [];
   if (sesiones.length === 0) {
-    doc.text('—', inicioX, y);
-    y += 16;
-  }
-  for (const s of sesiones) {
-    const partes = [`${s.taller || 'Taller'}`];
-    if (s.fecha) partes.push(`Fecha: ${formatoFecha(s.fecha)}`);
-    if (s.hora) partes.push(`Hora: ${s.hora}`);
-    if (s.lugar) partes.push(`Lugar: ${s.lugar}`);
-    const texto = partes.join(' · ');
-    doc.text(texto, inicioX, y, { width: 270 });
-    y += 42;
+    doc.text('—', 10, y, { width: anchoTexto });
+  } else {
+    for (const s of sesiones) {
+      const partes = [s.taller || 'Taller'];
+      if (s.fecha) partes.push(`Fecha: ${formatoFecha(s.fecha)}`);
+      if (s.hora) partes.push(`Hora: ${s.hora}`);
+      if (s.lugar) partes.push(`Lugar: ${s.lugar}`);
+      const texto = partes.join(' · ');
+      doc.text(texto, 10, y, { width: anchoTexto });
+      y += doc.heightOfString(texto, { width: anchoTexto }) + 3;
+    }
   }
 
-  const qrX = anchoPagina - 30 - 250;
-  const qrY = 165;
-  doc.image(qrBuffer, qrX, qrY, { width: 250, height: 250 });
+  const qrTam = 70;
+  doc.image(qrBuffer, W - 10 - qrTam, 52, { width: qrTam, height: qrTam });
 
   doc.end();
   await terminado;
