@@ -8,7 +8,7 @@ const PDFDocument = require('pdfkit');
 const logs = require('./logs');
 
 function generarCodigo() {
-  return 'ENC-' + crypto.randomBytes(5).toString('hex').toUpperCase();
+  return 'DSLA-' + crypto.randomBytes(5).toString('hex').toUpperCase();
 }
 
 function formatoFecha(fechaStr) {
@@ -98,14 +98,14 @@ async function generarPdf(payload) {
 
   doc.rect(0, 0, W, 46).fill(colorPrimario);
   if (logo) {
-    doc.image(logo, 8, 8, { fit: [150, 30] });
+    doc.image(logo, 8, 8, { fit: [120, 30] });
   }
   if (personaje) {
     doc.image(personaje, W - 8 - 60, 2, { fit: [60, 42] });
   }
-  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#ffffff')
-    .text('ACREDITACIÓN AL ENCUENTRO', 10, 11, { align: 'center', width: W - 20 });
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#ffffff')
+    .text('ACREDITACIÓN AL ENCUENTRO', 10, 11, { align: 'center', width: W - 20 });
+  doc.font('Helvetica-Bold').fontSize(4.5).fillColor('#ffffff')
     .text('Encuentro Nacional Dramatiza Salta 2026', 10, 24, { align: 'center', width: W - 20 });
 
   const anchoTexto = 198;
@@ -115,7 +115,7 @@ async function generarPdf(payload) {
     .text(lineaNombre, 10, y, { width: anchoTexto });
   y += doc.heightOfString(lineaNombre, { width: anchoTexto }) + 3;
 
-  doc.font('Helvetica').fontSize(8).fillColor(colorMutado);
+  doc.font('Helvetica').fontSize(6).fillColor(colorMutado);
   doc.text(`DNI: ${datos.dni || ''}`, 10, y);
   y += 11;
   if (datos.email) {
@@ -125,7 +125,7 @@ async function generarPdf(payload) {
   doc.text(`Código único: ${datos.id}`, 10, y);
   y += 12;
 
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(colorPrimario);
+  doc.font('Helvetica-Bold').fontSize(6).fillColor(colorPrimario);
   doc.text('Talleres:', 10, y);
   y += 10;
   doc.font('Helvetica').fontSize(7).fillColor(colorTexto);
