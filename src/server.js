@@ -1581,6 +1581,11 @@ const parseDiaValido = (v, def) => {
   return Number.isFinite(n) && n > 0 ? n : def;
 };
 
+const parseDiaFecha = (v, def) => {
+  const s = String(v ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : def;
+};
+
 app.get('/api/admin/ponentes', requireAuth, async (req, res, next) => {
   try {
     const ponentes = await db.listarPonentes();
@@ -1697,6 +1702,73 @@ app.post('/api/admin/ponentes/dias', requireAuth, async (req, res, next) => {
     const fechas = Array.isArray(req.body) ? req.body : [];
     await db.guardarDiasPonentes(fechas);
     res.json(await db.listarDiasPonentes());
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── Programa (admin CRUD bloques) ──────────────────────────────────────
+
+app.get('/api/admin/programa', requireAuth, async (req, res, next) => {
+  try {
+    const [bloques, asistentes, capacidadRaw] = await Promise.all([
+      db.listarPrograma(),
+      db.contarAsistentesUnicos(),
+      db.obtenerConfig('capacidad_locacion'),
+    ]);
+    const capacidad = Math.max(0, Number.parseInt(capacidadRaw, 10) || 0);
+    res.json({ bloques, capacidad, asistentes });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const parseBloquePayload = (body, existente = {}) => ({
+  dia: parseDiaFecha(body.dia, existente.dia || ''),
+  hora_inicio: String(body.hora_inicio ?? existente.hora_inicio ?? '').trim(),
+  hora_fin: String(body.hora_fin ?? existente.hora_fin ?? '').trim(),
+  tipo: String(body.tipo ?? existente.tipo ?? 'general').trim(),
+  titulo: String(body.titulo ?? existente.titulo ?? '').trim(),
+  descripcion: String(body.descripcion ?? existente.descripcion ?? '').trim(),
+  icono: String(body.icono ?? existente.icono ?? '').trim(),
+  orden: Number(body.orden) || existente.orden || 0,
+});
+
+app.post('/api/admin/programa/bloques', requireAuth, async (req, res, next) => {
+  try {
+    const body = parseBloquePayload(req.body || {});
+    if (!body.titulo) throw new db.HttpError(400, 'El título es obligatorio.');
+    const id = await db.crearBloque(body);
+    await db.registrarEvento('config_modificada', `Bloque de programa creado: "${body.titulo}"`, req.sesion.usuario);
+    res.status(201).json({ ok: true, id });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
+    const existente = await db.obtenerBloque(id);
+    if (!existente) throw new db.HttpError(404, 'Bloque no encontrado.');
+    const body = parseBloquePayload(req.body || {}, existente);
+    if (!body.titulo) throw new db.HttpError(400, 'El título es obligatorio.');
+    await db.actualizarBloque(id, { ...body, datos: existente.datos });
+    await db.registrarEvento('config_modificada', `Bloque de programa actualizado: "${body.titulo}"`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
+    await db.eliminarBloque(id);
+    await db.registrarEvento('config_modificada', `Bloque de programa eliminado (#${id})`, req.sesion.usuario);
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

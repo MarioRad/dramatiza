@@ -1114,3 +1114,70 @@ body.pdf-export .pie {
     page-break-inside: avoid;
   }
 }
+
+/* ── PDF del Programa del Encuentro (cronograma, 3 días en 1 hoja) ─ */
+
+.programa-pdf-page-programa {
+  padding: 14px 22px;
+  gap: 0;
+}
+
+.programa-pdf-dias {
+  margin-top: 8px;
+}
+
+.programa-pdf-dia {
+  margin-bottom: 12px;
+}
+
+.programa-pdf-dia-titulo {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 2px solid #ff7043;
+  padding-bottom: 3px;
+  margin-bottom: 5px;
+}
+
+.programa-pdf-bloque {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 9.5px;
+  line-height: 1.35;
+  padding: 1.5px 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.programa-pdf-bloque-hora {
+  flex: 0 0 62px;
+  font-weight: 700;
+  color: #d84315;
+  font-size: 9px;
+  text-align: right;
+}
+
+.programa-pdf-bloque-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.programa-pdf-bloque-titulo {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.programa-pdf-bloque-sub {
+  color: #475569;
+  font-weight: 400;
+  font-size: 8.5px;
+}
+
+.programa-pdf-bloque-sin {
+  color: #94a3b8;
+  font-style: italic;
+  padding-left: 70px;
+}

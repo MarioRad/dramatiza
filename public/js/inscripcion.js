@@ -53,10 +53,11 @@ function buscarConflictoCliente(seleccionados) {
   return null;
 }
 
-/* ── Tabs públicos (Inscripción / Programa) ─────────────────────── */
+/* ── Tabs públicos (Inscripción / Programa / Disertantes) ────────── */
 (function () {
   const vistaInscripcion = document.getElementById('vistaInscripcion');
   const vistaPrograma = document.getElementById('vistaPrograma');
+  const vistaDisertantes = document.getElementById('vistaDisertantes');
   const tabs = document.querySelectorAll('.programa-public-tab');
   let programaCargado = false;
 
@@ -64,8 +65,9 @@ function buscarConflictoCliente(seleccionados) {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.vista === vista));
     vistaInscripcion.hidden = vista !== 'inscripcion';
     vistaPrograma.hidden = vista !== 'programa';
-    if (vista === 'programa' && !programaCargado) {
-      ProgramaUI.init({ container: '#vistaPrograma', mode: 'public' });
+    vistaDisertantes.hidden = vista !== 'disertantes';
+    if ((vista === 'programa' || vista === 'disertantes') && !programaCargado) {
+      ProgramaUI.init({ container: '#vistaPrograma', disertantesContainer: '#vistaDisertantes', mode: 'public' });
       ProgramaUI.cargar().then(() => { ProgramaUI.render(); programaCargado = true; });
     }
   }

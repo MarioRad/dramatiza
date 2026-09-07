@@ -6,6 +6,7 @@
   <title>Panel de Administración</title>
   <link rel="stylesheet" href="/css/estilos.css">
   <link rel="stylesheet" href="/css/admin-ponentes.css">
+  <link rel="stylesheet" href="/programa.css">
 </head>
 <body>
   <header class="encabezado">
@@ -47,6 +48,7 @@
         <nav id="tabsPanel" class="tabs" aria-label="Secciones">
           <button type="button" class="tab" data-vista="inscripciones">Inscripciones</button>
           <button type="button" class="tab" data-vista="ponentes">Ponentes</button>
+          <button type="button" class="tab" data-vista="programa">Programa del Encuentro</button>
           <button type="button" class="tab" data-vista="encuentro">Importar listado</button>
           <button type="button" class="tab" data-vista="pagos">Pagos y cuotas</button>
           <button type="button" class="tab" data-vista="notificaciones">Notificaciones</button>
@@ -422,6 +424,10 @@
         </div>
       </div>
 
+      <div id="vistaPrograma" class="tab-contenido" hidden>
+        <div id="programaAdminApp"></div>
+      </div>
+
       <div id="vistaPermisos" class="tab-contenido" hidden>
         <h3>Permisos por usuario</h3>
         <p class="ayuda">Los permisos de los operadores definen qué módulos puede usar cada usuario. Los administradores siempre tienen acceso completo.</p>
@@ -445,6 +451,63 @@
       </div>
     </div>
   </main>
+
+  <div id="modalBloque" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="tituloModalBloque">
+      <h3 id="tituloModalBloque">Nuevo bloque</h3>
+      <div id="mensajeBloque" class="mensaje" role="alert"></div>
+      <form id="formBloque" novalidate>
+        <input type="hidden" id="bloqueId">
+        <div class="campos">
+          <div class="campo">
+            <label for="bloqueDia">Día (fecha del evento)</label>
+            <input type="date" id="bloqueDia" required>
+            <p class="ayuda-campo">Usá las fechas del encuentro (09/10, 10/10, 11/10/2026).</p>
+          </div>
+          <div class="campo">
+            <label for="bloqueHoraInicio">Hora inicio</label>
+            <input type="time" id="bloqueHoraInicio">
+          </div>
+          <div class="campo">
+            <label for="bloqueHoraFin">Hora fin</label>
+            <input type="time" id="bloqueHoraFin">
+          </div>
+          <div class="campo">
+            <label for="bloqueTipo">Tipo</label>
+            <select id="bloqueTipo">
+              <option value="general">General</option>
+              <option value="break">Break / Acreditación</option>
+              <option value="inauguracion">Apertura</option>
+              <option value="ponencia">Ponencia</option>
+              <option value="conversatorio">Conversatorio</option>
+              <option value="obra">Obra / Función</option>
+              <option value="talleres">Talleres</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="bloqueTitulo">Título</label>
+            <input type="text" id="bloqueTitulo" required maxlength="200">
+          </div>
+          <div class="campo">
+            <label for="bloqueDescripcion">Descripción</label>
+            <textarea id="bloqueDescripcion" rows="3" maxlength="2000"></textarea>
+          </div>
+          <div class="campo">
+            <label for="bloqueIcono">Ícono (emoji, opcional)</label>
+            <input type="text" id="bloqueIcono" maxlength="20">
+          </div>
+          <div class="campo">
+            <label for="bloqueOrden">Orden</label>
+            <input type="number" id="bloqueOrden" min="0" step="1" value="0">
+          </div>
+        </div>
+        <div class="modal-acciones">
+          <button type="button" class="boton boton-secundario" id="cancelarModalBloque">Cancelar</button>
+          <button type="submit" class="boton">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="modalEditarInscripcion" class="modal" hidden aria-hidden="true">
     <div class="modal-contenido modal-contenido-edicion" role="dialog" aria-modal="true" aria-labelledby="modalEditarTitulo">
@@ -594,7 +657,7 @@
       <h3 id="modalQrTitulo">Acreditación</h3>
       <p id="qrInfo" class="ayuda"></p>
       <div style="text-align:center;">
-        <img id="qrImagen" alt="Código QR" width="300" height="300" style="width:300px;height:300px;image-rendering:pixelated;border:1px solid var(--color-borde);border-radius:8px;">
+        <img id="qrImagen" alt="Código QR" width="220" height="220" style="width:220px;height:220px;image-rendering:pixelated;border:1px solid var(--color-borde);border-radius:8px;">
         <p class="ayuda-campo">Mostrá este código al ingresar para confirmar la asistencia.</p>
       </div>
       <div class="modal-acciones">
@@ -682,6 +745,7 @@
   </div>
 
   <script src="/js/darkmode.js"></script>
-  <script src="/js/admin.js?v=7"></script>
+  <script src="/js/programa.js?v=3"></script>
+  <script src="/js/admin.js?v=9"></script>
 </body>
 </html>

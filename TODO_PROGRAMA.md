@@ -6,12 +6,14 @@
 - [x] DB: Tablas `programa_bloques`, `configuracion_evento` + funciones + seed (src/db.js)
 - [x] API: Rutas programa, config, middleware permisos (src/server.js)
 - [x] Crear `public/programa.css`: estilos light/dark del programa
+- [x] Crear `public/js/programa.js`: renderizado read-only + modo admin CRUD
+- [x] Tabs públicos Inscripción/Programa/Disertantes (public/index.html, inscripcion.js)
+- [x] Pestaña admin "Programa del Encuentro" + modal CRUD bloques (admin.html, admin.js)
+- [x] Sección Disertantes movida a su propia pestaña pública (con PDF/imprimir en ambas)
 
 ### Pendiente
-- [ ] Crear `public/js/programa.js`: renderizado read-only + modo admin CRUD
-- [ ] Modificar `public/index.html` + `public/js/inscripcion.js`: tabs Inscripción/Programa
-- [ ] Modificar `public/admin.html` + `public/js/admin.js`: pestañas Programa + Permisos + CRUD bloques
-- [ ] Modificar `public/css/estilos.css`: estilos adicionales para nuevas pestañas
+- [ ] Verificar visual en navegador (tabs, acordeón, PDF/imprimir)
+- [ ] `public/css/estilos.css`: estilos adicionales si hacen falta
 
 ## Resumen del sistema
 
@@ -53,9 +55,13 @@
 
 ### Estructura de archivos
 - `public/programa.css` — CREADO — estilos light/dark compartidos
-- `public/js/programa.js` — PENDIENTE — renderizado read-only + admin CRUD
-- `public/index.html` — PENDIENTE — tabs Inscripción/Programa
-- `public/js/inscripcion.js` — PENDIENTE — lógica tabs
-- `public/admin.html` — PENDIENTE — pestañas Programa + Permisos
-- `public/js/admin.js` — PENDIENTE — CRUD bloques + gestión permisos
+- `public/js/programa.js` — CREADO — renderizado read-only + admin CRUD
+- `public/index.html` — MODIFICADO — tabs Inscripción/Programa/Disertantes
+- `public/js/inscripcion.js` — MODIFICADO — lógica tabs
+- `public/admin.html` — MODIFICADO — pestañas Programa + modal bloque
+- `public/js/admin.js` — MODIFICADO — CRUD bloques
 - `public/css/estilos.css` — PENDIENTE — estilos adicionales
+
+## Nota: campo `dia` en programa_bloques
+- `programa_bloques.dia` es `VARCHAR(10)` y guarda fechas completas (`2026-10-09`), NO números de día.
+- El modal admin usa `<input type="date">` y la API valida con `parseDiaFecha` (`^\d{4}-\d{2}-\d{2}$`).

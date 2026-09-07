@@ -118,7 +118,7 @@ async function generarPdf(payload) {
 
   const qrBuffer = await generarPng(payload, { size: 512 });
   const rutaPlantilla = resolverImagen('CREDENCIAL_TEMPLATE_PDF', 'public/credencial_acreditacion.pdf');
-  if (!rutaPlantilla) throw new Error('No se encontró la plantilla credencial_acreditacion.pdf.');
+  if (!rutaPlantilla) throw new Error('No se encontró la plantilla credencial');
 
   const pdf = await PDFDocument.load(fs.readFileSync(rutaPlantilla));
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -195,30 +195,87 @@ async function generarPdf(payload) {
   const TAL = {
     x: 20,
     maxWidth: 205.512 - 24,
-    lineGap: 9,
+    lineGap: 6,
+    sizeNombre: 4,
+    sizeDetalle: 4,
+    gapDetalle: 5,
   };
-  let y = 98.43;
+
+  const REG_SUFIJO_PARTE = /\s*\(\s*\d+\s*[º°]\s*parte\s*\)\s*$/gi;
+
+  function baseNombre(tallerNombre) {
+    return String(tallerNombre || '').replace(REG_SUFIJO_PARTE, '').trim();
+  }
+
+  const gruposSesiones = [];
+  const indiceGrupos = new Map();
   for (const s of datos.sesiones || []) {
-    const nombre = s.taller || s.nombre || 'Taller';
-    const lineasNombre = divisionEnLineas(`• ${nombre}`, fontBold, 6, TAL.maxWidth);
+    const base = baseNombre(s.taller);
+    if (!indiceGrupos.has(base)) {
+      const g = {
+        nombre: base,
+        esMultiparte: REG_SUFIJO_PARTE.test(String(s.taller || '')),
+        items: [],
+      };
+      indiceGrupos.set(base, g);
+      gruposSesiones.push(g);
+    }
+    indiceGrupos.get(base).items.push(s);
+  }
+  gruposSesiones.forEach((g) => {
+    g.esMultiparte = g.items.some((s) => REG_SUFIJO_PARTE.test(String(s.taller || '')));
+    g.items.sort(
+      (a, b) => String(a.fecha || '').localeCompare(String(b.fecha || ''))
+        || String(a.hora || '').localeCompare(String(b.hora || ''))
+    );
+  });
+
+  let y = 98.43;
+  for (const g of gruposSesiones) {
+    const items = g.items;
+    const esMultiparte = g.esMultiparte && items.length > 1;
+    const nombre = g.nombre + (esMultiparte ? ' (1º y 2º parte)' : '');
+    const lineasNombre = divisionEnLineas(`• ${nombre}`, fontBold, TAL.sizeNombre, TAL.maxWidth);
     for (const ln of lineasNombre) {
       if (y < 16) break;
-      page.drawText(ln, { x: TAL.x, y, size: 6, font: fontBold, color: colorOscuro });
+      page.drawText(ln, { x: TAL.x, y, size: TAL.sizeNombre, font: fontBold, color: colorOscuro });
       y -= TAL.lineGap;
     }
-    const detalle = [
-      s.fecha ? `Fecha: ${formatoFecha(s.fecha)}` : '',
-      s.hora ? `Hora: ${s.hora}` : '',
-      s.lugar ? `Lugar: ${s.lugar}` : '',
-    ]
-      .filter(Boolean)
-      .join('  ·  ');
+
+    let detalle;
+    if (esMultiparte) {
+      const jornadas = items.map((s, i) => {
+        const partes = [
+          s.fecha ? `Fecha: ${formatoFecha(s.fecha)}` : '',
+          s.hora ? `Hora: ${s.hora}` : '',
+          s.lugar ? `Lugar: ${s.lugar}` : '',
+        ].filter(Boolean).join(' · ');
+        return `Parte ${i + 1}º: ${partes}`;
+      });
+      detalle = jornadas.join('   ');
+    } else {
+      const s = items[0];
+      detalle = [
+        s.fecha ? `Fecha: ${formatoFecha(s.fecha)}` : '',
+        s.hora ? `Hora: ${s.hora}` : '',
+        s.lugar ? `Lugar: ${s.lugar}` : '',
+      ]
+        .filter(Boolean)
+        .join('  ·  ');
+    }
+
     if (detalle) {
-      const lineasDetalle = divisionEnLineas(detalle, font, 6, TAL.maxWidth);
+      const lineasDetalle = divisionEnLineas(detalle, font, TAL.sizeDetalle, TAL.maxWidth);
       for (const ld of lineasDetalle) {
         if (y < 16) break;
-        page.drawText(ld, { x: TAL.x + 8, y, size: 6, font, color: colorMutado });
-        y -= TAL.lineGap;
+        page.drawText(ld, {
+          x: TAL.x + 8,
+          y,
+          size: TAL.sizeDetalle,
+          font,
+          color: colorMutado,
+        });
+        y -= TAL.gapDetalle;
       }
     }
   }

@@ -23,20 +23,21 @@
   <nav class="programa-public-tabs">
     <button class="programa-public-tab active" data-vista="inscripcion">Inscripción a Talleres</button>
     <button class="programa-public-tab" data-vista="programa">Programa del Encuentro</button>
+    <button class="programa-public-tab" data-vista="disertantes">Disertantes y Talleristas</button>
   </nav>
 
   <div id="vistaInscripcion">
   <main class="contenedor">
     <section class="tarjeta">
       <h2>Formulario de inscripción a talleres</h2>
-      <p class="ayuda">Ingresa tu DNI, chequea tus datos y elegí los talleres en los que participar </p>
+      <p class="ayuda">Por favor, para continuar ingresa tu DNI, chequea tus datos y elegí los talleres en los que participar </p>
 
       <div id="mensaje" class="mensaje" role="alert"></div>
 
       <form id="formInscripcion" novalidate>
         <div id="pasoDni">
           <div class="campo">
-            <label for="dni">Número de documento</label>
+            <label for="dni">Número de documento sin puntos</label>
             <input type="text" id="dni" name="dni" required inputmode="numeric" pattern="\d{7,8}" maxlength="8" placeholder="12345678" autocomplete="off">
             <p class="ayuda-campo">Primero ingresá tu DNI para verificar si estás inscripto al encuentro.</p>
           </div>
@@ -111,6 +112,8 @@
 
   <div id="vistaPrograma" class="programa-container" hidden></div>
 
+  <div id="vistaDisertantes" class="programa-container" hidden></div>
+
   <div id="modalEncuentro" class="modal" hidden aria-hidden="true">
     <div class="modal-contenido modal-aviso" role="dialog" aria-modal="true" aria-labelledby="modalEncuentroTitulo">
       <div class="modal-cuerpo">
@@ -182,7 +185,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/js/darkmode.js"></script>
-  <script src="/js/programa.js"></script>
+  <script src="/js/programa.js?v=3"></script>
   <script src="/js/inscripcion.js"></script>
 </body>
 </html>

@@ -31,6 +31,7 @@ const ETIQUETAS_ALIMENTACION = {
 const TITULOS_VISTA = {
   inscripciones: 'Inscripciones',
   ponentes: 'Ponentes',
+  programa: 'Programa del Encuentro',
   encuentro: 'Importar listado',
   pagos: 'Gestión de pagos y cuotas',
   notificaciones: 'Notificaciones a la app móvil',
@@ -198,6 +199,9 @@ function cambiarVista(vista) {
   el('tituloPanel').textContent = TITULOS_VISTA[vista] || 'Panel';
   if (vista === 'ponentes') {
     cargarPonentes();
+  }
+  if (vista === 'programa') {
+    cargarProgramaAdmin();
   }
   if (vista === 'acreditaciones') {
     cargarAcreditaciones();
@@ -1594,6 +1598,118 @@ async function eliminarPonente(id) {
     await cargarPonentes();
   }
 }
+
+// ── Programa del Encuentro (bloques) ────────────────────────────────
+const appPrograma = el('programaAdminApp');
+const modalBloque = el('modalBloque');
+const formBloque = el('formBloque');
+const mensajeBloque = el('mensajeBloque');
+let bloquesPrograma = [];
+
+async function cargarProgramaAdmin() {
+  if (!appPrograma || !window.ProgramaUI) return;
+  ProgramaUI.init({
+    container: appPrograma,
+    mode: 'admin',
+    onAdd: () => abrirModalBloque(null),
+    onEdit: (id) => abrirModalBloque(id),
+    onDelete: async (id) => {
+      const b = bloquesPrograma.find((x) => Number(x.id) === Number(id));
+      if (!b) return;
+      if (!window.confirm(`¿Eliminar el bloque "${b.titulo}"? Esta acción no se puede deshacer.`)) return;
+      const res = await api(`/api/admin/programa/bloques/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        mostrarMensaje(mensajePanel, res.data.error || 'No se pudo eliminar el bloque.', 'error');
+      } else {
+        mostrarMensaje(mensajePanel, 'Bloque eliminado.', 'ok');
+        await recargarProgramaAdmin();
+      }
+    },
+  });
+  await recargarProgramaAdmin();
+}
+
+async function recargarProgramaAdmin() {
+  const ok = await ProgramaUI.cargar();
+  if (!ok) {
+    mostrarMensaje(mensajeBloque, 'No se pudo cargar el programa.', 'error');
+    return;
+  }
+  bloquesPrograma = ProgramaUI.getBloques() || [];
+  ProgramaUI.render();
+}
+
+function abrirModalBloque(id) {
+  formBloque.reset();
+  el('bloqueId').value = '';
+  el('bloqueDia').value = '';
+  el('bloqueHoraInicio').value = '';
+  el('bloqueHoraFin').value = '';
+  el('bloqueTipo').value = 'general';
+  el('bloqueTitulo').value = '';
+  el('bloqueDescripcion').value = '';
+  el('bloqueIcono').value = '';
+  el('bloqueOrden').value = '0';
+  el('tituloModalBloque').textContent = 'Nuevo bloque';
+  mostrarMensaje(mensajeBloque, '', '');
+
+  if (id) {
+    const b = bloquesPrograma.find((x) => Number(x.id) === Number(id));
+    if (b) {
+      el('tituloModalBloque').textContent = 'Editar bloque';
+      el('bloqueId').value = b.id;
+      el('bloqueDia').value = b.dia ?? 1;
+      el('bloqueHoraInicio').value = b.hora_inicio || '';
+      el('bloqueHoraFin').value = b.hora_fin || '';
+      el('bloqueTipo').value = b.tipo || 'general';
+      el('bloqueTitulo').value = b.titulo || '';
+      el('bloqueDescripcion').value = b.descripcion || '';
+      el('bloqueIcono').value = b.icono || '';
+      el('bloqueOrden').value = b.orden ?? 0;
+    }
+  }
+  modalBloque.hidden = false;
+  modalBloque.setAttribute('aria-hidden', 'false');
+  el('bloqueTitulo').focus();
+}
+
+function cerrarModalBloque() {
+  modalBloque.hidden = true;
+  modalBloque.setAttribute('aria-hidden', 'true');
+}
+
+el('cancelarModalBloque').addEventListener('click', cerrarModalBloque);
+
+formBloque.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = el('bloqueId').value;
+  const titulo = el('bloqueTitulo').value.trim();
+  if (!titulo) {
+    mostrarMensaje(mensajeBloque, 'El título es obligatorio.', 'error');
+    return;
+  }
+  const payload = {
+    dia: el('bloqueDia').value,
+    hora_inicio: el('bloqueHoraInicio').value,
+    hora_fin: el('bloqueHoraFin').value,
+    tipo: el('bloqueTipo').value,
+    titulo,
+    descripcion: el('bloqueDescripcion').value.trim(),
+    icono: el('bloqueIcono').value.trim(),
+    orden: Number(el('bloqueOrden').value) || 0,
+  };
+  const esEdicion = !!id;
+  const res = esEdicion
+    ? await api(`/api/admin/programa/bloques/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+    : await api('/api/admin/programa/bloques', { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) {
+    mostrarMensaje(mensajeBloque, res.data.error || 'No se pudo guardar el bloque.', 'error');
+    return;
+  }
+  mostrarMensaje(mensajeBloque, esEdicion ? 'Bloque actualizado.' : 'Bloque creado.', 'ok');
+  cerrarModalBloque();
+  await recargarProgramaAdmin();
+});
 
 // ── Pagos y cuotas ────────────────────────────────────────────────
 const mensajePagos = el('mensajePagos');

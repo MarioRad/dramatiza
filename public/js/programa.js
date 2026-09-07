@@ -14,6 +14,7 @@ const ProgramaUI = (() => {
   let onDelete = null;
   let onAdd = null;
   let renderType = 'accordion';
+  let disertantesContainer = null;
 
   function turnoDesdeHora(hora) {
     const m = String(hora || '').match(/(\d{1,2}):(\d{2})/);
@@ -172,8 +173,75 @@ const ProgramaUI = (() => {
     return html;
   }
 
+  function pdfHolderEl(tipo) {
+    const fuentes = [container, disertantesContainer].filter(Boolean);
+    for (const fuente of fuentes) {
+      const holder = fuente.querySelector(`.programa-pdf-holder[data-pdf-tipo="${tipo}"]`);
+      if (holder) return holder;
+    }
+    return null;
+  }
+
+  function otroPdfHolder(tipo) {
+    return tipo === 'programa' ? pdfHolderEl('disertantes') : pdfHolderEl('programa');
+  }
+
+  function buildProgramaPdf() {
+    const holder = pdfHolderEl('programa');
+    const el = holder ? holder.querySelector('.programa-pdf-area') : null;
+    if (!el) return;
+    if (dias.length === 0 || bloques.length === 0) { el.innerHTML = ''; return; }
+
+    const header = `
+      <div class="programa-pdf-header">
+        <img class="programa-pdf-logo" src="/logo.png" alt="Encuentro Nacional de Profesores de Teatro - Dramatiza Salta 2026">
+        <div class="programa-pdf-header-center">
+          <div class="programa-pdf-title">Programa del Encuentro</div>
+          <div class="programa-pdf-subtitle">26º Encuentro Nacional de Profesores de Teatro - Dramatiza Salta 2026</div>
+        </div>
+        <img class="programa-pdf-mascot" src="/personaje.png" alt="Mascota">
+      </div>`;
+
+    const diasHtml = dias.map((dia, idx) => {
+      const bloquesDia = bloques
+        .filter((b) => b.dia === dia)
+        .sort((a, b) => {
+          const o = (Number(a.orden) || 0) - (Number(b.orden) || 0);
+          return o !== 0 ? o : String(a.hora_inicio || '').localeCompare(String(b.hora_inicio || ''));
+        });
+
+      const filas = bloquesDia.length
+        ? bloquesDia.map((b) => {
+            const sub = renderSubtitulo(b);
+            const titulo = `${b.icono ? b.icono + ' ' : ''}${b.titulo}`;
+            return `
+              <div class="programa-pdf-bloque">
+                <span class="programa-pdf-bloque-hora">${escapeHtml(b.hora_inicio)}–${escapeHtml(b.hora_fin)}</span>
+                <span class="programa-pdf-bloque-info">
+                  <span class="programa-pdf-bloque-titulo">${escapeHtml(titulo)}</span>
+                  ${sub ? `<span class="programa-pdf-bloque-sub">${escapeHtml(sub)}</span>` : ''}
+                </span>
+              </div>`;
+          }).join('')
+        : '<div class="programa-pdf-bloque-sin">Sin actividades programadas.</div>';
+
+      return `
+        <div class="programa-pdf-dia">
+          <div class="programa-pdf-dia-titulo">${escapeHtml(formatoDiaLabel(dia, idx))}</div>
+          ${filas}
+        </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="programa-pdf-page programa-pdf-page-programa">
+        ${header}
+        <div class="programa-pdf-dias">${diasHtml}</div>
+      </div>`;
+  }
+
   function buildPdfArea() {
-    const holder = container ? container.querySelector('.programa-pdf-holder') : null;
+    buildProgramaPdf();
+    const holder = pdfHolderEl('disertantes');
     const el = holder ? holder.querySelector('.programa-pdf-area') : null;
     if (!el) return;
     const lista = expandirDias(ponentes);
@@ -257,17 +325,29 @@ const ProgramaUI = (() => {
     })));
   }
 
-  async function descargarPDF() {
-    const holder = container ? container.querySelector('.programa-pdf-holder') : null;
+  async function descargarPDF(tipo) {
+    tipo = tipo || 'disertantes';
+    const holder = pdfHolderEl(tipo);
     const root = holder ? holder.querySelector('.programa-pdf-area') : null;
-    const btn = document.getElementById('btnDescargarPdfPrograma');
+    const btns = [...document.querySelectorAll('.programa-btn-pdf')];
     if (!root || !root.querySelector('.programa-pdf-page') || !window.html2canvas || !window.jspdf) {
       alert('No se pudo generar el PDF (falta la librería o no hay días). Verificá la conexión a internet.');
       return;
     }
 
     await esperarImagenes(root);
-    if (btn) btn.disabled = true;
+    if (btns.length) btns.forEach(b => { b.disabled = true; });
+
+    const estados = [];
+    const garfios = [container, disertantesContainer].filter(Boolean);
+    garfios.forEach(c => estados.push({ el: c, hidden: c.hidden }));
+
+    if (tipo === 'programa' && container) container.hidden = false;
+    if (tipo === 'disertantes' && disertantesContainer) disertantesContainer.hidden = false;
+    const otro = otroPdfHolder(tipo);
+    const otroPrev = otro ? otro.style.display : null;
+    if (otro) otro.style.display = 'none';
+
     document.body.classList.add('pdf-export');
     window.scrollTo(0, 0);
 
@@ -317,17 +397,30 @@ const ProgramaUI = (() => {
         pdf.addImage(imgData, 'JPEG', (pageW - imgW) / 2, (pageH - imgH) / 2, imgW, imgH);
       });
 
-      pdf.save('Dramatiza_Salta_2026.pdf');
+      const nombre = tipo === 'programa' ? 'Dramatiza_Salta_2026_Programa.pdf' : 'Dramatiza_Salta_2026.pdf';
+      pdf.save(nombre);
     } catch (err) {
       alert('Error al generar el PDF: ' + err.message);
     } finally {
       document.body.classList.remove('pdf-export');
-      if (btn) btn.disabled = false;
+      if (otro) otro.style.display = otroPrev;
+      estados.forEach((e) => { e.el.hidden = e.hidden; });
+      if (btns.length) btns.forEach(b => { b.disabled = false; });
     }
   }
 
-  function imprimirPrograma() {
+  function imprimirPrograma(tipo) {
+    tipo = tipo || 'disertantes';
+    const garfios = [container, disertantesContainer].filter(Boolean);
+    const estados = garfios.map((c) => ({ el: c, hidden: c.hidden }));
+    if (tipo === 'programa' && container) container.hidden = false;
+    if (tipo === 'disertantes' && disertantesContainer) disertantesContainer.hidden = false;
+    const otro = otroPdfHolder(tipo);
+    const otroPrev = otro ? otro.style.display : null;
+    if (otro) otro.style.display = 'none';
     window.print();
+    if (otro) otro.style.display = otroPrev;
+    estados.forEach((e) => { e.el.hidden = e.hidden; });
   }
 
   function toggleAccordion(header) {
@@ -701,8 +794,8 @@ const ProgramaUI = (() => {
       html += `
         <div class="programa-controls">
           <div class="programa-controls-left">
-            <button type="button" class="programa-action-btn" id="btnDescargarPdfPrograma" onclick="ProgramaUI.descargarPDF()">⬇️ Descargar PDF</button>
-            <button type="button" class="programa-action-btn" id="btnImprimirPrograma" onclick="ProgramaUI.imprimirPrograma()">🖨️ Imprimir</button>
+            <button type="button" class="programa-action-btn programa-btn-pdf" id="btnDescargarPdfPrograma" onclick="ProgramaUI.descargarPDF('programa')">⬇️ Descargar PDF</button>
+            <button type="button" class="programa-action-btn" id="btnImprimirPrograma" onclick="ProgramaUI.imprimirPrograma('programa')">🖨️ Imprimir</button>
           </div>
           <div class="programa-controls-right"></div>
         </div>`;
@@ -723,9 +816,8 @@ const ProgramaUI = (() => {
     html += '</div>';
 
     if (mode !== 'admin') {
-      html += renderDisertantesSeccion();
       html += `
-        <div class="programa-pdf-holder" aria-hidden="true">
+        <div class="programa-pdf-holder" data-pdf-tipo="programa" aria-hidden="true">
           <div class="programa-pdf-area"></div>
         </div>`;
     }
@@ -752,6 +844,27 @@ const ProgramaUI = (() => {
     }
 
     if (mode !== 'admin') {
+      const controlesHTML = `
+        <div class="programa-controls">
+          <div class="programa-controls-left">
+            <button type="button" class="programa-action-btn programa-btn-pdf" onclick="ProgramaUI.descargarPDF('disertantes')">⬇️ Descargar PDF</button>
+            <button type="button" class="programa-action-btn" onclick="ProgramaUI.imprimirPrograma('disertantes')">🖨️ Imprimir</button>
+          </div>
+          <div class="programa-controls-right"></div>
+        </div>`;
+
+      const seccionHTML = renderDisertantesSeccion() + `
+        <div class="programa-pdf-holder" data-pdf-tipo="disertantes" aria-hidden="true">
+          <div class="programa-pdf-area"></div>
+        </div>`;
+
+      if (disertantesContainer) {
+        disertantesContainer.innerHTML = controlesHTML + seccionHTML;
+      } else {
+        const extra = document.createElement('div');
+        extra.innerHTML = seccionHTML;
+        while (extra.firstChild) container.appendChild(extra.firstChild);
+      }
       buildPdfArea();
     }
   }
@@ -807,6 +920,9 @@ const ProgramaUI = (() => {
   return {
     init(opts) {
       container = typeof opts.container === 'string' ? document.querySelector(opts.container) : opts.container;
+      disertantesContainer = opts.disertantesContainer
+        ? (typeof opts.disertantesContainer === 'string' ? document.querySelector(opts.disertantesContainer) : opts.disertantesContainer)
+        : null;
       mode = opts.mode || 'public';
       renderType = opts.renderType || 'accordion';
       onEdit = opts.onEdit || null;
@@ -860,3 +976,5 @@ const ProgramaUI = (() => {
     },
   };
 })();
+
+window.ProgramaUI = ProgramaUI;
