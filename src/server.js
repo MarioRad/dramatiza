@@ -423,6 +423,7 @@ async function regenerarAcreditacion(dni) {
     nombre: inscripciones[0].nombre,
     apellido: inscripciones[0].apellido,
     email: inscripciones[0].email,
+    alimentacion: inscripciones[0].alimentacion || '',
     sesiones,
   });
   await db.guardarQrInscripcion(dni, qrCode, qrPayload);
@@ -607,6 +608,7 @@ app.post('/api/inscripciones/finalizar', async (req, res, next) => {
       nombre,
       apellido,
       email,
+      alimentacion,
       sesiones: inscripciones.map((i) => ({
         taller: i.taller,
         fecha: i.fecha || '',

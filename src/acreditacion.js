@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
-const PDFDocument = require('pdfkit');
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const logs = require('./logs');
 
 function generarCodigo() {
@@ -17,7 +17,7 @@ function formatoFecha(fechaStr) {
   return `${partes[2].padStart(2, '0')}/${partes[1].padStart(2, '0')}/${partes[0].length === 2 ? `20${partes[0]}` : partes[0]}`;
 }
 
-function construirPayload({ id, dni, nombre, apellido, email, sesiones }) {
+function construirPayload({ id, dni, nombre, apellido, email, sesiones, alimentacion }) {
   return JSON.stringify({
     version: 1,
     id,
@@ -25,6 +25,7 @@ function construirPayload({ id, dni, nombre, apellido, email, sesiones }) {
     apellido,
     nombre,
     email,
+    alimentacion: alimentacion || '',
     sesiones: (sesiones || []).map((s) => ({
       taller: s.taller,
       fecha: s.fecha || '',
@@ -78,78 +79,151 @@ async function generarPng(payload, { size = 512 } = {}) {
   });
 }
 
+const UMBRAL_ALIMENTACION = {
+  sin_restriccion: 'Sin restricción',
+  vegano: 'Vegano',
+  sin_tacc: 'Sin TACC',
+  sin_lactosa: 'Sin lactosa',
+  otro: 'Otro',
+};
+
+const COLOR_ALIMENTACION = {
+  vegano: rgb(0, 0.6, 0.28),
+  sin_tacc: rgb(1, 0.6, 0.1),
+  sin_restriccion: rgb(0, 0, 0),
+  sin_lactosa: rgb(0.05, 0.45, 0.72),
+  otro: rgb(0.55, 0.55, 0.55),
+};
+
+function divisionEnLineas(texto, font, size, maxWidth) {
+  const palabras = String(texto || '').split(/\s+/).filter(Boolean);
+  const lineas = [];
+  let actual = '';
+  for (const palabra of palabras) {
+    const propuesta = actual ? `${actual} ${palabra}` : palabra;
+    if (font.widthOfTextAtSize(propuesta, size) > maxWidth && actual) {
+      lineas.push(actual);
+      actual = palabra;
+    } else {
+      actual = propuesta;
+    }
+  }
+  if (actual) lineas.push(actual);
+  return lineas;
+}
+
 async function generarPdf(payload) {
   const datos = parsearPayload(payload);
   if (!datos) throw new Error('Payload de acreditación inválido.');
 
-  const qrBuffer = await generarPng(payload, { size: 420 });
-  const W = 311.81; // 110 mm
-  const H = 198.43; // 70 mm
-  const doc = new PDFDocument({ size: [W, H], margin: 0 });
-  const buffers = [];
-  doc.on('data', (c) => buffers.push(c));
-  const terminado = new Promise((resolve) => doc.on('end', resolve));
+  const qrBuffer = await generarPng(payload, { size: 512 });
+  const rutaPlantilla = resolverImagen('CREDENCIAL_TEMPLATE_PDF', 'public/credencial_acreditacion.pdf');
+  if (!rutaPlantilla) throw new Error('No se encontró la plantilla credencial_acreditacion.pdf.');
 
-  const colorPrimario = '#323136';
-  const colorTexto = '#0f172a';
-  const colorMutado = '#334155';
-  const logo = resolverImagen('ENCUENTRO_LOGO_IMG', 'public/logo.png');
-  const personaje = resolverImagen('ENCUENTRO_PERSONAJE_IMG', 'public/personaje.png');
+  const pdf = await PDFDocument.load(fs.readFileSync(rutaPlantilla));
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const qrImg = await pdf.embedPng(qrBuffer);
 
-  doc.rect(0, 0, W, 46).fill(colorPrimario);
-  if (logo) {
-    doc.image(logo, 8, 8, { fit: [120, 30] });
-  }
-  if (personaje) {
-    doc.image(personaje, W - 8 - 60, 2, { fit: [60, 42] });
-  }
-  doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#ffffff')
-    .text('ACREDITACIÓN AL ENCUENTRO', 10, 11, { align: 'center', width: W - 20 });
-  doc.font('Helvetica-Bold').fontSize(4.5).fillColor('#ffffff')
-    .text('Encuentro Nacional Dramatiza Salta 2026', 10, 24, { align: 'center', width: W - 20 });
+  const page = pdf.getPages()[0];
+  const H = page.getHeight();
+  const colorOscuro = rgb(0.055, 0.09, 0.16);
+  const colorMutado = rgb(0.2, 0.255, 0.333);
 
-  const anchoTexto = 198;
-  let y = 52;
-  const lineaNombre = `Apellido y Nombre: ${datos.apellido || ''} ${datos.nombre || ''}`.trim();
-  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(colorTexto)
-    .text(lineaNombre, 10, y, { width: anchoTexto });
-  y += doc.heightOfString(lineaNombre, { width: anchoTexto }) + 3;
+  const QRD = {
+    x: 205.512,
+    top: 52.441,
+    size: 297.638 - 205.512,
+  };
+  page.drawImage(qrImg, {
+    x: QRD.x,
+    y: H - QRD.top - QRD.size,
+    width: QRD.size,
+    height: QRD.size,
+  });
 
-  doc.font('Helvetica').fontSize(6).fillColor(colorMutado);
-  doc.text(`DNI: ${datos.dni || ''}`, 10, y);
-  y += 11;
-  if (datos.email) {
-    doc.text(`Correo: ${datos.email}`, 10, y);
-    y += 11;
-  }
-  doc.text(`Código único: ${datos.id}`, 10, y);
-  y += 12;
-
-  doc.font('Helvetica-Bold').fontSize(6).fillColor(colorPrimario);
-  doc.text('Talleres:', 10, y);
-  y += 10;
-  doc.font('Helvetica').fontSize(7).fillColor(colorTexto);
-  const sesiones = datos.sesiones || [];
-  if (sesiones.length === 0) {
-    doc.text('—', 10, y, { width: anchoTexto });
-  } else {
-    for (const s of sesiones) {
-      const partes = [s.taller || 'Taller'];
-      if (s.fecha) partes.push(`Fecha: ${formatoFecha(s.fecha)}`);
-      if (s.hora) partes.push(`Hora: ${s.hora}`);
-      if (s.lugar) partes.push(`Lugar: ${s.lugar}`);
-      const texto = partes.join(' · ');
-      doc.text(texto, 10, y, { width: anchoTexto });
-      y += doc.heightOfString(texto, { width: anchoTexto }) + 3;
+  const campos = [
+    {
+      texto: `${datos.apellido || ''} ${datos.nombre || ''}`.trim(),
+      x: 76,
+      y: 138.642,
+      size: 7,
+      bold: true,
+      color: colorOscuro,
+    },
+    { texto: datos.dni || '', x: 24, y: 126.227, size: 6, color: colorMutado },
+    { texto: datos.email || '', x: 33, y: 115.228, size: 6, color: colorMutado },
+    { texto: datos.id || '', x: 251, y: 39.628, size: 6, color: colorMutado },
+  ];
+  for (const c of campos) {
+    if (c.texto) {
+      page.drawText(c.texto, {
+        x: c.x,
+        y: c.y,
+        size: c.size,
+        font: c.bold ? fontBold : font,
+        color: c.color,
+      });
     }
   }
 
-  const qrTam = 70;
-  doc.image(qrBuffer, W - 10 - qrTam, 52, { width: qrTam, height: qrTam });
+  const alimentacion = datos.alimentacion
+    ? UMBRAL_ALIMENTACION[datos.alimentacion] || datos.alimentacion
+    : '';
+  if (alimentacion) {
+    const colorBox = COLOR_ALIMENTACION[datos.alimentacion] || COLOR_ALIMENTACION.otro;
+    const fontSize = 6;
+    const padX = 3;
+    const boxH = 9;
+    const anchoTexto = fontBold.widthOfTextAtSize(alimentacion, fontSize);
+    page.drawRectangle({
+      x: 51,
+      y: 12.897 - 2.5,
+      width: anchoTexto + padX * 2 + 2,
+      height: boxH,
+      color: colorBox,
+    });
+    page.drawText(alimentacion, {
+      x: 53,
+      y: 12.897,
+      size: fontSize,
+      font: fontBold,
+      color: rgb(1, 1, 1),
+    });
+  }
 
-  doc.end();
-  await terminado;
-  return Buffer.concat(buffers);
+  const TAL = {
+    x: 20,
+    maxWidth: 205.512 - 24,
+    lineGap: 9,
+  };
+  let y = 98.43;
+  for (const s of datos.sesiones || []) {
+    const nombre = s.taller || s.nombre || 'Taller';
+    const lineasNombre = divisionEnLineas(`• ${nombre}`, fontBold, 6, TAL.maxWidth);
+    for (const ln of lineasNombre) {
+      if (y < 16) break;
+      page.drawText(ln, { x: TAL.x, y, size: 6, font: fontBold, color: colorOscuro });
+      y -= TAL.lineGap;
+    }
+    const detalle = [
+      s.fecha ? `Fecha: ${formatoFecha(s.fecha)}` : '',
+      s.hora ? `Hora: ${s.hora}` : '',
+      s.lugar ? `Lugar: ${s.lugar}` : '',
+    ]
+      .filter(Boolean)
+      .join('  ·  ');
+    if (detalle) {
+      const lineasDetalle = divisionEnLineas(detalle, font, 6, TAL.maxWidth);
+      for (const ld of lineasDetalle) {
+        if (y < 16) break;
+        page.drawText(ld, { x: TAL.x + 8, y, size: 6, font, color: colorMutado });
+        y -= TAL.lineGap;
+      }
+    }
+  }
+
+  return Buffer.from(await pdf.save());
 }
 
 function carpetaEntradas() {

@@ -138,7 +138,7 @@ function construirHtml({ datos, talleres, qrDataUrl, modoCid = false }) {
                   <p style="margin:10px 0 0;font-size:13px;color:#64748b;">Mostrá este código QR para confirmar tu asistencia.</p>
                 </td></tr>
               </table>
-
+              <p style="margin:20px 0 0;font-size:14px;color:#334155;">Descargá la constancia de tu inscripción, se solicitará el día del encuentro.</p>
               <p style="margin:20px 0 0;font-size:14px;color:#334155;">También te adjuntamos tu acreditación en PDF.</p>
               <p style="margin:10px 0 0;font-size:14px;color:#334155;">¡Nos vemos en el Encuentro Nacional Dramatiza Salta 2026!</p>
             </td>
