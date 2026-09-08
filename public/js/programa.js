@@ -715,7 +715,10 @@ const ProgramaUI = (() => {
       itemsDia.forEach(item => {
         const t = item.main;
         const allParts = [t, ...item.parts];
-        const inscriptos = allParts.reduce((s, p) => s + (Number(p.inscriptos) || 0), 0);
+        // Para talleres multiparte la inscripción crea una fila en cada parte;
+        // sumar duplicaría el recuento. Usar el máximo (o el del main) refleja
+        // personas únicas y coincide con el control de cupo del backend.
+        const inscriptos = Math.max(...allParts.map(p => Number(p.inscriptos) || 0));
         const cupo = Math.min(...allParts.map(p => Number(p.cupo) || 20));
         const lleno = inscriptos >= cupo;
         const duracionTotal = allParts.reduce((s, p) => s + (Number(p.duracion_hs) || 3), 0);

@@ -135,7 +135,8 @@ function mostrarMensaje(elNodo, texto, tipo) {
 async function api(uri, opciones = {}) {
   const res = await fetch(uri, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
     ...opciones,
   });
   const data = await res.json().catch(() => ({}));
@@ -187,8 +188,17 @@ function mostrarPanel() {
     `${miSesion.nombre || miSesion.usuario} · ${ETIQUETAS_ROL[miSesion.rol] || miSesion.rol}`;
 }
 
+let intervaloAcreditaciones = null;
+let intervaloComidas = null;
+
+function detenerPollingAcreditaciones() {
+  if (intervaloAcreditaciones) { clearInterval(intervaloAcreditaciones); intervaloAcreditaciones = null; }
+  if (intervaloComidas) { clearInterval(intervaloComidas); intervaloComidas = null; }
+}
+
 function cambiarVista(vista) {
   vistaActiva = vista;
+  detenerPollingAcreditaciones();
   for (const tab of document.querySelectorAll('.tab')) {
     tab.classList.toggle('activo', tab.dataset.vista === vista);
   }
@@ -205,9 +215,15 @@ function cambiarVista(vista) {
   }
   if (vista === 'acreditaciones') {
     cargarAcreditaciones();
+    intervaloAcreditaciones = setInterval(() => {
+      if (vistaActiva === 'acreditaciones' && !document.hidden) cargarAcreditaciones(true);
+    }, 15000);
   }
   if (vista === 'comidas') {
     cargarComidas();
+    intervaloComidas = setInterval(() => {
+      if (vistaActiva === 'comidas' && !document.hidden) cargarComidas(true);
+    }, 15000);
   }
   if (vista === 'inscripciones') {
     cargarInscripciones();
@@ -946,11 +962,35 @@ function renderAcreditaciones(datos) {
   const inscriptosUnicos = Number(datos.inscriptosUnicos) || 0;
   resumenAcreditaciones.textContent = `Total acreditados: ${total} de ${inscriptosUnicos} inscripto(s).`;
 
-  const porTaller = datos.porTaller || [];
+  let porTaller = datos.porTaller || [];
+  // Agrupar talleres multiparte (pareja_id) para mostrar un solo renglón por taller lógico
+  // y evitar duplicar inscriptos. El recuento lógico es el máximo entre partes.
+  const grupos = new Map();
+  for (const t of porTaller) {
+    const clave = t.pareja_id ? t.pareja_id : t.taller_id;
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(t);
+  }
+  const filasAgrupadas = [];
+  for (const [, arr] of grupos) {
+    if (arr.length === 1) {
+      filasAgrupadas.push(arr[0]);
+    } else {
+      const main = arr.find((x) => !x.pareja_id) || arr[0];
+      const cupo = Math.min(...arr.map((x) => Number(x.cupo) || 20));
+      const inscriptos = Math.max(...arr.map((x) => Number(x.inscriptos) || 0));
+      const acreditados = Math.max(...arr.map((x) => Number(x.acreditados) || 0));
+      // nombre sin sufijo "(2° parte)" para el grupo
+      const nombreBase = String(main.taller || '').replace(/\s*\(\d+°\s*parte\)\s*$/gi, '').trim() || main.taller;
+      filasAgrupadas.push({ ...main, taller: nombreBase + (arr.length > 1 ? ` (${arr.length} partes)` : ''), cupo, inscriptos, acreditados });
+    }
+  }
+  porTaller = filasAgrupadas.sort((a, b) => String(a.fecha||'').localeCompare(String(b.fecha||'')) || String(a.hora||'').localeCompare(String(b.hora||'')));
+
   if (porTaller.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.textContent = 'No hay talleres cargados.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -970,6 +1010,10 @@ function renderAcreditaciones(datos) {
     const tdHora = document.createElement('td');
     tdHora.textContent = t.hora || '—';
 
+    const tdCupo = document.createElement('td');
+    tdCupo.textContent = t.cupo != null ? t.cupo : '—';
+    tdCupo.style.color = 'var(--color-texto-suave)';
+
     const tdAcreditados = document.createElement('td');
     tdAcreditados.textContent = t.acreditados;
     tdAcreditados.style.fontWeight = 'bold';
@@ -978,20 +1022,20 @@ function renderAcreditaciones(datos) {
     tdInscriptos.textContent = t.inscriptos;
 
     const tdPendientes = document.createElement('td');
-    const pendientes = Math.max(0, t.inscriptos - t.acreditados);
+    const pendientes = Math.max(0, Number(t.inscriptos) - Number(t.acreditados));
     tdPendientes.textContent = pendientes;
     tdPendientes.className = pendientes === 0 ? 'encuentro-si' : '';
 
-    tr.append(tdTaller, tdFecha, tdHora, tdAcreditados, tdInscriptos, tdPendientes);
+    tr.append(tdTaller, tdFecha, tdHora, tdCupo, tdAcreditados, tdInscriptos, tdPendientes);
     cuerpo.appendChild(tr);
   }
 }
 
-async function cargarAcreditaciones() {
-  resumenAcreditaciones.textContent = 'Cargando…';
+async function cargarAcreditaciones(silencioso = false) {
+  if (!silencioso) resumenAcreditaciones.textContent = 'Cargando…';
   const res = await api('/api/admin/acreditaciones/resumen');
   if (!res.ok) {
-    resumenAcreditaciones.textContent = res.data.error || 'No se pudieron cargar las acreditaciones.';
+    if (!silencioso) resumenAcreditaciones.textContent = res.data.error || 'No se pudieron cargar las acreditaciones.';
     return;
   }
   renderAcreditaciones(res.data);
@@ -1090,17 +1134,17 @@ function renderComidas(datos) {
   }
 }
 
-async function cargarComidas() {
-  resumenComidas.textContent = 'Cargando…';
+async function cargarComidas(silencioso = false) {
+  if (!silencioso) resumenComidas.textContent = 'Cargando…';
   const res = await api('/api/admin/comidas/resumen');
   if (!res.ok) {
-    resumenComidas.textContent = res.data.error || 'No se pudo cargar el recuento de comidas.';
+    if (!silencioso) resumenComidas.textContent = res.data.error || 'No se pudo cargar el recuento de comidas.';
     return;
   }
   renderComidas(res.data);
 }
 
-el('botonActualizarComidas').addEventListener('click', cargarComidas);
+el('botonActualizarComidas').addEventListener('click', () => cargarComidas(false));
 
 async function cargarDatos() {
   mostrarMensaje(mensajePanel, '', '');

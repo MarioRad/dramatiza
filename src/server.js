@@ -433,7 +433,8 @@ async function regenerarAcreditacion(dni) {
 app.get('/api/talleres', async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
-    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), duracion_hs: Number(t.duracion_hs) })));
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null })));
   } catch (e) {
     next(e);
   }
@@ -871,7 +872,8 @@ app.delete('/api/admin/usuarios/:id', requireAdmin, async (req, res, next) => {
 app.get('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
-    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), duracion_hs: Number(t.duracion_hs) })));
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null })));
   } catch (e) {
     next(e);
   }
@@ -880,6 +882,7 @@ app.get('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), asy
 app.get('/api/admin/inscripciones', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const listado = await db.listarInscripciones();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json(listado.map((i) => ({ ...i, en_encuentro: Boolean(i.en_encuentro) })));
   } catch (e) {
     next(e);
@@ -1242,6 +1245,7 @@ app.get('/api/admin/acreditaciones/resumen', requireAuth, requirePermiso('perm_a
       db.contarAsistentesUnicos(),
       db.listarAcreditacionesPorTaller(),
     ]);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({ total, inscriptosUnicos, porTaller });
   } catch (e) {
     next(e);
@@ -1250,6 +1254,7 @@ app.get('/api/admin/acreditaciones/resumen', requireAuth, requirePermiso('perm_a
 
 app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     const { servicios, dietas, porAsistente } = await db.resumenComidas();
 
     const dietasPorBloque = {};

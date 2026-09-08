@@ -431,10 +431,17 @@ async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertan
       const nombreParte = nombreBase + sufijoParte(i, totalParts);
 
       if (p.id) {
-        await run(
-          'UPDATE talleres SET nombre = ?, descripcion = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
-          [nombreParte, descripcion, duracionHs, fecha, hora, lugar, disertante, p.id]
-        );
+        if (Number(p.id) === Number(id)) {
+          await run(
+            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
+            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, p.id]
+          );
+        } else {
+          await run(
+            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
+            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, p.id]
+          );
+        }
       } else {
         const parejaId = i === 0 ? null : id;
         await run(
@@ -888,18 +895,17 @@ async function contarAcreditados() {
 
 async function listarAcreditacionesPorTaller() {
   const filasRes = await query(
-    `SELECT t.id AS taller_id, t.nombre AS taller, t.fecha, t.hora,
-       COUNT(DISTINCT i.id) AS inscriptos,
-       COUNT(DISTINCT CASE WHEN a.dni IS NOT NULL THEN i.dni END) AS acreditados
-     FROM talleres t
-     LEFT JOIN inscripciones i ON i.taller_id = t.id
-     LEFT JOIN acreditaciones a ON a.dni = i.dni
-     GROUP BY t.id, t.nombre, t.fecha, t.hora
-     ORDER BY t.fecha, t.hora, t.nombre`
+    `SELECT t.id AS taller_id, t.nombre AS taller, t.fecha, t.hora, t.cupo, t.pareja_id,
+       (SELECT COUNT(*) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos,
+       (SELECT COUNT(DISTINCT i2.dni) FROM inscripciones i2 JOIN acreditaciones a ON a.dni = i2.dni WHERE i2.taller_id = t.id) AS acreditados
+      FROM talleres t
+      ORDER BY t.fecha, t.hora, t.nombre`
   );
   return filasRes.map((f) => ({
     ...f,
     taller_id: Number(f.taller_id),
+    cupo: Number(f.cupo),
+    pareja_id: f.pareja_id ? Number(f.pareja_id) : null,
     inscriptos: Number(f.inscriptos),
     acreditados: Number(f.acreditados),
   }));
