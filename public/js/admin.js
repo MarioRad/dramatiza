@@ -969,7 +969,7 @@ function renderAcreditaciones(datos) {
   if (porTaller.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 7;
+    td.colSpan = 8;
     td.textContent = 'No hay talleres cargados.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -993,19 +993,27 @@ function renderAcreditaciones(datos) {
     tdCupo.textContent = t.cupo != null ? t.cupo : '—';
     tdCupo.style.color = 'var(--color-texto-suave)';
 
-    const tdAcreditados = document.createElement('td');
-    tdAcreditados.textContent = t.acreditados;
-    tdAcreditados.style.fontWeight = 'bold';
+    const cupoNum = Number(t.cupo) || 0;
+    const inscriptosNum = Number(t.inscriptos) || 0;
+    const libres = Math.max(0, cupoNum - inscriptosNum);
+    const tdLibres = document.createElement('td');
+    tdLibres.textContent = libres;
+    tdLibres.style.fontWeight = libres === 0 ? 'bold' : '';
+    tdLibres.className = libres === 0 ? 'cupo-lleno' : '';
 
     const tdInscriptos = document.createElement('td');
     tdInscriptos.textContent = t.inscriptos;
 
+    const tdAcreditados = document.createElement('td');
+    tdAcreditados.textContent = t.acreditados;
+    tdAcreditados.style.fontWeight = 'bold';
+
     const tdPendientes = document.createElement('td');
-    const pendientes = Math.max(0, Number(t.inscriptos) - Number(t.acreditados));
+    const pendientes = Math.max(0, inscriptosNum - Number(t.acreditados));
     tdPendientes.textContent = pendientes;
     tdPendientes.className = pendientes === 0 ? 'encuentro-si' : '';
 
-    tr.append(tdTaller, tdFecha, tdHora, tdCupo, tdAcreditados, tdInscriptos, tdPendientes);
+    tr.append(tdTaller, tdFecha, tdHora, tdCupo, tdLibres, tdInscriptos, tdAcreditados, tdPendientes);
     cuerpo.appendChild(tr);
   }
 }
