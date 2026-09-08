@@ -478,6 +478,40 @@ async function eliminarInscripcionesPorDni(dni) {
   return res.filasAfectadas;
 }
 
+// ── Asistentes (CRUD agregado sobre inscripciones) ────────────────────
+
+async function listarAsistentes() {
+  return query(
+    `SELECT
+       i.dni,
+       MIN(i.nombre) AS nombre,
+       MIN(i.apellido) AS apellido,
+       MIN(i.email) AS email,
+       MIN(i.telefono) AS telefono,
+       MIN(i.alimentacion) AS alimentacion,
+       BOOL_OR(i.en_encuentro) AS en_encuentro,
+       MIN(i.estado_pago) AS estado_pago,
+       MIN(i.creado_en) AS creado_en,
+       COUNT(*) AS cantidad_talleres,
+       STRING_AGG(t.nombre, ', ' ORDER BY t.fecha, t.hora) AS talleres_nombres,
+       STRING_AGG(CAST(t.id AS TEXT), ',' ORDER BY t.fecha, t.hora) AS talleres_ids
+     FROM inscripciones i
+     JOIN talleres t ON t.id = i.taller_id
+     GROUP BY i.dni
+     ORDER BY MIN(i.apellido), MIN(i.nombre)`
+  );
+}
+
+async function actualizarAsistente(dni, { nombre, apellido, email, telefono, alimentacion }) {
+  const existe = await queryOne('SELECT dni FROM inscripciones WHERE dni = ? LIMIT 1', [dni]);
+  if (!existe) throw new HttpError(404, 'Asistente no encontrado.');
+  await mutation(
+    'UPDATE inscripciones SET nombre = ?, apellido = ?, email = ?, telefono = ?, alimentacion = ? WHERE dni = ?',
+    [String(nombre || '').trim(), String(apellido || '').trim(), String(email || '').trim(), String(telefono || '').trim().replace(/\D/g, ''), String(alimentacion || 'sin_restriccion').trim(), dni]
+  );
+  return true;
+}
+
 async function registrarEvento(tipo, detalle, usuario = 'admin') {
   await query('INSERT INTO eventos (tipo, detalle, usuario) VALUES (?, ?, ?)', [tipo, detalle, usuario]);
 }
@@ -1407,6 +1441,8 @@ module.exports = {
   eliminarTaller,
   crearInscripcion,
   listarInscripciones,
+  listarAsistentes,
+  actualizarAsistente,
   cambiarEstadoPagoInscripcion,
   eliminarInscripcion,
   eliminarInscripcionesPorDni,

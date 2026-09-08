@@ -972,6 +972,92 @@ app.delete('/api/admin/inscripciones/:id', requireAuth, requirePermiso('perm_ins
   }
 });
 
+// ── CRUD Asistentes (agregado sobre inscripciones) ───────────────────
+app.get('/api/admin/asistentes', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const lista = await db.listarAsistentes();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(lista.map((a) => ({
+      dni: a.dni,
+      nombre: a.nombre,
+      apellido: a.apellido,
+      email: a.email,
+      telefono: a.telefono || '',
+      alimentacion: a.alimentacion || 'sin_restriccion',
+      en_encuentro: Boolean(a.en_encuentro),
+      estado_pago: a.estado_pago || 'no_pagado',
+      creado_en: a.creado_en,
+      cantidad_talleres: Number(a.cantidad_talleres),
+      talleres_nombres: a.talleres_nombres || '',
+      talleres_ids: a.talleres_ids || '',
+    })));
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/asistentes', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const nombre = String(body.nombre || '').trim();
+    const apellido = String(body.apellido || '').trim();
+    const dni = String(body.dni || '').trim().replace(/\D/g, '');
+    const email = String(body.email || '').trim();
+    const telefono = String(body.telefono || '').trim().replace(/\D/g, '');
+    const alimentacion = String(body.alimentacion || 'sin_restriccion').trim();
+    const tallerIds = Array.isArray(body.talleres) ? body.talleres : parseIds(body.talleres || body.tallerIds || '');
+    if (nombre.length < 2 || apellido.length < 2) throw new db.HttpError(400, 'Nombre y apellido requeridos.');
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+    if (!validarEmail(email)) throw new db.HttpError(400, 'Email inválido.');
+    if (!ALIMENTACIONES_VALIDAS.includes(alimentacion)) throw new db.HttpError(400, 'Alimentación inválida.');
+    if (!tallerIds.length) throw new db.HttpError(400, 'Seleccioná al menos un taller.');
+    const enEncuentro = await db.esAsistenteEncuentro(dni);
+    const encuentro = enEncuentro ? await db.buscarEncuentroPorDni(dni) : null;
+    const estadoPago = encuentro && encuentro.pago ? encuentro.pago : 'no_pagado';
+    await db.crearInscripcion({ nombre, apellido, dni, email, telefono, alimentacion, tallerIds, enEncuentro, estadoPago });
+    await regenerarAcreditacion(dni);
+    await db.registrarEvento('inscripcion_creada', `Asistente creado: ${nombre} ${apellido} (DNI ${dni}) - ${tallerIds.length} taller(es)`, req.sesion.usuario);
+    res.status(201).json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.put('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String(req.params.dni || '').replace(/\D/g, '');
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    const body = req.body || {};
+    const campos = {
+      nombre: String(body.nombre || '').trim(),
+      apellido: String(body.apellido || '').trim(),
+      email: String(body.email || '').trim(),
+      telefono: String(body.telefono || '').trim(),
+      alimentacion: String(body.alimentacion || 'sin_restriccion').trim(),
+    };
+    if (campos.nombre.length < 2 || campos.apellido.length < 2) throw new db.HttpError(400, 'Nombre y apellido requeridos.');
+    if (!validarEmail(campos.email)) throw new db.HttpError(400, 'Email inválido.');
+    if (!ALIMENTACIONES_VALIDAS.includes(campos.alimentacion)) throw new db.HttpError(400, 'Alimentación inválida.');
+    await db.actualizarAsistente(dni, campos);
+    if (body.talleres !== undefined) {
+      const talleres = Array.isArray(body.talleres) ? body.talleres : parseIds(String(body.talleres || ''));
+      if (talleres.length === 0) throw new db.HttpError(400, 'Seleccioná al menos un taller.');
+      await db.reemplazarTalleresInscripcion(dni, talleres);
+    }
+    await regenerarAcreditacion(dni);
+    await db.registrarEvento('inscripcion_modificada', `Asistente actualizado: ${campos.nombre} ${campos.apellido} (DNI ${dni})`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String(req.params.dni || '').replace(/\D/g, '');
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    const fila = await db.queryOne('SELECT nombre, apellido FROM inscripciones WHERE dni = ? LIMIT 1', [dni]);
+    if (!fila) throw new db.HttpError(404, 'Asistente no encontrado.');
+    const eliminadas = await db.eliminarInscripcionesPorDni(dni);
+    await db.registrarEvento('inscripcion_eliminada', `Asistente eliminado: ${fila.nombre} ${fila.apellido} (DNI ${dni}) - ${eliminadas} inscripción(es)`, req.sesion.usuario);
+    res.json({ ok: true, eliminadas });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/admin/eventos', requireAdmin, async (req, res, next) => {
   try {
     const eventos = await db.listarEventos();

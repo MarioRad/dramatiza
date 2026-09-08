@@ -120,6 +120,8 @@ let dniQrActual = null;
 let ponenteEditandoId = null;
 let encuentroPersonas = [];
 let encuentroEditando = null;
+let asistentesData = [];
+let asistenteEditando = null;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -252,8 +254,13 @@ function activarSubTabInscripcion(sub) {
     btn.classList.toggle('activo', btn.dataset.sub === sub);
   }
   el('subInscripcionesTalleres').hidden = sub !== 'talleres';
+  el('subInscripcionesAsistentes').hidden = sub !== 'asistentes';
   el('subInscripcionesEncuentro').hidden = sub !== 'encuentro';
   if (sub === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
+  if (sub === 'asistentes') {
+    if (!asistentesData.length) cargarAsistentes();
+    else renderAsistentes(asistentesData);
+  }
 }
 
 document.querySelectorAll('#subTabsInscripciones .sub-tab').forEach((btn) => {
@@ -759,6 +766,157 @@ el('botonActualizarEncuentro').addEventListener('click', async () => {
     return;
   }
   renderEncuentroPersonas(res.data.personas || []);
+});
+
+// ── Asistentes (CRUD dentro de Inscripciones) ────────────────────────
+const resumenAsistentes = el('resumenAsistentes');
+const buscarAsistente = el('buscarAsistente');
+const modalAsistente = el('modalAsistente');
+const mensajeAsistenteModal = el('mensajeAsistenteModal');
+const asistenteDni = el('asistenteDni');
+const asistenteApellido = el('asistenteApellido');
+const asistenteNombre = el('asistenteNombre');
+const asistenteEmail = el('asistenteEmail');
+const asistenteTelefono = el('asistenteTelefono');
+const asistenteAlimentacion = el('asistenteAlimentacion');
+const modalAsistenteTalleres = el('modalAsistenteTalleres');
+const modalAsistenteConflicto = el('modalAsistenteConflicto');
+const botonGuardarAsistente = el('botonGuardarAsistente');
+const botonCancelarAsistente = el('botonCancelarAsistente');
+const botonNuevoAsistente = el('botonNuevoAsistente');
+const botonActualizarAsistentes = el('botonActualizarAsistentes');
+
+function renderAsistentes(lista) {
+  asistentesData = Array.isArray(lista) ? lista : [];
+  const cuerpo = document.querySelector('#tablaAsistentes tbody');
+  cuerpo.innerHTML = '';
+  resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} · ${asistentesData.reduce((s,a)=>s+Number(a.cantidad_talleres||0),0)} inscripciones en talleres.`;
+  const q = (buscarAsistente.value || '').trim().toLowerCase();
+  const visibles = asistentesData.filter(a =>
+    !q || String(a.dni||'').includes(q) || String(a.apellido||'').toLowerCase().includes(q) || String(a.nombre||'').toLowerCase().includes(q) || String(a.email||'').toLowerCase().includes(q)
+  );
+  if (visibles.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 10;
+    td.textContent = q ? 'Sin resultados para el filtro.' : 'No hay asistentes inscriptos.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpo.appendChild(tr);
+    return;
+  }
+  for (const a of visibles) {
+    const tr = document.createElement('tr');
+    const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent=a.dni;
+    const tdNombre = document.createElement('td'); tdNombre.textContent=`${a.apellido}, ${a.nombre}`.replace(/^,\s*/,'') || '—';
+    const tdEmail = document.createElement('td'); tdEmail.textContent=a.email||'—';
+    const tdTel = document.createElement('td'); tdTel.textContent=a.telefono||'—';
+    const tdAlim = document.createElement('td'); tdAlim.textContent=ETIQUETAS_ALIMENTACION[a.alimentacion]||a.alimentacion||'—';
+    const tdTalleres = document.createElement('td');
+    const divTalleres = document.createElement('div'); divTalleres.className='lista-talleres-inscripcion';
+    const nombres = String(a.talleres_nombres||'').split(',').map(s=>s.trim()).filter(Boolean);
+    for (const n of nombres.slice(0,3)) { const chip=document.createElement('div'); chip.className='chip-taller'; chip.textContent=n; divTalleres.appendChild(chip); }
+    if (nombres.length>3) { const more=document.createElement('div'); more.className='chip-taller chip-taller-mas'; more.textContent=`+${nombres.length-3} más`; divTalleres.appendChild(more); }
+    if (!nombres.length) divTalleres.textContent='—';
+    tdTalleres.appendChild(divTalleres);
+    const tdEncuentro = document.createElement('td'); tdEncuentro.textContent=a.en_encuentro?'Sí':'No'; tdEncuentro.className=a.en_encuentro?'encuentro-si':'encuentro-no';
+    const tdPago = document.createElement('td'); const spanPago=document.createElement('span'); spanPago.className=`estado-pago-texto ${a.estado_pago||'no_pagado'}`; spanPago.textContent=ETIQUETAS_PAGO[a.estado_pago]||a.estado_pago||'—'; tdPago.appendChild(spanPago);
+    const tdFecha = document.createElement('td'); tdFecha.textContent=formatearFecha(a.creado_en);
+    const tdAcc = document.createElement('td'); const cont=document.createElement('div'); cont.className='acciones-fila';
+    const btnEdit=document.createElement('button'); btnEdit.type='button'; btnEdit.className='boton boton-chico'; btnEdit.textContent='Editar'; btnEdit.addEventListener('click',()=>abrirModalAsistente(a)); cont.appendChild(btnEdit);
+    const btnDel=document.createElement('button'); btnDel.type='button'; btnDel.className='boton boton-peligro boton-chico'; btnDel.textContent='Eliminar'; btnDel.addEventListener('click', async()=>{
+      if(!window.confirm(`¿Eliminar asistente ${a.apellido}, ${a.nombre} (DNI ${a.dni}) y todas sus inscripciones?`)) return;
+      btnDel.disabled=true;
+      const res=await api(`/api/admin/asistentes/${encodeURIComponent(a.dni)}`,{method:'DELETE'});
+      if(!res.ok){ mostrarMensaje(mensajePanel,res.data.error||'No se pudo eliminar.','error'); } else { mostrarMensaje(mensajePanel,'Asistente eliminado.','ok'); await cargarDatos(); await cargarAsistentes(); }
+      btnDel.disabled=false;
+    }); cont.appendChild(btnDel);
+    tdAcc.appendChild(cont);
+    tr.append(tdDni,tdNombre,tdEmail,tdTel,tdAlim,tdTalleres,tdEncuentro,tdPago,tdFecha,tdAcc);
+    cuerpo.appendChild(tr);
+  }
+}
+
+async function cargarAsistentes() {
+  resumenAsistentes.textContent='Cargando…';
+  const res=await api('/api/admin/asistentes');
+  if(!res.ok){ resumenAsistentes.textContent=res.data.error||'No se pudieron cargar los asistentes.'; return; }
+  renderAsistentes(res.data);
+}
+
+function actualizarConflictoAsistente(){
+  const aviso=modalAsistenteConflicto;
+  const seleccionados=[...modalAsistenteTalleres.querySelectorAll('input[type="checkbox"]:checked')].map(c=>Number(c.value));
+  const byId=new Map(talleresActuales.map(t=>[Number(t.id),t]));
+  const extra=seleccionados.map(id=>byId.get(id)).filter(Boolean);
+  const pares=[];
+  for(let i=0;i<extra.length;i++) for(let j=i+1;j<extra.length;j++) if(talleresSeSuperponenEdicion(extra[i],extra[j])) pares.push([extra[i],extra[j]]);
+  if(pares.length===0){ aviso.hidden=true; aviso.innerHTML=''; return; }
+  aviso.innerHTML=`<strong>⚠ Conflicto de horarios:</strong><br>${pares.map(([a,b])=>`• ${escapeHtml(a.nombre)} ↔ ${escapeHtml(b.nombre)}`).join('<br>')}`;
+  aviso.hidden=false;
+}
+
+async function abrirModalAsistente(asistente){
+  asistenteEditando = asistente || null;
+  const esNuevo=!asistenteEditando;
+  el('modalAsistenteTitulo').textContent= esNuevo ? 'Nuevo asistente' : 'Editar asistente';
+  mostrarMensaje(mensajeAsistenteModal,'','');
+  asistenteDni.value = asistente ? asistente.dni : '';
+  asistenteDni.disabled = !esNuevo;
+  asistenteApellido.value = asistente ? asistente.apellido : '';
+  asistenteNombre.value = asistente ? asistente.nombre : '';
+  asistenteEmail.value = asistente ? asistente.email : '';
+  asistenteTelefono.value = asistente ? asistente.telefono : '';
+  asistenteAlimentacion.value = asistente ? (asistente.alimentacion||'sin_restriccion') : 'sin_restriccion';
+  if(!talleresActuales.length){
+    try{ const r=await api('/api/admin/talleres'); if(r.ok) talleresActuales=r.data; }catch(_){}
+  }
+  modalAsistenteTalleres.innerHTML='';
+  const idsActuales = asistente ? String(asistente.talleres_ids||'').split(',').map(s=>Number(s.trim())).filter(n=>n>0) : [];
+  for(const t of talleresActuales){
+    const id=Number(t.id);
+    const marcado=idsActuales.includes(id);
+    const lleno=t.inscriptos>=t.cupo && !marcado;
+    const label=document.createElement('label'); label.className='opcion-taller'+(lleno?' opcion-taller-lleno':'');
+    const check=document.createElement('input'); check.type='checkbox'; check.value=id; check.checked=marcado; check.disabled=lleno;
+    const span=document.createElement('span'); span.textContent= lleno ? `${t.nombre} (lleno)` : `${t.nombre} — ${t.cupo - t.inscriptos} cupos`;
+    label.appendChild(check); label.appendChild(span); modalAsistenteTalleres.appendChild(label);
+  }
+  actualizarConflictoAsistente();
+  modalAsistente.hidden=false; modalAsistente.setAttribute('aria-hidden','false');
+}
+function cerrarModalAsistente(){
+  modalAsistente.hidden=true; modalAsistente.setAttribute('aria-hidden','true');
+  asistenteEditando=null; mostrarMensaje(mensajeAsistenteModal,'','');
+}
+botonCancelarAsistente.addEventListener('click', cerrarModalAsistente);
+modalAsistente.addEventListener('click', (e)=>{ if(e.target===modalAsistente) cerrarModalAsistente(); });
+modalAsistenteTalleres.addEventListener('change', actualizarConflictoAsistente);
+botonNuevoAsistente.addEventListener('click', ()=>abrirModalAsistente(null));
+botonActualizarAsistentes.addEventListener('click', cargarAsistentes);
+buscarAsistente.addEventListener('input', ()=>renderAsistentes(asistentesData));
+botonGuardarAsistente.addEventListener('click', async()=>{
+  const dni=String(asistenteDni.value||'').trim().replace(/\D/g,'');
+  const apellido=String(asistenteApellido.value||'').trim();
+  const nombre=String(asistenteNombre.value||'').trim();
+  const email=String(asistenteEmail.value||'').trim();
+  const telefono=String(asistenteTelefono.value||'').trim();
+  const alimentacion=String(asistenteAlimentacion.value||'sin_restriccion').trim();
+  const seleccionados=[...modalAsistenteTalleres.querySelectorAll('input[type="checkbox"]:checked')].map(c=>Number(c.value));
+  if(!/^\d{7,8}$/.test(dni)){ mostrarMensaje(mensajeAsistenteModal,'DNI inválido (7 u 8 dígitos).','error'); return; }
+  if(apellido.length<2 || nombre.length<2){ mostrarMensaje(mensajeAsistenteModal,'Nombre y apellido requeridos.','error'); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ mostrarMensaje(mensajeAsistenteModal,'Email inválido.','error'); return; }
+  if(seleccionados.length===0){ mostrarMensaje(mensajeAsistenteModal,'Seleccioná al menos un taller.','error'); return; }
+  botonGuardarAsistente.disabled=true;
+  const esNuevo=!asistenteEditando;
+  const url= esNuevo ? '/api/admin/asistentes' : `/api/admin/asistentes/${encodeURIComponent(dni)}`;
+  const method= esNuevo ? 'POST':'PUT';
+  const payload={ dni, nombre, apellido, email, telefono, alimentacion, talleres: seleccionados };
+  if(!esNuevo) { payload.dni=dni; }
+  const res=await api(url,{method, body:JSON.stringify(payload)});
+  if(!res.ok){ mostrarMensaje(mensajeAsistenteModal,res.data.error||'No se pudo guardar.','error'); }
+  else { mostrarMensaje(mensajePanel, esNuevo?'Asistente creado.':'Asistente actualizado.','ok'); cerrarModalAsistente(); await cargarDatos(); await cargarAsistentes(); if(subTabInscripcionActiva()==='talleres'){ await cargarInscripciones(); } }
+  botonGuardarAsistente.disabled=false;
 });
 
 function renderEventos(eventos) {

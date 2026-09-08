@@ -82,6 +82,7 @@
       <div id="vistaInscripciones" class="tab-contenido" hidden>
         <div class="sub-tabs" id="subTabsInscripciones">
           <button type="button" class="sub-tab activo" data-sub="talleres">Inscripciones a talleres</button>
+          <button type="button" class="sub-tab" data-sub="asistentes">Asistentes</button>
           <button type="button" class="sub-tab" data-sub="encuentro">Importadas del encuentro</button>
         </div>
 
@@ -113,6 +114,42 @@
                   <th>Teléfono</th>
                   <th>Alimentación</th>
                   <th>Taller</th>
+                  <th>Encuentro</th>
+                  <th>Pago</th>
+                  <th>Fecha</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="subInscripcionesAsistentes" hidden>
+          <div class="cabecera-panel">
+            <h3>Asistentes</h3>
+            <div style="display:flex;gap:8px;">
+              <button id="botonNuevoAsistente" class="boton boton-secundario boton-chico" type="button">+ Nuevo asistente</button>
+              <button id="botonActualizarAsistentes" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+            </div>
+          </div>
+          <p class="ayuda" id="resumenAsistentes"></p>
+          <div class="filtros-barra">
+            <div class="campo">
+              <label for="buscarAsistente">Buscar por DNI, nombre o correo</label>
+              <input type="text" id="buscarAsistente" placeholder="Ej: 30123456 o apellido…">
+            </div>
+          </div>
+          <div class="tabla-envoltura">
+            <table id="tablaAsistentes">
+              <thead>
+                <tr>
+                  <th>DNI</th>
+                  <th>Nombre y apellido</th>
+                  <th>Correo</th>
+                  <th>Teléfono</th>
+                  <th>Alimentación</th>
+                  <th>Talleres</th>
                   <th>Encuentro</th>
                   <th>Pago</th>
                   <th>Fecha</th>
@@ -581,6 +618,55 @@
       <div class="modal-acciones">
         <button type="button" class="boton boton-modal" id="botonGuardarEncuentro">Guardar</button>
         <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEncuentro">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalAsistente" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-edicion" role="dialog" aria-modal="true" aria-labelledby="modalAsistenteTitulo">
+      <h3 id="modalAsistenteTitulo">Nuevo asistente</h3>
+      <div id="mensajeAsistenteModal" class="mensaje" role="alert"></div>
+      <div class="campos">
+        <div class="campo">
+          <label for="asistenteDni">Nº D.N.I *</label>
+          <input type="text" id="asistenteDni" inputmode="numeric" maxlength="8" required placeholder="Ej: 30123456">
+        </div>
+        <div class="campo">
+          <label for="asistenteApellido">Apellido *</label>
+          <input type="text" id="asistenteApellido" required>
+        </div>
+        <div class="campo">
+          <label for="asistenteNombre">Nombre *</label>
+          <input type="text" id="asistenteNombre" required>
+        </div>
+        <div class="campo">
+          <label for="asistenteEmail">Correo electrónico *</label>
+          <input type="email" id="asistenteEmail" required>
+        </div>
+        <div class="campo">
+          <label for="asistenteTelefono">Teléfono</label>
+          <input type="text" id="asistenteTelefono" inputmode="numeric">
+        </div>
+        <div class="campo">
+          <label for="asistenteAlimentacion">Alimentación</label>
+          <select id="asistenteAlimentacion">
+            <option value="sin_restriccion">Sin restricción</option>
+            <option value="vegano">Vegano</option>
+            <option value="sin_tacc">Sin TACC</option>
+            <option value="sin_lactosa">Sin lactosa</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+      </div>
+      <div class="campo" style="margin-top:1rem;">
+        <label>Talleres *</label>
+        <div id="modalAsistenteTalleres" class="talleres-multiple"></div>
+        <p class="ayuda-campo">Seleccioná al menos un taller. Se verifica cupo y superposición horaria.</p>
+      </div>
+      <div id="modalAsistenteConflicto" class="aviso-conflicto" hidden></div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarAsistente">Guardar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarAsistente">Cancelar</button>
       </div>
     </div>
   </div>
