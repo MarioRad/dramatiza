@@ -461,6 +461,11 @@ td {
 .notif-tipo-recordatorio { color: var(--color-primario); }
 .modal-contenido-edicion { max-width: calc(100vw - 2rem); width: 100%; }
 .modal-contenido-medio { max-width: 460px; }
+.modal-contenido-asistente { max-width: 640px; max-height: 92vh; }
+.modal-contenido-asistente .modal-cuerpo { padding-right: 0.25rem; }
+.modal-contenido-asistente .modal-acciones { position: sticky; bottom: 0; background: #fff; padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--color-borde, #e2e8f0); }
+body.dark .modal-contenido-asistente .modal-acciones { background: var(--color-tarjeta); }
+.modal-contenido-asistente .talleres-multiple { max-height: 32vh; min-height: 120px; }
 
 /* ── Pagos y cuotas ─────────────────────────────── */
 .pagos-seccion {
