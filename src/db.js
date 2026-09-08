@@ -894,18 +894,31 @@ async function contarAcreditados() {
 }
 
 async function listarAcreditacionesPorTaller() {
+  // Unificar talleres de 2 partes: una sola fila por taller lógico (COALESCE(pareja_id, id))
+  // Inscriptos = personas distintas (DNI) en cualquier parte del taller; coincide con cupo lógico.
   const filasRes = await query(
-    `SELECT t.id AS taller_id, t.nombre AS taller, t.fecha, t.hora, t.cupo, t.pareja_id,
-       (SELECT COUNT(*) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos,
-       (SELECT COUNT(DISTINCT i2.dni) FROM inscripciones i2 JOIN acreditaciones a ON a.dni = i2.dni WHERE i2.taller_id = t.id) AS acreditados
-      FROM talleres t
-      ORDER BY t.fecha, t.hora, t.nombre`
+    `SELECT
+       COALESCE(t.pareja_id, t.id) AS taller_id,
+       MAX(CASE WHEN t.pareja_id IS NULL THEN t.nombre ELSE NULL END) AS taller,
+       MAX(CASE WHEN t.pareja_id IS NULL THEN t.fecha ELSE NULL END) AS fecha,
+       MAX(CASE WHEN t.pareja_id IS NULL THEN t.hora ELSE NULL END) AS hora,
+       MIN(t.cupo) AS cupo,
+       COUNT(DISTINCT i.dni) AS inscriptos,
+       COUNT(DISTINCT CASE WHEN a.dni IS NOT NULL THEN i.dni END) AS acreditados
+     FROM talleres t
+     LEFT JOIN inscripciones i ON i.taller_id = t.id
+     LEFT JOIN acreditaciones a ON a.dni = i.dni
+     GROUP BY COALESCE(t.pareja_id, t.id)
+     ORDER BY MAX(CASE WHEN t.pareja_id IS NULL THEN t.fecha ELSE NULL END), MAX(CASE WHEN t.pareja_id IS NULL THEN t.hora ELSE NULL END), MAX(CASE WHEN t.pareja_id IS NULL THEN t.nombre ELSE NULL END)`
   );
+  // Normalizar nombre base (sin sufijo " (2° parte)") por si quedó algún sufijo residual
+  const REG_SUFIJO = /\s*\(\s*\d+\s*[º°]\s*parte\s*\)\s*$/i;
   return filasRes.map((f) => ({
-    ...f,
     taller_id: Number(f.taller_id),
+    taller: String(f.taller || '').replace(REG_SUFIJO, '').trim() || String(f.taller || ''),
+    fecha: f.fecha || '',
+    hora: f.hora || '',
     cupo: Number(f.cupo),
-    pareja_id: f.pareja_id ? Number(f.pareja_id) : null,
     inscriptos: Number(f.inscriptos),
     acreditados: Number(f.acreditados),
   }));

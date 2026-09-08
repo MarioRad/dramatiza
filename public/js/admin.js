@@ -963,29 +963,8 @@ function renderAcreditaciones(datos) {
   resumenAcreditaciones.textContent = `Total acreditados: ${total} de ${inscriptosUnicos} inscripto(s).`;
 
   let porTaller = datos.porTaller || [];
-  // Agrupar talleres multiparte (pareja_id) para mostrar un solo renglón por taller lógico
-  // y evitar duplicar inscriptos. El recuento lógico es el máximo entre partes.
-  const grupos = new Map();
-  for (const t of porTaller) {
-    const clave = t.pareja_id ? t.pareja_id : t.taller_id;
-    if (!grupos.has(clave)) grupos.set(clave, []);
-    grupos.get(clave).push(t);
-  }
-  const filasAgrupadas = [];
-  for (const [, arr] of grupos) {
-    if (arr.length === 1) {
-      filasAgrupadas.push(arr[0]);
-    } else {
-      const main = arr.find((x) => !x.pareja_id) || arr[0];
-      const cupo = Math.min(...arr.map((x) => Number(x.cupo) || 20));
-      const inscriptos = Math.max(...arr.map((x) => Number(x.inscriptos) || 0));
-      const acreditados = Math.max(...arr.map((x) => Number(x.acreditados) || 0));
-      // nombre sin sufijo "(2° parte)" para el grupo
-      const nombreBase = String(main.taller || '').replace(/\s*\(\d+°\s*parte\)\s*$/gi, '').trim() || main.taller;
-      filasAgrupadas.push({ ...main, taller: nombreBase + (arr.length > 1 ? ` (${arr.length} partes)` : ''), cupo, inscriptos, acreditados });
-    }
-  }
-  porTaller = filasAgrupadas.sort((a, b) => String(a.fecha||'').localeCompare(String(b.fecha||'')) || String(a.hora||'').localeCompare(String(b.hora||'')));
+  // El servidor ya unifica talleres de 2 partes en una sola fila (por taller lógico)
+  porTaller = [...porTaller].sort((a, b) => String(a.fecha||'').localeCompare(String(b.fecha||'')) || String(a.hora||'').localeCompare(String(b.hora||'')));
 
   if (porTaller.length === 0) {
     const tr = document.createElement('tr');
