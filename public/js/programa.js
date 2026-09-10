@@ -725,14 +725,14 @@ const ProgramaUI = (() => {
         const horarios = allParts.map(p => horariosTaller(p)).join('<br>');
         const tallId = t.pareja_id || t.id;
         const checkbox = isSeleccion
-          ? `<input type="checkbox" class="taller-checkbox" data-taller-id="${tallId}"${lleno ? ' disabled' : ''}>`
+          ? `<input type="checkbox" class="taller-checkbox" data-taller-id="${tallId}"${lleno ? ' disabled title="No hay más cupos disponibles"' : ''}>`
           : '';
         const disertante = t.disertante ? `<div class="taller-disertante">${escapeHtml(t.disertante)}</div>` : '';
         const disponibles = Math.max(0, cupo - inscriptos);
         const cupoHtml = lleno
           ? '<span class="cupo-lleno">Lleno</span>'
           : `${disponibles} de ${cupo}`;
-        rows += `<tr data-taller-id="${tallId}" class="${lleno ? 'fila-llena' : ''}">
+        rows += `<tr data-taller-id="${tallId}" class="${lleno ? 'fila-llena' : ''}"${lleno && isSeleccion ? ' title="No hay más cupos disponibles"' : ''}>
           <td class="taller-check">${checkbox}</td>
           <td class="taller-nombre">${escapeHtml(t.nombre)}${disertante}${item.parts.length ? ' <span class="taller-partes-badge">' + (item.parts.length + 1) + ' partes</span>' : ''}</td>
           <td class="taller-duracion">${duracionTotal} h</td>
@@ -776,10 +776,30 @@ const ProgramaUI = (() => {
       if (mode === 'seleccion') {
         container.querySelectorAll('.taller-checkbox').forEach(cb => {
           cb.addEventListener('change', () => {
+            if (cb.disabled) {
+              cb.checked = false;
+              alert('No hay más cupos disponibles');
+              return;
+            }
             if (typeof window.__cambioSeleccionTaller === 'function') {
               window.__cambioSeleccionTaller(cb);
             }
           });
+          if (cb.disabled) {
+            cb.addEventListener('click', (e) => {
+              e.preventDefault();
+              alert('No hay más cupos disponibles');
+            });
+          }
+        });
+        container.querySelectorAll('tr.fila-llena').forEach(tr => {
+          tr.addEventListener('click', (e) => {
+            const cb = tr.querySelector('.taller-checkbox');
+            if (cb && cb.disabled && e.target !== cb) {
+              alert('No hay más cupos disponibles');
+            }
+          });
+          tr.style.cursor = 'not-allowed';
         });
       }
       return;

@@ -331,6 +331,7 @@ function abrirModalEdicion(inscripcion, filas = []) {
 
     const label = document.createElement('label');
     label.className = 'opcion-taller' + (lleno ? ' opcion-taller-lleno' : '');
+    if (lleno) label.title = 'No hay más cupos disponibles';
     const check = document.createElement('input');
     check.type = 'checkbox';
     check.value = id;
@@ -338,11 +339,17 @@ function abrirModalEdicion(inscripcion, filas = []) {
     check.disabled = lleno;
     const span = document.createElement('span');
     const etiqueta = lleno
-      ? `${t.nombre} (lleno)`
+      ? `${t.nombre} — No hay más cupos disponibles`
       : `${t.nombre} — ${t.cupo - t.inscriptos} cupos`;
     span.textContent = etiqueta;
     label.appendChild(check);
     label.appendChild(span);
+    if (lleno) {
+      label.addEventListener('click', (e) => {
+        e.preventDefault();
+        alert('No hay más cupos disponibles');
+      });
+    }
     modalEditarTalleres.appendChild(label);
   }
 
@@ -376,7 +383,11 @@ botonGuardarEdicion.addEventListener('click', async () => {
     body: JSON.stringify({ dni: inscripcionEditando.dni, talleres: seleccionados }),
   });
   if (!res.ok) {
-    mostrarMensaje(mensajePanel, res.data.error || 'No se pudieron actualizar los talleres.', 'error');
+    const msg = res.data.error || 'No se pudieron actualizar los talleres.';
+    mostrarMensaje(mensajePanel, msg, 'error');
+    if (String(msg).toLowerCase().includes('cupo') || String(msg).toLowerCase().includes('no hay más cupos')) {
+      alert('No hay más cupos disponibles');
+    }
   } else {
     mostrarMensaje(mensajePanel, 'Talleres actualizados.', 'ok');
     cerrarModalEdicion();
@@ -878,9 +889,17 @@ async function abrirModalAsistente(asistente){
     const marcado=idsActuales.includes(id);
     const lleno=t.inscriptos>=t.cupo && !marcado;
     const label=document.createElement('label'); label.className='opcion-taller'+(lleno?' opcion-taller-lleno':'');
+    if (lleno) label.title = 'No hay más cupos disponibles';
     const check=document.createElement('input'); check.type='checkbox'; check.value=id; check.checked=marcado; check.disabled=lleno;
-    const span=document.createElement('span'); span.textContent= lleno ? `${t.nombre} (lleno)` : `${t.nombre} — ${t.cupo - t.inscriptos} cupos`;
-    label.appendChild(check); label.appendChild(span); modalAsistenteTalleres.appendChild(label);
+    const span=document.createElement('span'); span.textContent= lleno ? `${t.nombre} — No hay más cupos disponibles` : `${t.nombre} — ${t.cupo - t.inscriptos} cupos`;
+    label.appendChild(check); label.appendChild(span);
+    if (lleno) {
+      label.addEventListener('click', (e) => {
+        e.preventDefault();
+        alert('No hay más cupos disponibles');
+      });
+    }
+    modalAsistenteTalleres.appendChild(label);
   }
   actualizarConflictoAsistente();
   modalAsistente.hidden=false; modalAsistente.setAttribute('aria-hidden','false');
@@ -914,7 +933,13 @@ botonGuardarAsistente.addEventListener('click', async()=>{
   const payload={ dni, nombre, apellido, email, telefono, alimentacion, talleres: seleccionados };
   if(!esNuevo) { payload.dni=dni; }
   const res=await api(url,{method, body:JSON.stringify(payload)});
-  if(!res.ok){ mostrarMensaje(mensajeAsistenteModal,res.data.error||'No se pudo guardar.','error'); }
+  if(!res.ok){
+    const msg=res.data.error||'No se pudo guardar.';
+    mostrarMensaje(mensajeAsistenteModal,msg,'error');
+    if (String(msg).toLowerCase().includes('cupo') || String(msg).toLowerCase().includes('no hay más cupos')) {
+      alert('No hay más cupos disponibles');
+    }
+  }
   else { mostrarMensaje(mensajePanel, esNuevo?'Asistente creado.':'Asistente actualizado.','ok'); cerrarModalAsistente(); await cargarDatos(); await cargarAsistentes(); if(subTabInscripcionActiva()==='talleres'){ await cargarInscripciones(); } }
   botonGuardarAsistente.disabled=false;
 });

@@ -166,7 +166,7 @@ async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', a
       if (!taller) throw new HttpError(400, 'Uno de los talleres seleccionados no existe.');
       const conteo = await run('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [id]);
       if (Number(conteo[0].n) >= Number(taller.cupo)) {
-        throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
+        throw new HttpError(409, `No hay más cupos disponibles para el taller "${taller.nombre}".`);
       }
       seleccionados.push(taller);
     }
@@ -584,7 +584,7 @@ async function cambiarTallerInscripcion(id, nuevoTallerId) {
   if (!taller) throw new HttpError(400, 'El taller seleccionado no existe.');
   const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND id <> ?', [nuevoTallerId, id]);
   if (Number(conteo[0].n) >= Number(taller.cupo)) {
-    throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
+    throw new HttpError(409, `No hay más cupos disponibles para el taller "${taller.nombre}".`);
   }
   const otros = await query(
     `SELECT i.taller_id, t.nombre, t.fecha, t.hora, t.duracion_hs
@@ -643,7 +643,7 @@ async function reemplazarTalleresInscripcion(dni, ids) {
       if (actualesPorTaller.has(id)) continue;
       const conteo = await run('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND dni <> ?', [id, dni]);
       if (Number(conteo[0].n) >= Number(taller.cupo)) {
-        throw new HttpError(409, `El taller "${taller.nombre}" ya completó su cupo.`);
+        throw new HttpError(409, `No hay más cupos disponibles para el taller "${taller.nombre}".`);
       }
       nuevosTalleres.push(taller);
     }

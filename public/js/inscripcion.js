@@ -229,6 +229,13 @@ function cambioSeleccionTaller(cbCambiado) {
   hiddenTallerIds.value = '';
 
   if (cbCambiado && cbCambiado.checked) {
+    const idCambiado = Number(cbCambiado.dataset.tallerId);
+    const tCambiado = talleresData.find(x => x.id === idCambiado);
+    if (tCambiado && tCambiado.inscriptos >= tCambiado.cupo) {
+      cbCambiado.checked = false;
+      alert('No hay más cupos disponibles');
+      return;
+    }
     const seleccionadas = [];
     checks.forEach(cb => {
       if (!cb.checked) return;
@@ -299,7 +306,25 @@ function deshabilitarSinCupo(container) {
   container.querySelectorAll('.taller-checkbox').forEach(cb => {
     const t = talleresData.find(x => x.id === Number(cb.dataset.tallerId));
     if (!t) return;
-    if (t.inscriptos >= t.cupo) cb.disabled = true;
+    if (t.inscriptos >= t.cupo) {
+      cb.disabled = true;
+      cb.title = 'No hay más cupos disponibles';
+      cb.closest('tr')?.setAttribute('title', 'No hay más cupos disponibles');
+      cb.addEventListener('click', (e) => {
+        e.preventDefault();
+        alert('No hay más cupos disponibles');
+      });
+    }
+  });
+  container.querySelectorAll('tr.fila-llena').forEach(tr => {
+    if (!tr.querySelector('.taller-checkbox:disabled')) return;
+    tr.addEventListener('click', (e) => {
+      const cb = tr.querySelector('.taller-checkbox');
+      if (cb && cb.disabled && e.target !== cb) {
+        alert('No hay más cupos disponibles');
+      }
+    });
+    tr.style.cursor = 'not-allowed';
   });
 }
 
@@ -608,7 +633,11 @@ formulario.addEventListener('submit', async (e) => {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      mostrarMensaje(data.error || 'Ocurrió un error al registrarte.', 'error');
+      const msg = data.error || 'Ocurrió un error al registrarte.';
+      mostrarMensaje(msg, 'error');
+      if (String(msg).toLowerCase().includes('cupo') || String(msg).toLowerCase().includes('no hay más cupos')) {
+        alert('No hay más cupos disponibles');
+      }
       return;
     }
 
