@@ -1215,8 +1215,89 @@ el('botonActualizarAcreditaciones').addEventListener('click', cargarAcreditacion
 
 const ICONO_CATEGORIA_COMIDA = { desayuno: '☕', merienda: '🫖', otro: '🍽️' };
 
+let _comidasInscriptosCache = [];
+
+function renderTablaInscriptosConDieta() {
+  const cuerpo = document.querySelector('#tablaInscriptosConDieta tbody');
+  if (!cuerpo) return;
+  cuerpo.innerHTML = '';
+  const filtroDieta = (el('filtroComidasDieta')?.value || '').trim();
+  const q = (el('buscarComidasDietas')?.value || '').trim().toLowerCase();
+  const visibles = _comidasInscriptosCache.filter(p => {
+    if (filtroDieta && p.alimentacion !== filtroDieta) return false;
+    if (!q) return true;
+    return String(p.dni||'').includes(q) || String(p.apellido||'').toLowerCase().includes(q) || String(p.nombre||'').toLowerCase().includes(q) || `${p.nombre||''} ${p.apellido||''}`.toLowerCase().includes(q);
+  });
+  if (visibles.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = _comidasInscriptosCache.length === 0 ? 'Aún no hay inscriptos a talleres.' : 'Sin resultados para el filtro.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    cuerpo.appendChild(tr);
+    return;
+  }
+  for (const p of visibles) {
+    const tr = document.createElement('tr');
+    const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent = p.dni;
+    const tdNombre = document.createElement('td'); tdNombre.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
+    const tdAlim = document.createElement('td'); tdAlim.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+    if (p.alimentacion !== 'sin_restriccion') tdAlim.classList.add('encuentro-si');
+    const tdTalleres = document.createElement('td'); tdTalleres.textContent = p.talleres || '—'; tdTalleres.style.whiteSpace='normal'; tdTalleres.style.fontSize='0.85rem';
+    const tdEmail = document.createElement('td'); tdEmail.textContent = p.email || '—'; tdEmail.style.fontSize='0.85rem';
+    tr.append(tdDni, tdNombre, tdAlim, tdTalleres, tdEmail);
+    cuerpo.appendChild(tr);
+  }
+}
+
 function renderComidas(datos) {
-  resumenComidas.textContent = `Total acreditados: ${Number(datos.total) || 0}. Hora del servidor: ${datos.horaServidor || '—'} (los escaneos cuentan para el servicio cuyo horario incluya esa hora, ±20 min).`;
+  const totalInscriptos = Number(datos.totalInscriptos) || 0;
+  const totalInscripcionesTalleres = Number(datos.totalInscripcionesTalleres) || 0;
+  const totalAcreditados = Number(datos.total) || 0;
+  const dietasInscriptos = datos.inscriptosPorDieta || {};
+  // Resumen al estilo Inscripciones: Personas: 65 (253 inscripciones) · desglose por dieta
+  const desglose = ['sin_restriccion','vegano','sin_tacc','sin_lactosa','otro'].map(k => `${ETIQUETAS_ALIMENTACION[k]}: ${Number(dietasInscriptos[k]||0)}`).join(' · ');
+  resumenComidas.textContent = `Personas: ${totalInscriptos} (${totalInscripcionesTalleres} inscripciones en talleres) · ${desglose} · Acreditados: ${totalAcreditados}. Hora del servidor: ${datos.horaServidor || '—'}`;
+  const resumenInscriptos = el('resumenComidasInscriptos');
+  if (resumenInscriptos) {
+    resumenInscriptos.textContent = `Personas: ${totalInscriptos} (${totalInscripcionesTalleres} inscripciones) · Vegano: ${Number(dietasInscriptos.vegano||0)} · Sin TACC: ${Number(dietasInscriptos.sin_tacc||0)} · Sin lactosa: ${Number(dietasInscriptos.sin_lactosa||0)} · Sin restricción: ${Number(dietasInscriptos.sin_restriccion||0)} · Otro: ${Number(dietasInscriptos.otro||0)}`;
+  }
+
+  // ── Inscriptos por dieta (global, DNI únicos) ──
+  const cuerpoInscriptos = document.querySelector('#tablaInscriptosDieta tbody');
+  if (cuerpoInscriptos) {
+    cuerpoInscriptos.innerHTML = '';
+    const ordenDietas = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_lactosa', 'otro'];
+    const tr = document.createElement('tr');
+    const tdTotal = document.createElement('td');
+    tdTotal.textContent = totalInscriptos;
+    tdTotal.style.fontWeight = 'bold';
+    tr.appendChild(tdTotal);
+    for (const clave of ordenDietas) {
+      const td = document.createElement('td');
+      const cantidad = Number(dietasInscriptos[clave] || 0);
+      td.textContent = cantidad;
+      if (cantidad > 0 && clave !== 'sin_restriccion') td.classList.add('encuentro-si');
+      if (clave !== 'sin_restriccion' && cantidad > 0) td.style.fontWeight = 'bold';
+      tr.appendChild(td);
+    }
+    cuerpoInscriptos.appendChild(tr);
+    if (totalInscriptos === 0) {
+      const tr2 = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.textContent = 'Aún no hay inscriptos a talleres.';
+      td.style.color = 'var(--color-texto-suave)';
+      td.style.fontSize = '0.85rem';
+      tr2.appendChild(td);
+      cuerpoInscriptos.appendChild(tr2);
+    }
+  }
+
+  // ── Listado detallado de quién tiene restricción ──
+  _comidasInscriptosCache = Array.isArray(datos.inscriptosConDieta) ? datos.inscriptosConDieta : [];
+  renderTablaInscriptosConDieta();
 
   const cuerpoServicios = document.querySelector('#tablaComidasServicios tbody');
   cuerpoServicios.innerHTML = '';
@@ -1315,6 +1396,8 @@ async function cargarComidas(silencioso = false) {
 }
 
 el('botonActualizarComidas').addEventListener('click', () => cargarComidas(false));
+el('filtroComidasDieta')?.addEventListener('change', renderTablaInscriptosConDieta);
+el('buscarComidasDietas')?.addEventListener('input', renderTablaInscriptosConDieta);
 
 async function cargarDatos() {
   mostrarMensaje(mensajePanel, '', '');

@@ -28,6 +28,7 @@ const dbMock = {
     }
   },
   async init() {},
+  async initPool() {},
   async hayUsuarios() {
     return true;
   },

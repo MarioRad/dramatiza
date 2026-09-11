@@ -1023,28 +1023,60 @@ async function resumenComidas() {
 
   const porAsistente = await query(
     `SELECT c.dni,
-       MIN(a.primera_acreditacion) AS primera_acreditacion,
-       COALESCE(MIN(p.apellido), '') AS apellido,
-       COALESCE(MIN(p.nombre), '') AS nombre,
-       COALESCE(MIN(p.alimentacion), 'sin_restriccion') AS alimentacion,
-       SUM(CASE WHEN LOWER(b.titulo) LIKE '%desayuno%' THEN 1 ELSE 0 END) AS desayunos,
-       SUM(CASE WHEN LOWER(b.titulo) LIKE '%merienda%' THEN 1 ELSE 0 END) AS meriendas,
-       COUNT(*) AS total_servicios
-     FROM comidas_asistencias c
-     JOIN programa_bloques b ON b.id = c.bloque_id
-     LEFT JOIN (
-       SELECT dni, MIN(apellido) AS apellido, MIN(nombre) AS nombre, MIN(alimentacion) AS alimentacion
-       FROM inscripciones GROUP BY dni
-     ) p ON p.dni = c.dni
-     LEFT JOIN (
-       SELECT dni, MIN(registrado_en) AS primera_acreditacion
-       FROM acreditaciones GROUP BY dni
-     ) a ON a.dni = c.dni
-     GROUP BY c.dni
-     ORDER BY apellido, nombre`
+        MIN(a.primera_acreditacion) AS primera_acreditacion,
+        COALESCE(MIN(p.apellido), '') AS apellido,
+        COALESCE(MIN(p.nombre), '') AS nombre,
+        COALESCE(MIN(p.alimentacion), 'sin_restriccion') AS alimentacion,
+        SUM(CASE WHEN LOWER(b.titulo) LIKE '%desayuno%' THEN 1 ELSE 0 END) AS desayunos,
+        SUM(CASE WHEN LOWER(b.titulo) LIKE '%merienda%' THEN 1 ELSE 0 END) AS meriendas,
+        COUNT(*) AS total_servicios
+      FROM comidas_asistencias c
+      JOIN programa_bloques b ON b.id = c.bloque_id
+      LEFT JOIN (
+        SELECT dni, MIN(apellido) AS apellido, MIN(nombre) AS nombre, MIN(alimentacion) AS alimentacion
+        FROM inscripciones GROUP BY dni
+      ) p ON p.dni = c.dni
+      LEFT JOIN (
+        SELECT dni, MIN(registrado_en) AS primera_acreditacion
+        FROM acreditaciones GROUP BY dni
+      ) a ON a.dni = c.dni
+      GROUP BY c.dni
+      ORDER BY apellido, nombre`
   );
 
-  return { servicios, dietas, porAsistente };
+  // Conteo global de inscriptos a talleres por restricción alimentaria (DNI únicos)
+  const inscriptosPorDietaRaw = await query(
+    `SELECT COALESCE(NULLIF(alimentacion, ''), 'sin_restriccion') AS alimentacion,
+        COUNT(*) AS cantidad
+      FROM (SELECT dni, MIN(alimentacion) AS alimentacion FROM inscripciones GROUP BY dni) x
+      GROUP BY COALESCE(NULLIF(alimentacion, ''), 'sin_restriccion')`
+  );
+  const inscriptosPorDieta = inscriptosPorDietaRaw.map(r => ({
+    alimentacion: String(r.alimentacion || 'sin_restriccion'),
+    cantidad: Number(r.cantidad) || 0,
+  }));
+  const totalInscriptos = inscriptosPorDieta.reduce((s, r) => s + r.cantidad, 0);
+
+  // Listado de personas inscriptas por dieta (DNI únicos) para anticipar servicio — igual base que Inscripciones/Asistentes
+  const inscriptosConDieta = await query(
+    `SELECT dni,
+        MIN(nombre) AS nombre,
+        MIN(apellido) AS apellido,
+        MIN(email) AS email,
+        MIN(telefono) AS telefono,
+        COALESCE(NULLIF(MIN(alimentacion), ''), 'sin_restriccion') AS alimentacion,
+        COUNT(*) AS cantidad_talleres,
+        STRING_AGG(t_nombre, ', ' ORDER BY t_nombre) AS talleres_nombres
+      FROM (
+        SELECT i.dni, i.nombre, i.apellido, i.email, i.telefono, i.alimentacion, t.nombre AS t_nombre
+        FROM inscripciones i JOIN talleres t ON t.id = i.taller_id
+      ) q
+      GROUP BY dni
+      ORDER BY MIN(apellido), MIN(nombre)`
+  );
+  const totalInscripcionesTalleres = inscriptosConDieta.reduce((s, r) => s + Number(r.cantidad_talleres || 0), 0);
+
+  return { servicios, dietas, porAsistente, inscriptosPorDieta, totalInscriptos, inscriptosConDieta, totalInscripcionesTalleres };
 }
 
 // ── Pagos y cuotas ────────────────────────────────────────────────────

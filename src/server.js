@@ -1341,7 +1341,7 @@ app.get('/api/admin/acreditaciones/resumen', requireAuth, requirePermiso('perm_a
 app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    const { servicios, dietas, porAsistente } = await db.resumenComidas();
+    const { servicios, dietas, porAsistente, inscriptosPorDieta = [], totalInscriptos = 0, inscriptosConDieta = [], totalInscripcionesTalleres = 0 } = await db.resumenComidas();
 
     const dietasPorBloque = {};
     for (const f of dietas) {
@@ -1351,8 +1351,28 @@ app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acredita
       dietasPorBloque[f.bloque_id] = bloque;
     }
 
+    // Mapa global de inscriptos a talleres por restricción alimentaria (DNI únicos)
+    const inscriptosMap = DIETAS_VALIDAS.reduce((acc, d) => { acc[d] = 0; return acc; }, {});
+    for (const r of inscriptosPorDieta) {
+      const clave = DIETAS_VALIDAS.includes(r.alimentacion) ? r.alimentacion : 'otro';
+      inscriptosMap[clave] = (inscriptosMap[clave] || 0) + Number(r.cantidad || 0);
+    }
+
     res.json({
       total: await db.contarAcreditados(),
+      totalInscriptos: Number(totalInscriptos) || 0,
+      totalInscripcionesTalleres: Number(totalInscripcionesTalleres) || 0,
+      inscriptosPorDieta: inscriptosMap,
+      inscriptosConDieta: inscriptosConDieta.map(p => ({
+        dni: p.dni,
+        apellido: p.apellido || '',
+        nombre: p.nombre || '',
+        email: p.email || '',
+        telefono: p.telefono || '',
+        alimentacion: p.alimentacion || 'sin_restriccion',
+        cantidadTalleres: Number(p.cantidad_talleres || 0),
+        talleres: p.talleres_nombres || '',
+      })),
       horaServidor: new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }),
       servicios: servicios.map((s) => ({
         id: Number(s.bloque_id),

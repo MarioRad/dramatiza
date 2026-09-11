@@ -362,7 +362,56 @@
           <button id="botonActualizarComidas" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
         </div>
         <p class="ayuda">Cada vez que un asistente acreditado escanea su QR dentro del horario de un desayuno o merienda, se cuenta para ese servicio.</p>
-        <h4>Cantidades por servicio y restricción alimentaria</h4>
+        <h4>Inscriptos a talleres por restricción alimentaria (base para planificar)</h4>
+        <p class="ayuda">Total de asistentes <strong>inscriptos a talleres</strong> agrupados por dieta (DNI únicos). Es el número a considerar para comprar/preparar desayunos y meriendas.</p>
+        <div class="tabla-envoltura">
+          <table id="tablaInscriptosDieta">
+            <thead>
+              <tr>
+                <th>Total inscriptos</th>
+                <th>Sin restricción</th>
+                <th>Vegano</th>
+                <th>Sin TACC</th>
+                <th>Sin lactosa</th>
+                <th>Otro</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="ayuda" id="resumenComidasInscriptos" style="margin-top:0.5rem;"></p>
+        <div class="filtros-barra">
+          <div class="campo">
+            <label for="filtroComidasDieta">Filtrar por dieta</label>
+            <select id="filtroComidasDieta">
+              <option value="">Todas las dietas</option>
+              <option value="sin_restriccion">Sin restricción</option>
+              <option value="vegano">Vegano</option>
+              <option value="sin_tacc">Sin TACC</option>
+              <option value="sin_lactosa">Sin lactosa</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="buscarComidasDietas">Buscar por DNI / nombre</label>
+            <input type="text" id="buscarComidasDietas" placeholder="Ej: 30123456, apellido…">
+          </div>
+        </div>
+        <div class="tabla-envoltura">
+          <table id="tablaInscriptosConDieta">
+            <thead>
+              <tr>
+                <th>DNI</th>
+                <th>Apellido y nombre</th>
+                <th>Alimentación</th>
+                <th>Talleres</th>
+                <th>Email</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h4>Cantidades por servicio y restricción alimentaria (solo acreditados que retiraron)</h4>
         <div class="tabla-envoltura">
           <table id="tablaComidasServicios">
             <thead>
@@ -836,6 +885,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=3"></script>
-  <script src="/js/admin.js?v=9"></script>
+  <script src="/js/admin.js?v=11"></script>
 </body>
 </html>
