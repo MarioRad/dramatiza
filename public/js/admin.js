@@ -148,21 +148,28 @@ async function api(uri, opciones = {}) {
 
 function formatearFecha(valor) {
   if (!valor) return '';
-  const iso = String(valor).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const str = String(valor).trim();
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) {
     return `${iso[3].padStart(2, '0')}/${iso[2].padStart(2, '0')}/${iso[1]}`;
   }
-  const partes = String(valor).split(/[/\-]/);
-  if (partes.length >= 3) {
+  // Si es fecha+hora (ISO con T o con hora), formatear en Salta como DD/MM/AAAA - HH:MM
+  if (/[T ]\d{1,2}:\d{2}/.test(str)) {
+    const fecha = new Date(str);
+    if (!Number.isNaN(fecha.getTime())) {
+      return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(fecha).replace(',', ' -');
+    }
+  }
+  const partes = str.split(/[/\-]/);
+  if (partes.length >= 3 && !/[T:]/.test(str)) {
     const d = partes[0].padStart(2, '0');
     const m = partes[1].padStart(2, '0');
     const y = partes[2].length === 2 ? `20${partes[2]}` : partes[2];
     return `${d}/${m}/${y}`;
   }
-  const fecha = new Date(valor);
+  const fecha = new Date(str);
   if (Number.isNaN(fecha.getTime())) return valor;
-  // Fecha en Salta (dia/mes/año) — respeta TZ para evitar desfase UTC
-  return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric' }).format(fecha);
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(fecha).replace(',', ' -');
 }
 
 function mostrarLogin() {
@@ -551,19 +558,19 @@ function formatearMarcaTemporal(valor) {
   const pad = (n) => String(n).padStart(2, '0');
   const mFechaHora = texto.match(/(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (mFechaHora) {
-    const [, d, m, y, h, min, s] = mFechaHora;
+    const [, d, m, y, h, min] = mFechaHora;
     const anio = y.length === 2 ? `20${y}` : y;
-    return `${pad(d)}/${pad(m)}/${anio} ${pad(h)}:${pad(min)}:${pad(s || 0)}`;
+    return `${pad(d)}/${pad(m)}/${anio} - ${pad(h)}:${pad(min)}`;
   }
   const mFecha = texto.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})$/);
   if (mFecha) {
     const [, d, m, y] = mFecha;
     const anio = y.length === 2 ? `20${y}` : y;
-    return `${pad(d)}/${pad(m)}/${anio} 00:00:00`;
+    return `${pad(d)}/${pad(m)}/${anio} - 00:00`;
   }
   const d = new Date(texto);
   if (!Number.isNaN(d.getTime())) {
-    return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d).replace(',', '');
+    return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(d).replace(',', ' -');
   }
   return texto;
 }
