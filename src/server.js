@@ -1292,7 +1292,7 @@ app.post('/api/mobile/acreditar', async (req, res, next) => {
       nombre: persona.nombre,
       apellido: persona.apellido,
       alimentacion: persona.alimentacion || (inscripciones[0] || {}).alimentacion || 'sin_restriccion',
-      horaServidor: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+      horaServidor: new Date().toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Salta', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
       servicio: servicioComida,
       pagoCompleto,
       talleres: inscripciones.map((i) => ({
@@ -1317,11 +1317,16 @@ function clasificarServicioComida(titulo) {
 
 const DIETAS_VALIDAS = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_lactosa', 'otro'];
 
+const TZ_SALTA = 'America/Argentina/Salta';
 function formatearFechaHora(valor) {
   const d = new Date(valor);
   if (Number.isNaN(d.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: TZ_SALTA,
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).format(d).replace(',', '');
 }
 
 app.get('/api/admin/acreditaciones/resumen', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
@@ -1373,7 +1378,7 @@ app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acredita
         cantidadTalleres: Number(p.cantidad_talleres || 0),
         talleres: p.talleres_nombres || '',
       })),
-      horaServidor: new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }),
+      horaServidor: new Date().toLocaleString('es-AR', { timeZone: TZ_SALTA, dateStyle: 'short', timeStyle: 'medium' }),
       servicios: servicios.map((s) => ({
         id: Number(s.bloque_id),
         dia: s.dia,

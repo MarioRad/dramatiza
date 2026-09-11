@@ -46,6 +46,7 @@ const ETIQUETAS_PAGO = {
   pago_parcial: 'Pago parcial',
   pago_completo: 'Pago completo',
 };
+const TZ_SALTA = 'America/Argentina/Salta';
 
 function el(id) {
   return document.getElementById(id);
@@ -160,10 +161,8 @@ function formatearFecha(valor) {
   }
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return valor;
-  const dd = String(fecha.getDate()).padStart(2, '0');
-  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
-  const yy = String(fecha.getFullYear());
-  return `${dd}/${mm}/${yy}`;
+  // Fecha en Salta (dia/mes/año) — respeta TZ para evitar desfase UTC
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric' }).format(fecha);
 }
 
 function mostrarLogin() {
@@ -564,7 +563,7 @@ function formatearMarcaTemporal(valor) {
   }
   const d = new Date(texto);
   if (!Number.isNaN(d.getTime())) {
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d).replace(',', '');
   }
   return texto;
 }
@@ -2297,7 +2296,7 @@ function abrirModalCuota(a, numero, pagada) {
   modalCuotaPlanId.value = a.asistentePlanId;
   modalCuotaNumero.value = numero;
   modalCuotaMonto.value = pagada ? (pagoPrevio ? pagoPrevio.monto : montoEsperado) : montoEsperado;
-  modalCuotaFecha.value = pagada ? (pagoPrevio && pagoPrevio.fecha ? pagoPrevio.fecha : '') : new Date().toISOString().slice(0, 10);
+  modalCuotaFecha.value = pagada ? (pagoPrevio && pagoPrevio.fecha ? pagoPrevio.fecha : '') : new Intl.DateTimeFormat('en-CA', { timeZone: TZ_SALTA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const nombre = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
   const tope = det && det.fecha_tope ? ` · vence ${formatearFechaTope(det.fecha_tope)}` : '';
   modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}${tope}`;
@@ -2376,8 +2375,7 @@ let notifEditandoId = null;
 function formatearFechaCompleta(valor) {
   const d = new Date(valor);
   if (Number.isNaN(d.getTime())) return valor || '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_SALTA, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d).replace(',', '');
 }
 
 async function cargarNotificaciones() {

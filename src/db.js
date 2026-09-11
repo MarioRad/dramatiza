@@ -1370,11 +1370,17 @@ async function sincronizarEstadoPagoPorDni(dni) {
 
 const EPOCH_FECHA_SQL = "round(extract(epoch from creado_en AT TIME ZONE current_setting('TimeZone')))";
 
+const TZ_SALTA = 'America/Argentina/Salta';
 function formatearFechaServer(epoch) {
   const d = new Date(Number(epoch) * 1000);
   if (Number.isNaN(d.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Fecha y hora en Salta con segundos HH:MM:SS
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: TZ_SALTA,
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).format(d).replace(',', '');
 }
 
 async function listarNotificaciones() {
