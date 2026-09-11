@@ -1231,7 +1231,7 @@ function renderTablaInscriptosConDieta() {
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 5;
+    td.colSpan = 4;
     td.textContent = _comidasInscriptosCache.length === 0 ? 'Aún no hay inscriptos a talleres.' : 'Sin resultados para el filtro.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -1244,9 +1244,8 @@ function renderTablaInscriptosConDieta() {
     const tdNombre = document.createElement('td'); tdNombre.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
     const tdAlim = document.createElement('td'); tdAlim.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
     if (p.alimentacion !== 'sin_restriccion') tdAlim.classList.add('encuentro-si');
-    const tdTalleres = document.createElement('td'); tdTalleres.textContent = p.talleres || '—'; tdTalleres.style.whiteSpace='normal'; tdTalleres.style.fontSize='0.85rem';
     const tdEmail = document.createElement('td'); tdEmail.textContent = p.email || '—'; tdEmail.style.fontSize='0.85rem';
-    tr.append(tdDni, tdNombre, tdAlim, tdTalleres, tdEmail);
+    tr.append(tdDni, tdNombre, tdAlim, tdEmail);
     cuerpo.appendChild(tr);
   }
 }
