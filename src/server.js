@@ -11,9 +11,17 @@ const db = require('./db');
 const notificaciones = require('./notificaciones');
 const acreditacion = require('./acreditacion');
 const whatsapp = require('./whatsapp');
-const { supabaseAdmin } = require('./supabase');
+let supabaseAdmin = null;
+try {
+  ({ supabaseAdmin } = require('./supabase'));
+} catch (_) { /* supabase opcional */ }
 
 const STORAGE_BUCKET = 'ponentes-fotos';
+// Fotos locales: public/uploads/ponentes (servido por express.static)
+const UPLOADS_DIR = path.join(__dirname, '..', 'public', 'uploads', 'ponentes');
+function ensureUploadsDir() {
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
 const EN_VERCEL = String(process.env.VERCEL || '').toLowerCase() === '1';
 
@@ -1168,7 +1176,7 @@ function sesionMovilValida(req) {
   const token = tokenMovilDesdeRequest(req);
   const s = verificarToken(token);
   if (!s || !s.usuario) return null;
-  return { token, usuario: s.usuario };
+  return { token, usuario: s.usuario, nombre: s.nombre, rol: s.rol };
 }
 
 function extraerDatosQr(texto) {
@@ -1668,28 +1676,55 @@ function supabaseFotoPath(filename) {
 async function uploadFotoToStorage(file) {
   const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
   const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-  const storagePath = supabaseFotoPath(name);
-  const { error } = await supabaseAdmin.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
-  if (error) throw new Error(`Error subiendo foto: ${error.message}`);
+  // Si hay Supabase configurado, intentar usarlo; si no, guardar local
+  const useSupabase = process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage;
+  if (useSupabase) {
+    try {
+      const storagePath = supabaseFotoPath(name);
+      const { error } = await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+      if (!error) return name;
+      console.warn('[Storage] Supabase falló, usando filesystem local:', error.message);
+    } catch (e) {
+      console.warn('[Storage] Supabase error, usando filesystem local:', e.message);
+    }
+  }
+  ensureUploadsDir();
+  const dest = path.join(UPLOADS_DIR, name);
+  await fs.promises.writeFile(dest, file.buffer);
   return name;
 }
 
 async function deleteFotoPonente(foto) {
   if (!foto) return;
-  const storagePath = supabaseFotoPath(foto);
+  // Intentar borrar de Supabase si está configurado
+  if (process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage) {
+    try {
+      const storagePath = supabaseFotoPath(foto);
+      await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
+    } catch (_) { /* noop */ }
+  }
+  // Siempre intentar borrar local
   try {
-    await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
+    const localPath = path.join(UPLOADS_DIR, path.basename(foto));
+    if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
   } catch (_) { /* noop */ }
 }
 
 function getFotoUrl(foto) {
   if (!foto) return null;
-  const { data } = supabaseAdmin.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(supabaseFotoPath(foto));
-  return data?.publicUrl || null;
+  // Si hay Supabase configurado, devolver URL pública; si no, ruta local
+  if (process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage) {
+    try {
+      const { data } = supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .getPublicUrl(supabaseFotoPath(foto));
+      if (data?.publicUrl && !data.publicUrl.includes('supabase.co/undefined')) return data.publicUrl;
+    } catch (_) { /* fallback local */ }
+  }
+  // Archivo local servido por express.static -> /uploads/ponentes/<file>
+  return `/uploads/ponentes/${path.basename(foto)}`;
 }
 
 const parseDiaValido = (v, def) => {
@@ -1998,6 +2033,30 @@ app.get('/api/mobile/notificaciones', async (req, res, next) => {
     const lista = await db.listarNotificacionesActivas(sesion.usuario);
     const sinLeer = lista.filter((n) => !n.leida).length;
     res.json({ ok: true, notificaciones: lista, sin_leer: sinLeer });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/mobile/notificaciones', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) {
+      return res.status(401).json({ error: 'No autorizado.' });
+    }
+    if (sesion.rol !== 'admin') {
+      return res.status(403).json({ error: 'Solo el administrador puede enviar notificaciones.' });
+    }
+    const { titulo, mensaje, tipo } = validarNotificacion(req.body || {});
+    const id = await db.crearNotificacion({
+      titulo,
+      mensaje,
+      tipo,
+      activa: true,
+      creadoPor: sesion.usuario,
+    });
+    await db.registrarEvento('notificacion_creada', `Notificación creada desde app móvil: "${titulo}" (${tipo})`, sesion.usuario);
+    res.status(201).json({ ok: true, id });
   } catch (e) {
     next(e);
   }
