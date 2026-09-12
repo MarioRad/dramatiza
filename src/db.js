@@ -44,6 +44,20 @@ async function initPool() {
     poolConfig.database = process.env.DB_NAME || 'inscripciones';
   }
   pool = new pg.Pool(poolConfig);
+  // Auto-migración idempotente para producción (Vercel no ejecuta run-migrations.js)
+  // 006_tallerista_50 + 005 cuotas (por si la DB de producción quedó desactualizada)
+  pool.on('error', () => {});
+  // Ejecutar en background sin bloquear el arranque
+  (async () => {
+    try {
+      await pool.query('ALTER TABLE planes_pago ADD COLUMN IF NOT EXISTS cuotas JSONB');
+      await pool.query('ALTER TABLE asistente_planes ADD COLUMN IF NOT EXISTS cuotas JSONB');
+      await pool.query('ALTER TABLE planes_pago ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
+      await pool.query('ALTER TABLE asistente_planes ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
+    } catch (e) {
+      console.error('[db] auto-migración es_tallerista/cuotas falló:', e.message);
+    }
+  })();
   return pool;
 }
 
@@ -1243,18 +1257,36 @@ async function asignarPlanesAutomaticos(personas) {
 }
 
 async function listarPlanesPago() {
-  const planes = await query(
-    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, es_tallerista, creado_en
-     FROM planes_pago ORDER BY id`
-  );
-  return planes.map((p) => ({
-    ...p,
-    id: Number(p.id),
-    monto_total: Number(p.monto_total),
-    cantidad_cuotas: Number(p.cantidad_cuotas),
-    es_tallerista: Boolean(p.es_tallerista),
-    cuotas: normalizarDetalleCuotas(p.cuotas, p.cantidad_cuotas, p.monto_total),
-  }));
+  try {
+    const planes = await query(
+      `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, es_tallerista, creado_en
+       FROM planes_pago ORDER BY id`
+    );
+    return planes.map((p) => ({
+      ...p,
+      id: Number(p.id),
+      monto_total: Number(p.monto_total),
+      cantidad_cuotas: Number(p.cantidad_cuotas),
+      es_tallerista: Boolean(p.es_tallerista),
+      cuotas: normalizarDetalleCuotas(p.cuotas, p.cantidad_cuotas, p.monto_total),
+    }));
+  } catch (e) {
+    if (e.code === '42703' && String(e.message).includes('es_tallerista')) {
+      const planes = await query(
+        `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, creado_en
+         FROM planes_pago ORDER BY id`
+      );
+      return planes.map((p) => ({
+        ...p,
+        id: Number(p.id),
+        monto_total: Number(p.monto_total),
+        cantidad_cuotas: Number(p.cantidad_cuotas),
+        es_tallerista: false,
+        cuotas: normalizarDetalleCuotas(p.cuotas, p.cantidad_cuotas, p.monto_total),
+      }));
+    }
+    throw e;
+  }
 }
 
 async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1, cuotas = null, esTallerista = false }) {
@@ -1334,7 +1366,12 @@ async function actualizarEsTalleristaAsistente(asistentePlanId, esTallerista) {
 }
 
 async function listarPagos() {
-  const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas, es_tallerista FROM planes_pago`);
+  const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas, es_tallerista FROM planes_pago`).catch((e) => {
+    if (e.code === '42703' && String(e.message).includes('es_tallerista')) {
+      return query(`SELECT id, nombre, monto_total, cantidad_cuotas FROM planes_pago`);
+    }
+    throw e;
+  });
   const asistentes = query(
     `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas, a.es_tallerista,
             COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
@@ -1342,7 +1379,19 @@ async function listarPagos() {
      FROM asistente_planes a
      LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
      ORDER BY e.apellido, e.nombre, a.dni`
-  );
+  ).catch(async (e) => {
+    if (e.code === '42703' && String(e.message).includes('es_tallerista')) {
+      return query(
+        `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas,
+                COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
+                COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
+         FROM asistente_planes a
+         LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
+         ORDER BY e.apellido, e.nombre, a.dni`
+      );
+    }
+    throw e;
+  });
   const pagos = query(
     `SELECT asistente_plan_id, numero_cuota, monto, fecha_pago FROM pagos_cuotas ORDER BY numero_cuota`
   );
