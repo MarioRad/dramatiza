@@ -497,10 +497,15 @@ body.dark #tablaUltimos5 .estado-pago-texto.no_pagado { background: rgba(239,68,
 
 /* Keep existing contenedor behavior inside app-main */
 .app-main .contenedor-panel {
-  max-width: 1600px;
+  max-width: 100%;
   margin: 1.25rem auto 2rem;
   padding: 0 1rem;
   width: 100%;
+}
+@media (min-width: 1600px) {
+  .app-main .contenedor-panel {
+    padding: 0 1.5rem;
+  }
 }
 
 /* ── Gestión de Menús — Cards ───────────────────────────────── */
