@@ -935,6 +935,7 @@ el('botonActualizarEncuentro').addEventListener('click', async () => {
 // ── Asistentes (CRUD dentro de Inscripciones) ────────────────────────
 const resumenAsistentes = el('resumenAsistentes');
 const buscarAsistente = el('buscarAsistente');
+const filtroAsistenteTaller = el('filtroAsistenteTaller');
 const modalAsistente = el('modalAsistente');
 const mensajeAsistenteModal = el('mensajeAsistenteModal');
 const asistenteDni = el('asistenteDni');
@@ -950,20 +951,80 @@ const botonCancelarAsistente = el('botonCancelarAsistente');
 const botonNuevoAsistente = el('botonNuevoAsistente');
 const botonActualizarAsistentes = el('botonActualizarAsistentes');
 
+function poblarFiltroAsistenteTaller() {
+  if (!filtroAsistenteTaller) return;
+  const valorActual = filtroAsistenteTaller.value || '';
+  // Agrupar talleres de 2 partes: mostrar solo el taller lógico (pareja_id === null) o deduplicar por grupo
+  const grupos = new Map();
+  for (const t of talleresActuales) {
+    const grupoId = t.pareja_id ? Number(t.pareja_id) : Number(t.id);
+    if (!grupos.has(grupoId)) {
+      const base = String(t.nombre || '').replace(/\s*\(\d+°\s*parte\)\s*$/i, '').trim() || t.nombre;
+      grupos.set(grupoId, base);
+    }
+  }
+  const opciones = [...grupos.entries()].sort((a,b) => String(a[1]).localeCompare(String(b[1])));
+  filtroAsistenteTaller.innerHTML = '<option value="">Todos los talleres</option>';
+  for (const [id, nombre] of opciones) {
+    const opt = document.createElement('option');
+    opt.value = String(id);
+    opt.textContent = nombre;
+    filtroAsistenteTaller.appendChild(opt);
+  }
+  if (valorActual && [...filtroAsistenteTaller.options].some(o=>o.value===valorActual)) {
+    filtroAsistenteTaller.value = valorActual;
+  }
+}
+
+function talleresIdsAgrupadosDeAsistente(a) {
+  const ids = String(a.talleres_ids||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const grupos = new Set();
+  const idAMapa = new Map(talleresActuales.map(t=>[String(t.id), t]));
+  for (const id of ids) {
+    grupos.add(id);
+    const t = idAMapa.get(String(id));
+    if (t && t.pareja_id) grupos.add(String(t.pareja_id));
+    // si es principal, también considerar su pareja (inscriptos a la 2da parte deben aparecer al filtrar por principal)
+    for (const ot of talleresActuales) {
+      if (String(ot.pareja_id) === String(id)) grupos.add(String(ot.id));
+      if (t && t.pareja_id && String(ot.id) === String(t.pareja_id)) grupos.add(String(ot.id));
+    }
+  }
+  // también añadir grupo lógico
+  for (const id of [...grupos]) {
+    const t = idAMapa.get(String(id));
+    if (t) {
+      const g = t.pareja_id ? String(t.pareja_id) : String(t.id);
+      grupos.add(g);
+    }
+  }
+  return grupos;
+}
+
 function renderAsistentes(lista) {
   asistentesData = Array.isArray(lista) ? lista : [];
   const cuerpo = document.querySelector('#tablaAsistentes tbody');
   cuerpo.innerHTML = '';
-  resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} · ${asistentesData.reduce((s,a)=>s+Number(a.cantidad_talleres||0),0)} inscripciones en talleres.`;
+  const totalInscripciones = asistentesData.reduce((s,a)=>s+Number(a.cantidad_talleres||0),0);
   const q = (buscarAsistente.value || '').trim().toLowerCase();
-  const visibles = asistentesData.filter(a =>
-    !q || String(a.dni||'').includes(q) || String(a.apellido||'').toLowerCase().includes(q) || String(a.nombre||'').toLowerCase().includes(q) || String(a.email||'').toLowerCase().includes(q)
-  );
+  const tallerFiltro = filtroAsistenteTaller ? String(filtroAsistenteTaller.value || '').trim() : '';
+  const visibles = asistentesData.filter(a => {
+    const coincideTexto = !q || String(a.dni||'').includes(q) || String(a.apellido||'').toLowerCase().includes(q) || String(a.nombre||'').toLowerCase().includes(q) || String(a.email||'').toLowerCase().includes(q);
+    if (!coincideTexto) return false;
+    if (!tallerFiltro) return true;
+    const grupos = talleresIdsAgrupadosDeAsistente(a);
+    return grupos.has(tallerFiltro);
+  });
+  if (tallerFiltro || q) {
+    resumenAsistentes.textContent = `Asistentes: ${visibles.length} de ${asistentesData.length} · ${totalInscripciones} inscripciones en talleres${tallerFiltro ? ' · filtrado por taller' : ''}.`;
+  } else {
+    resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} · ${totalInscripciones} inscripciones en talleres.`;
+  }
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 10;
-    td.textContent = q ? 'Sin resultados para el filtro.' : 'No hay asistentes inscriptos.';
+    td.textContent = (q || tallerFiltro) ? 'Sin resultados para el filtro.' : 'No hay asistentes inscriptos.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
     cuerpo.appendChild(tr);
@@ -1020,6 +1081,11 @@ function renderAsistentes(lista) {
 
 async function cargarAsistentes() {
   resumenAsistentes.textContent='Cargando…';
+  if (!talleresActuales.length) {
+    try { const r = await api('/api/admin/talleres'); if (r.ok) { talleresActuales = r.data; poblarFiltroAsistenteTaller(); } } catch(_){}
+  } else {
+    poblarFiltroAsistenteTaller();
+  }
   const res=await api('/api/admin/asistentes');
   if(!res.ok){ resumenAsistentes.textContent=res.data.error||'No se pudieron cargar los asistentes.'; return; }
   renderAsistentes(res.data);
@@ -1084,6 +1150,7 @@ modalAsistenteTalleres.addEventListener('change', actualizarConflictoAsistente);
 botonNuevoAsistente.addEventListener('click', ()=>abrirModalAsistente(null));
 botonActualizarAsistentes.addEventListener('click', cargarAsistentes);
 buscarAsistente.addEventListener('input', ()=>renderAsistentes(asistentesData));
+if (filtroAsistenteTaller) filtroAsistenteTaller.addEventListener('change', ()=>renderAsistentes(asistentesData));
 botonGuardarAsistente.addEventListener('click', async()=>{
   const dni=String(asistenteDni.value||'').trim().replace(/\D/g,'');
   const apellido=String(asistenteApellido.value||'').trim();
@@ -1761,8 +1828,11 @@ async function cargarDatos() {
     return;
   }
   talleresActuales = talleres.data;
+  poblarFiltroAsistenteTaller();
   window.__inscripcionesActuales = inscripciones.data;
   renderInscripciones(inscripciones.data);
+  // Si ya hay asistentes cargados, re-renderizar con el filtro actualizado
+  if (asistentesData.length) renderAsistentes(asistentesData);
   encuentroPersonas = Array.isArray(encuentro.data?.personas) ? encuentro.data.personas : [];
   resumenEncuentro.textContent = `Personas cargadas: ${encuentro.data.total ?? encuentroPersonas.length}.`;
   if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
