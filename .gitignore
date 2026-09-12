@@ -148,3 +148,6 @@ vite.config.ts.timestamp-*
 .vite/
 .vercel
 .env*
+
+# Local ideas / mocks - no commitear
+ideas/
