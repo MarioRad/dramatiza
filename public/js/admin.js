@@ -29,6 +29,7 @@ const ETIQUETAS_ALIMENTACION = {
   otro: 'Otro',
 };
 const TITULOS_VISTA = {
+  dashboard: 'Dashboard',
   inscripciones: 'Inscripciones',
   ponentes: 'Ponentes',
   programa: 'Programa del Encuentro',
@@ -36,7 +37,7 @@ const TITULOS_VISTA = {
   pagos: 'Gestión de pagos y cuotas',
   notificaciones: 'Notificaciones a la app móvil',
   acreditaciones: 'Acreditaciones',
-  comidas: 'Desayunos y meriendas',
+  comidas: 'Gestión de Menús',
   eventos: 'Registro de eventos',
   usuarios: 'Usuarios',
   permisos: 'Permisos del sistema',
@@ -116,7 +117,7 @@ let inscripcionEditando = null;
 let talleresEditando = [];
 let usuarioEditando = null;
 let miSesion = null;
-let vistaActiva = 'inscripciones';
+let vistaActiva = 'dashboard';
 let dniQrActual = null;
 let ponenteEditandoId = null;
 let encuentroPersonas = [];
@@ -176,6 +177,13 @@ function mostrarLogin() {
   vistaLogin.hidden = false;
   vistaPanel.hidden = true;
   miSesion = null;
+  const sb = el('sidebar');
+  const ov = el('sidebarOverlay');
+  const tb = document.querySelector('.app-topbar');
+  if (sb) sb.hidden = true;
+  if (ov) ov.hidden = true;
+  if (tb) tb.hidden = true;
+  document.body.classList.add('is-login');
 }
 
 function mostrarPanel() {
@@ -188,12 +196,24 @@ function mostrarPanel() {
   const vistasSinPermiso = ['eventos', 'usuarios', 'permisos'];
   if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas');
   if (vistasSinPermiso.includes(vistaActiva)) {
-    cambiarVista('inscripciones');
+    cambiarVista('dashboard');
   } else {
     cambiarVista(vistaActiva);
   }
-  el('usuarioActual').textContent =
-    `${miSesion.nombre || miSesion.usuario} · ${ETIQUETAS_ROL[miSesion.rol] || miSesion.rol}`;
+  const textoUsuario = `${miSesion.nombre || miSesion.usuario} · ${ETIQUETAS_ROL[miSesion.rol] || miSesion.rol}`;
+  el('usuarioActual').textContent = textoUsuario;
+  const sidebarInfo = el('sidebarUserInfo');
+  if (sidebarInfo) sidebarInfo.textContent = textoUsuario;
+  const sb = el('sidebar');
+  const ov = el('sidebarOverlay');
+  const tb = document.querySelector('.app-topbar');
+  if (sb) sb.hidden = false;
+  if (ov) ov.hidden = false;
+  if (tb) tb.hidden = false;
+  document.body.classList.remove('is-login');
+  // sync sidebar collapsed state
+  const collapsed = localStorage.getItem('dramatiza-sidebar') === 'collapsed';
+  document.body.classList.toggle('sidebar-collapsed', collapsed && window.innerWidth > 860);
 }
 
 let intervaloAcreditaciones = null;
@@ -214,7 +234,18 @@ function cambiarVista(vista) {
     const contenedor = el(`vista${nombre[0].toUpperCase()}${nombre.slice(1)}`);
     if (contenedor) contenedor.hidden = nombre !== vista;
   }
-  el('tituloPanel').textContent = TITULOS_VISTA[vista] || 'Panel';
+  const titulo = el('tituloPanel');
+  if (titulo) titulo.textContent = TITULOS_VISTA[vista] || 'Panel';
+  // cerrar sidebar en móvil
+  if (window.innerWidth <= 860) {
+    const sb = el('sidebar');
+    const ov = el('sidebarOverlay');
+    if (sb) sb.classList.remove('open');
+    if (ov) ov.classList.remove('visible');
+  }
+  if (vista === 'dashboard') {
+    cargarDashboard();
+  }
   if (vista === 'ponentes') {
     cargarPonentes();
   }
@@ -249,6 +280,54 @@ for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => cambiarVista(tab.dataset.vista));
 }
 
+/* ── Sidebar custom ligero ─────────────────────────────── */
+(function initSidebar() {
+  const btn = el('btnToggleSidebar');
+  const sidebar = el('sidebar');
+  const overlay = el('sidebarOverlay');
+  const filter = el('sidebarFilter');
+  if (!btn || !sidebar) return;
+  const toggle = () => {
+    if (window.innerWidth <= 860) {
+      const open = sidebar.classList.toggle('open');
+      if (overlay) overlay.classList.toggle('visible', open);
+    } else {
+      const collapsed = document.body.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('dramatiza-sidebar', collapsed ? 'collapsed' : 'expanded');
+    }
+  };
+  btn.addEventListener('click', toggle);
+  if (overlay) overlay.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('visible');
+  });
+  if (filter) {
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const link of document.querySelectorAll('.sidebar-link')) {
+        const txt = (link.textContent || '').toLowerCase();
+        // no ocultar si es título filtrado, solo links
+        link.style.display = !q || txt.includes(q) ? '' : 'none';
+      }
+      for (const title of document.querySelectorAll('.sidebar-section-title')) {
+        // ocultar título si todos sus links siguientes están ocultos
+        let next = title.nextElementSibling;
+        let hasVisible = false;
+        while (next && !next.classList.contains('sidebar-section-title') && !next.classList.contains('sidebar-footer')) {
+          if (next.classList.contains('sidebar-link') && next.style.display !== 'none' && !next.hidden) { hasVisible = true; break; }
+          next = next.nextElementSibling;
+        }
+        title.style.display = hasVisible || !q ? '' : 'none';
+      }
+    });
+  }
+  // Ver más dashboard
+  const btnVer = el('btnVerInscripciones');
+  if (btnVer) btnVer.addEventListener('click', () => cambiarVista('inscripciones'));
+  const btnActDash = el('botonActualizarDashboard');
+  if (btnActDash) btnActDash.addEventListener('click', () => cargarDashboard());
+})();
+
 function subTabInscripcionActiva() {
   return (document.querySelector('#subTabsInscripciones .sub-tab.activo') || {}).dataset?.sub || 'talleres';
 }
@@ -273,6 +352,22 @@ document.querySelectorAll('#subTabsInscripciones .sub-tab').forEach((btn) => {
   btn.addEventListener('click', () => activarSubTabInscripcion(btn.dataset.sub));
 });
 
+function subTabPagosActiva() {
+  return (document.querySelector('#subTabsPagos .sub-tab.activo') || {}).dataset?.sub || 'plan';
+}
+
+function activarSubTabPagos(sub) {
+  if (subTabPagosActiva() === sub) return;
+  for (const btn of document.querySelectorAll('#subTabsPagos .sub-tab')) {
+    btn.classList.toggle('activo', btn.dataset.sub === sub);
+  }
+  el('subPagosPlan').hidden = sub !== 'plan';
+  el('subPagosAsignar').hidden = sub !== 'asignar';
+}
+
+document.querySelectorAll('#subTabsPagos .sub-tab').forEach((btn) => {
+  btn.addEventListener('click', () => activarSubTabPagos(btn.dataset.sub));
+});
 
 function bloquesHorario(t) {
   const mFecha = String(t.fecha || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -473,7 +568,12 @@ function renderInscripciones(inscripciones) {
     tdTelefono.textContent = i.telefono || '—';
 
     const tdAlimentacion = document.createElement('td');
-    tdAlimentacion.textContent = ETIQUETAS_ALIMENTACION[i.alimentacion] || i.alimentacion || '—';
+    const alimKey = i.alimentacion || 'sin_restriccion';
+    const badgeAlim = document.createElement('span');
+    badgeAlim.className = `badge badge-alim ${alimKey}`;
+    badgeAlim.textContent = ETIQUETAS_ALIMENTACION[alimKey] || alimKey || '—';
+    badgeAlim.title = ETIQUETAS_ALIMENTACION[alimKey] || alimKey;
+    tdAlimentacion.appendChild(badgeAlim);
 
     const tdTaller = document.createElement('td');
     const talleresUnicos = [...new Map(filas.map((f) => [f.taller, f])).values()];
@@ -484,6 +584,7 @@ function renderInscripciones(inscripciones) {
       const span = document.createElement('div');
       span.className = 'chip-taller';
       span.textContent = ft.taller;
+      span.title = ft.taller;
       divTalleres.appendChild(span);
     }
     if (totalSesiones > talleresUnicos.length) {
@@ -498,17 +599,25 @@ function renderInscripciones(inscripciones) {
     tdTaller.appendChild(divTalleres);
 
     const tdEncuentro = document.createElement('td');
-    tdEncuentro.textContent = filas.some((f) => f.en_encuentro) ? 'Sí' : 'No';
-    tdEncuentro.className = filas.some((f) => f.en_encuentro) ? 'encuentro-si' : 'encuentro-no';
+    const enEnc = filas.some((f) => f.en_encuentro);
+    const badgeEnc = document.createElement('span');
+    badgeEnc.className = `badge ${enEnc ? 'badge-encuentro-si' : 'badge-encuentro-no'}`;
+    badgeEnc.textContent = enEnc ? '✓ En encuentro' : '○ Sin encuentro';
+    tdEncuentro.appendChild(badgeEnc);
 
     const tdPago = document.createElement('td');
     const spanPago = document.createElement('span');
-    spanPago.className = `estado-pago-texto ${i.estado_pago || 'no_pagado'}`;
-    spanPago.textContent = ETIQUETAS_PAGO[i.estado_pago] || '—';
+    const estadoKey = i.estado_pago || 'no_pagado';
+    const iconPago = estadoKey === 'pago_completo' ? '✓' : estadoKey === 'pago_parcial' ? '◐' : '✕';
+    spanPago.className = `badge badge-pago ${estadoKey}`;
+    spanPago.textContent = `${iconPago} ${ETIQUETAS_PAGO[estadoKey] || '—'}`;
     tdPago.appendChild(spanPago);
 
     const tdFecha = document.createElement('td');
     tdFecha.textContent = formatearFecha(i.creado_en);
+    tdFecha.title = i.creado_en || '';
+    tdFecha.style.whiteSpace = 'nowrap';
+    tdFecha.style.fontSize = '0.82rem';
 
     const tdAccion = document.createElement('td');
     const contenedorAcciones = document.createElement('div');
@@ -599,25 +708,29 @@ function renderEncuentroPersonas(lista) {
   cuerpo.innerHTML = '';
 
   const conTalleres = encuentroPersonas.filter((p) => p.tiene_talleres).length;
+  const sinTalleres = encuentroPersonas.length - conTalleres;
   resumenEncuentroLista.textContent =
-    `Personas importadas: ${encuentroPersonas.length} · inscriptas a talleres: ${conTalleres} · sin talleres: ${encuentroPersonas.length - conTalleres}.`;
+    `Personas importadas: ${encuentroPersonas.length} · inscriptas a talleres: ${conTalleres} · sin talleres: ${sinTalleres}.`;
 
   const q = buscarEncuentro.value.trim().toLowerCase();
-  const visibles = encuentroPersonas.filter(
-    (p) =>
-      !q ||
-      String(p.dni || '').includes(q) ||
+  const filtroEstado = (el('filtroEncuentroEstado')?.value || '').trim();
+  const visibles = encuentroPersonas.filter((p) => {
+    if (filtroEstado === 'sin_taller' && p.tiene_talleres) return false;
+    if (filtroEstado === 'con_taller' && !p.tiene_talleres) return false;
+    if (!q) return true;
+    return String(p.dni || '').includes(q) ||
       String(p.apellido || '').toLowerCase().includes(q) ||
       String(p.nombre || '').toLowerCase().includes(q) ||
       `${p.nombre || ''} ${p.apellido || ''}`.toLowerCase().includes(q) ||
-      String(p.email || '').toLowerCase().includes(q)
-  );
+      String(p.email || '').toLowerCase().includes(q);
+  });
 
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 12;
-    td.textContent = q ? 'Sin resultados para el filtro.' : 'No hay personas importadas del encuentro.';
+    const hayFiltro = Boolean(q || filtroEstado);
+    td.textContent = hayFiltro ? 'Sin resultados para el filtro.' : 'No hay personas importadas del encuentro.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
     cuerpo.appendChild(tr);
@@ -628,19 +741,32 @@ function renderEncuentroPersonas(lista) {
     const tr = document.createElement('tr');
 
     const tdEstado = document.createElement('td');
-    const spanEstado = document.createElement('span');
-    spanEstado.textContent = p.tiene_talleres ? 'Inscripto a talleres' : 'Sin inscribir a talleres';
-    spanEstado.className = p.tiene_talleres ? 'encuentro-si' : 'encuentro-no';
-    tdEstado.appendChild(spanEstado);
+    const badgeEstado = document.createElement('span');
+    badgeEstado.className = `badge ${p.tiene_talleres ? 'badge-encuentro-si' : 'badge-encuentro-no'}`;
+    badgeEstado.textContent = p.tiene_talleres ? '✓ Con taller' : '○ Sin taller';
+    badgeEstado.title = p.tiene_talleres ? 'Inscripto a talleres' : 'Sin inscribir a talleres';
+    tdEstado.appendChild(badgeEstado);
 
     const tdMarca = document.createElement('td');
     tdMarca.textContent = formatearMarcaTemporal(p.marca_temporal || p.creado_en);
+    tdMarca.style.whiteSpace = 'nowrap';
+    tdMarca.style.fontSize = '0.78rem';
+    tdMarca.title = p.marca_temporal || p.creado_en || '';
 
     const tdEmail = document.createElement('td');
     tdEmail.textContent = p.email || '—';
+    tdEmail.title = p.email || '';
+    tdEmail.style.maxWidth = '150px';
+    tdEmail.style.overflow = 'hidden';
+    tdEmail.style.textOverflow = 'ellipsis';
+    tdEmail.style.whiteSpace = 'nowrap';
+    tdEmail.style.fontSize = '0.78rem';
 
     const tdNombre = document.createElement('td');
     tdNombre.textContent = [p.apellido, p.nombre].filter(Boolean).join(', ') || '—';
+    tdNombre.title = [p.apellido, p.nombre].filter(Boolean).join(', ') || '';
+    tdNombre.style.fontWeight = '600';
+    tdNombre.style.minWidth = '130px';
 
     const tdDni = document.createElement('td');
     tdDni.className = 'celda-dni';
@@ -648,21 +774,41 @@ function renderEncuentroPersonas(lista) {
 
     const tdNacimiento = document.createElement('td');
     tdNacimiento.textContent = formatearFechaNacimiento(p.fecha_nacimiento);
+    tdNacimiento.style.whiteSpace = 'nowrap';
+    tdNacimiento.style.fontSize = '0.78rem';
 
     const tdTelefono = document.createElement('td');
     tdTelefono.textContent = p.telefono || '—';
+    tdTelefono.style.whiteSpace = 'nowrap';
+    tdTelefono.style.fontSize = '0.78rem';
 
     const tdProvincia = document.createElement('td');
     tdProvincia.textContent = p.provincia || '—';
+    tdProvincia.title = p.provincia || '';
+    tdProvincia.style.fontSize = '0.78rem';
 
     const tdCiudad = document.createElement('td');
     tdCiudad.textContent = p.ciudad || '—';
+    tdCiudad.title = p.ciudad || '';
+    tdCiudad.style.fontSize = '0.78rem';
 
     const tdOcupacion = document.createElement('td');
     tdOcupacion.textContent = p.ocupacion || '—';
+    tdOcupacion.title = p.ocupacion || '';
+    tdOcupacion.style.fontSize = '0.78rem';
+    tdOcupacion.style.maxWidth = '110px';
+    tdOcupacion.style.overflow = 'hidden';
+    tdOcupacion.style.textOverflow = 'ellipsis';
+    tdOcupacion.style.whiteSpace = 'nowrap';
 
     const tdOpcionPago = document.createElement('td');
     tdOpcionPago.textContent = p.opcion_pago || '—';
+    tdOpcionPago.title = p.opcion_pago || '';
+    tdOpcionPago.style.fontSize = '0.78rem';
+    tdOpcionPago.style.maxWidth = '100px';
+    tdOpcionPago.style.overflow = 'hidden';
+    tdOpcionPago.style.textOverflow = 'ellipsis';
+    tdOpcionPago.style.whiteSpace = 'nowrap';
 
     const tdAccion = document.createElement('td');
     const contenedorAcciones = document.createElement('div');
@@ -775,6 +921,7 @@ botonGuardarEncuentro.addEventListener('click', async () => {
 });
 
 buscarEncuentro.addEventListener('input', () => renderEncuentroPersonas(encuentroPersonas));
+el('filtroEncuentroEstado')?.addEventListener('change', () => renderEncuentroPersonas(encuentroPersonas));
 
 el('botonActualizarEncuentro').addEventListener('click', async () => {
   const res = await api('/api/admin/encuentro');
@@ -824,21 +971,38 @@ function renderAsistentes(lista) {
   }
   for (const a of visibles) {
     const tr = document.createElement('tr');
-    const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent=a.dni;
-    const tdNombre = document.createElement('td'); tdNombre.textContent=`${a.apellido}, ${a.nombre}`.replace(/^,\s*/,'') || '—';
-    const tdEmail = document.createElement('td'); tdEmail.textContent=a.email||'—';
-    const tdTel = document.createElement('td'); tdTel.textContent=a.telefono||'—';
-    const tdAlim = document.createElement('td'); tdAlim.textContent=ETIQUETAS_ALIMENTACION[a.alimentacion]||a.alimentacion||'—';
+    const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent=a.dni; tdDni.title = `DNI ${a.dni}`;
+    const tdNombre = document.createElement('td'); tdNombre.textContent=`${a.apellido}, ${a.nombre}`.replace(/^,\s*/,'') || '—'; tdNombre.title = `${a.apellido}, ${a.nombre}`; tdNombre.style.fontWeight='600'; tdNombre.style.textAlign='left';
+    const tdEmail = document.createElement('td'); tdEmail.textContent=a.email||'—'; tdEmail.title = a.email||''; tdEmail.style.maxWidth='180px'; tdEmail.style.overflow='hidden'; tdEmail.style.textOverflow='ellipsis'; tdEmail.style.whiteSpace='nowrap'; tdEmail.style.fontSize='0.82rem'; tdEmail.style.textAlign='left';
+    const tdTel = document.createElement('td'); tdTel.textContent=a.telefono||'—'; tdTel.style.whiteSpace='nowrap'; tdTel.style.fontSize='0.82rem';
+    const tdAlim = document.createElement('td');
+    const alimKey2 = a.alimentacion || 'sin_restriccion';
+    const badge2 = document.createElement('span');
+    badge2.className = `badge badge-alim ${alimKey2}`;
+    badge2.textContent = ETIQUETAS_ALIMENTACION[alimKey2] || alimKey2;
+    badge2.title = ETIQUETAS_ALIMENTACION[alimKey2] || alimKey2;
+    tdAlim.appendChild(badge2);
     const tdTalleres = document.createElement('td');
     const divTalleres = document.createElement('div'); divTalleres.className='lista-talleres-inscripcion';
     const nombres = String(a.talleres_nombres||'').split(',').map(s=>s.trim()).filter(Boolean);
-    for (const n of nombres.slice(0,3)) { const chip=document.createElement('div'); chip.className='chip-taller'; chip.textContent=n; divTalleres.appendChild(chip); }
-    if (nombres.length>3) { const more=document.createElement('div'); more.className='chip-taller chip-taller-mas'; more.textContent=`+${nombres.length-3} más`; divTalleres.appendChild(more); }
+    for (const n of nombres.slice(0,3)) { const chip=document.createElement('div'); chip.className='chip-taller'; chip.textContent=n; chip.title=n; divTalleres.appendChild(chip); }
+    if (nombres.length>3) { const more=document.createElement('div'); more.className='chip-taller chip-taller-mas'; more.textContent=`+${nombres.length-3} más`; more.title = nombres.slice(3).join(', '); divTalleres.appendChild(more); }
     if (!nombres.length) divTalleres.textContent='—';
     tdTalleres.appendChild(divTalleres);
-    const tdEncuentro = document.createElement('td'); tdEncuentro.textContent=a.en_encuentro?'Sí':'No'; tdEncuentro.className=a.en_encuentro?'encuentro-si':'encuentro-no';
-    const tdPago = document.createElement('td'); const spanPago=document.createElement('span'); spanPago.className=`estado-pago-texto ${a.estado_pago||'no_pagado'}`; spanPago.textContent=ETIQUETAS_PAGO[a.estado_pago]||a.estado_pago||'—'; tdPago.appendChild(spanPago);
-    const tdFecha = document.createElement('td'); tdFecha.textContent=formatearFecha(a.creado_en);
+    const tdEncuentro = document.createElement('td');
+    const enEnc2 = Boolean(a.en_encuentro);
+    const badgeEnc2 = document.createElement('span');
+    badgeEnc2.className = `badge ${enEnc2 ? 'badge-encuentro-si' : 'badge-encuentro-no'}`;
+    badgeEnc2.textContent = enEnc2 ? '✓ Sí' : '○ No';
+    tdEncuentro.appendChild(badgeEnc2);
+    const tdPago = document.createElement('td');
+    const spanPago2=document.createElement('span');
+    const estadoKey2 = a.estado_pago||'no_pagado';
+    const icon2 = estadoKey2 === 'pago_completo' ? '✓' : estadoKey2 === 'pago_parcial' ? '◐' : '✕';
+    spanPago2.className=`badge badge-pago ${estadoKey2}`;
+    spanPago2.textContent=`${icon2} ${ETIQUETAS_PAGO[estadoKey2]||'—'}`;
+    tdPago.appendChild(spanPago2);
+    const tdFecha = document.createElement('td'); tdFecha.textContent=formatearFecha(a.creado_en); tdFecha.title = a.creado_en||''; tdFecha.style.whiteSpace='nowrap'; tdFecha.style.fontSize='0.82rem';
     const tdAcc = document.createElement('td'); const cont=document.createElement('div'); cont.className='acciones-fila';
     const btnEdit=document.createElement('button'); btnEdit.type='button'; btnEdit.className='boton boton-chico'; btnEdit.textContent='Editar'; btnEdit.addEventListener('click',()=>abrirModalAsistente(a)); cont.appendChild(btnEdit);
     const btnDel=document.createElement('button'); btnDel.type='button'; btnDel.className='boton boton-peligro boton-chico'; btnDel.textContent='Eliminar'; btnDel.addEventListener('click', async()=>{
@@ -1224,35 +1388,82 @@ const ICONO_CATEGORIA_COMIDA = { desayuno: '☕', merienda: '🫖', otro: '🍽�
 let _comidasInscriptosCache = [];
 
 function renderTablaInscriptosConDieta() {
+  // legacy table
   const cuerpo = document.querySelector('#tablaInscriptosConDieta tbody');
-  if (!cuerpo) return;
-  cuerpo.innerHTML = '';
-  const filtroDieta = (el('filtroComidasDieta')?.value || '').trim();
-  const q = (el('buscarComidasDietas')?.value || '').trim().toLowerCase();
+  if (cuerpo) {
+    cuerpo.innerHTML = '';
+    const filtroDieta = (el('filtroComidasDieta')?.value || '').trim();
+    const q = (el('buscarComidasDietas')?.value || '').trim().toLowerCase();
+    const visiblesTable = _comidasInscriptosCache.filter(p => {
+      if (filtroDieta && p.alimentacion !== filtroDieta) return false;
+      if (!q) return true;
+      return String(p.dni||'').includes(q) || String(p.apellido||'').toLowerCase().includes(q) || String(p.nombre||'').toLowerCase().includes(q) || `${p.nombre||''} ${p.apellido||''}`.toLowerCase().includes(q);
+    });
+    if (visiblesTable.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.textContent = _comidasInscriptosCache.length === 0 ? 'Aún no hay inscriptos a talleres.' : 'Sin resultados para el filtro.';
+      td.style.color = 'var(--color-texto-suave)';
+      tr.appendChild(td);
+      cuerpo.appendChild(tr);
+    } else {
+      for (const p of visiblesTable) {
+        const tr = document.createElement('tr');
+        const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent = p.dni;
+        const tdNombre = document.createElement('td'); tdNombre.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
+        const tdAlim = document.createElement('td'); tdAlim.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+        if (p.alimentacion !== 'sin_restriccion') tdAlim.classList.add('encuentro-si');
+        const tdEmail = document.createElement('td'); tdEmail.textContent = p.email || '—'; tdEmail.style.fontSize='0.85rem';
+        tr.append(tdDni, tdNombre, tdAlim, tdEmail);
+        cuerpo.appendChild(tr);
+      }
+    }
+  }
+  // cards
+  const cardsCont = el('cardsInscriptosConDieta');
+  if (!cardsCont) return;
+  cardsCont.innerHTML = '';
+  const filtroDieta2 = (el('filtroComidasDieta')?.value || '').trim();
+  const q2 = (el('buscarComidasDietas')?.value || '').trim().toLowerCase();
   const visibles = _comidasInscriptosCache.filter(p => {
-    if (filtroDieta && p.alimentacion !== filtroDieta) return false;
-    if (!q) return true;
-    return String(p.dni||'').includes(q) || String(p.apellido||'').toLowerCase().includes(q) || String(p.nombre||'').toLowerCase().includes(q) || `${p.nombre||''} ${p.apellido||''}`.toLowerCase().includes(q);
+    if (filtroDieta2 && p.alimentacion !== filtroDieta2) return false;
+    if (!q2) return true;
+    return String(p.dni||'').includes(q2) || String(p.apellido||'').toLowerCase().includes(q2) || String(p.nombre||'').toLowerCase().includes(q2) || `${p.nombre||''} ${p.apellido||''}`.toLowerCase().includes(q2);
   });
   if (visibles.length === 0) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.textContent = _comidasInscriptosCache.length === 0 ? 'Aún no hay inscriptos a talleres.' : 'Sin resultados para el filtro.';
-    td.style.color = 'var(--color-texto-suave)';
-    tr.appendChild(td);
-    cuerpo.appendChild(tr);
+    const div = document.createElement('div');
+    div.className = 'menu-empty';
+    div.textContent = _comidasInscriptosCache.length === 0 ? 'Aún no hay inscriptos a talleres.' : 'Sin resultados para el filtro.';
+    cardsCont.appendChild(div);
     return;
   }
+  const badgeClass = { sin_restriccion:'badge-sin', vegano:'badge-vegano', sin_tacc:'badge-tacc', sin_lactosa:'badge-lactosa', otro:'badge-otro' };
   for (const p of visibles) {
-    const tr = document.createElement('tr');
-    const tdDni = document.createElement('td'); tdDni.className='celda-dni'; tdDni.textContent = p.dni;
-    const tdNombre = document.createElement('td'); tdNombre.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
-    const tdAlim = document.createElement('td'); tdAlim.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
-    if (p.alimentacion !== 'sin_restriccion') tdAlim.classList.add('encuentro-si');
-    const tdEmail = document.createElement('td'); tdEmail.textContent = p.email || '—'; tdEmail.style.fontSize='0.85rem';
-    tr.append(tdDni, tdNombre, tdAlim, tdEmail);
-    cuerpo.appendChild(tr);
+    const card = document.createElement('div');
+    card.className = 'menu-card';
+    const header = document.createElement('div');
+    header.className = 'menu-card-header';
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'menu-card-title';
+    title.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
+    const sub = document.createElement('div');
+    sub.className = 'menu-card-subtitle';
+    sub.textContent = `DNI ${p.dni} · ${p.email || 'sin email'}`;
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(sub);
+    const badge = document.createElement('span');
+    badge.className = 'menu-card-badge ' + (badgeClass[p.alimentacion] || 'badge-sin');
+    badge.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+    header.appendChild(titleWrap);
+    header.appendChild(badge);
+    const footer = document.createElement('div');
+    footer.className = 'menu-card-footer';
+    footer.innerHTML = `<span>📧 ${escapeHtml(p.email || '—')}</span>`;
+    card.appendChild(header);
+    card.appendChild(footer);
+    cardsCont.appendChild(card);
   }
 }
 
@@ -1299,15 +1510,61 @@ function renderComidas(datos) {
       cuerpoInscriptos.appendChild(tr2);
     }
   }
+  // cards resumen dieta
+  const cardsDieta = el('cardsInscriptosDieta');
+  if (cardsDieta) {
+    cardsDieta.innerHTML = '';
+    cardsDieta.className = 'menu-grid menu-grid--stats';
+    const dietConfig = [
+      { clave: 'total', label: 'Total inscriptos', valor: totalInscriptos, badge: 'badge-total', icon: '👥' },
+      { clave: 'sin_restriccion', label: 'Sin restricción', valor: Number(dietasInscriptos.sin_restriccion||0), badge: 'badge-sin', icon: '🍽️' },
+      { clave: 'vegano', label: 'Vegano', valor: Number(dietasInscriptos.vegano||0), badge: 'badge-vegano', icon: '🌱' },
+      { clave: 'sin_tacc', label: 'Sin TACC', valor: Number(dietasInscriptos.sin_tacc||0), badge: 'badge-tacc', icon: '🌾' },
+      { clave: 'sin_lactosa', label: 'Sin lactosa', valor: Number(dietasInscriptos.sin_lactosa||0), badge: 'badge-lactosa', icon: '🥛' },
+      { clave: 'otro', label: 'Otro', valor: Number(dietasInscriptos.otro||0), badge: 'badge-otro', icon: '📝' },
+    ];
+    for (const d of dietConfig) {
+      const card = document.createElement('div');
+      card.className = 'menu-card menu-card--' + d.clave;
+      const header = document.createElement('div');
+      header.className = 'menu-card-header';
+      const titleWrap = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'menu-card-title';
+      title.textContent = d.label;
+      const sub = document.createElement('div');
+      sub.className = 'menu-card-subtitle';
+      sub.textContent = d.icon + ' ' + d.label;
+      titleWrap.appendChild(title);
+      const badge = document.createElement('span');
+      badge.className = 'menu-card-badge ' + d.badge;
+      badge.textContent = d.clave === 'total' ? 'TOTAL' : d.label.toUpperCase();
+      header.appendChild(titleWrap);
+      header.appendChild(badge);
+      const value = document.createElement('div');
+      value.className = 'menu-card-value';
+      value.textContent = String(d.valor);
+      if (d.valor > 0 && d.clave !== 'total' && d.clave !== 'sin_restriccion') value.style.color = 'var(--color-primario)';
+      card.appendChild(header);
+      card.appendChild(value);
+      if (d.clave === 'total') {
+        const meta = document.createElement('div');
+        meta.className = 'menu-card-subtitle';
+        meta.textContent = `${totalInscripcionesTalleres} inscripciones en talleres`;
+        card.appendChild(meta);
+      }
+      cardsDieta.appendChild(card);
+    }
+  }
 
   // ── Listado detallado de quién tiene restricción ──
   _comidasInscriptosCache = Array.isArray(datos.inscriptosConDieta) ? datos.inscriptosConDieta : [];
   renderTablaInscriptosConDieta();
 
   const cuerpoServicios = document.querySelector('#tablaComidasServicios tbody');
-  cuerpoServicios.innerHTML = '';
+  if (cuerpoServicios) cuerpoServicios.innerHTML = '';
   const servicios = datos.servicios || [];
-  if (servicios.length === 0) {
+  if (cuerpoServicios && servicios.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 9;
@@ -1316,40 +1573,82 @@ function renderComidas(datos) {
     tr.appendChild(td);
     cuerpoServicios.appendChild(tr);
   }
-  for (const s of servicios) {
-    const tr = document.createElement('tr');
-    const icono = ICONO_CATEGORIA_COMIDA[s.categoria] || '';
-
-    const tdTitulo = document.createElement('td');
-    tdTitulo.textContent = `${icono} ${s.titulo}`;
-
-    const tdDia = document.createElement('td');
-    tdDia.textContent = formatearFecha(s.dia);
-
-    const tdHorario = document.createElement('td');
-    tdHorario.textContent = `${s.hora_inicio || ''} – ${s.hora_fin || ''}`;
-
-    const tdTotal = document.createElement('td');
-    tdTotal.textContent = s.asistentes;
-    tdTotal.style.fontWeight = 'bold';
-
-    const dietas = s.dietas || {};
-    const celdasDietas = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_lactosa', 'otro'].map((clave) => {
-      const td = document.createElement('td');
-      const cantidad = Number(dietas[clave] || 0);
-      td.textContent = cantidad;
-      if (cantidad > 0 && clave !== 'sin_restriccion') td.classList.add('encuentro-si');
-      return td;
-    });
-
-    tr.append(tdTitulo, tdDia, tdHorario, tdTotal, ...celdasDietas);
-    cuerpoServicios.appendChild(tr);
+  if (cuerpoServicios) {
+    for (const s of servicios) {
+      const tr = document.createElement('tr');
+      const icono = ICONO_CATEGORIA_COMIDA[s.categoria] || '';
+      const tdTitulo = document.createElement('td');
+      tdTitulo.textContent = `${icono} ${s.titulo}`;
+      const tdDia = document.createElement('td');
+      tdDia.textContent = formatearFecha(s.dia);
+      const tdHorario = document.createElement('td');
+      tdHorario.textContent = `${s.hora_inicio || ''} – ${s.hora_fin || ''}`;
+      const tdTotal = document.createElement('td');
+      tdTotal.textContent = s.asistentes;
+      tdTotal.style.fontWeight = 'bold';
+      const dietas = s.dietas || {};
+      const celdasDietas = ['sin_restriccion', 'vegano', 'sin_tacc', 'sin_lactosa', 'otro'].map((clave) => {
+        const td = document.createElement('td');
+        const cantidad = Number(dietas[clave] || 0);
+        td.textContent = cantidad;
+        if (cantidad > 0 && clave !== 'sin_restriccion') td.classList.add('encuentro-si');
+        return td;
+      });
+      tr.append(tdTitulo, tdDia, tdHorario, tdTotal, ...celdasDietas);
+      cuerpoServicios.appendChild(tr);
+    }
+  }
+  // cards servicios
+  const cardsServicios = el('cardsComidasServicios');
+  if (cardsServicios) {
+    cardsServicios.innerHTML = '';
+    if (servicios.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'menu-empty';
+      div.textContent = 'No hay bloques de desayuno/merienda en el programa.';
+      cardsServicios.appendChild(div);
+    } else {
+      for (const s of servicios) {
+        const icono = ICONO_CATEGORIA_COMIDA[s.categoria] || '🍽️';
+        const card = document.createElement('div');
+        card.className = 'menu-card';
+        const header = document.createElement('div');
+        header.className = 'menu-card-header';
+        const titleWrap = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'menu-card-title';
+        title.textContent = `${icono} ${s.titulo}`;
+        const sub = document.createElement('div');
+        sub.className = 'menu-card-subtitle';
+        sub.textContent = `${formatearFecha(s.dia)} · ${s.hora_inicio || ''} – ${s.hora_fin || ''}`;
+        titleWrap.appendChild(title);
+        titleWrap.appendChild(sub);
+        const badge = document.createElement('span');
+        badge.className = 'menu-card-badge badge-total';
+        badge.textContent = `${s.asistentes} retiraron`;
+        header.appendChild(titleWrap);
+        header.appendChild(badge);
+        const meta = document.createElement('div');
+        meta.className = 'menu-card-meta';
+        const dietas = s.dietas || {};
+        for (const clave of ['sin_restriccion','vegano','sin_tacc','sin_lactosa','otro']) {
+          const chip = document.createElement('span');
+          const val = Number(dietas[clave]||0);
+          chip.className = 'menu-chip' + (val>0 && clave!=='sin_restriccion' ? ' menu-chip--highlight' : '');
+          chip.innerHTML = `<strong>${val}</strong> ${ETIQUETAS_ALIMENTACION[clave]}`;
+          meta.appendChild(chip);
+        }
+        card.appendChild(header);
+        card.appendChild(meta);
+        cardsServicios.appendChild(card);
+      }
+    }
   }
 
   const cuerpoAsistentes = document.querySelector('#tablaComidasAsistentes tbody');
-  cuerpoAsistentes.innerHTML = '';
+  if (cuerpoAsistentes) cuerpoAsistentes.innerHTML = '';
   const porAsistente = datos.porAsistente || [];
-  if (porAsistente.length === 0) {
+  if (cuerpoAsistentes && porAsistente.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 7;
@@ -1387,6 +1686,47 @@ function renderComidas(datos) {
 
     tr.append(tdFecha, tdDni, tdNombre, tdAlimentacion, tdDesayunos, tdMeriendas, tdTotal);
     cuerpoAsistentes.appendChild(tr);
+  }
+  // cards asistentes
+  const cardsAsistentes = el('cardsComidasAsistentes');
+  if (cardsAsistentes) {
+    cardsAsistentes.innerHTML = '';
+    if (porAsistente.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'menu-empty';
+      div.textContent = 'Todavía no hay escaneos registrados en desayunos o meriendas.';
+      cardsAsistentes.appendChild(div);
+    } else {
+      const badgeClass2 = { sin_restriccion:'badge-sin', vegano:'badge-vegano', sin_tacc:'badge-tacc', sin_lactosa:'badge-lactosa', otro:'badge-otro' };
+      for (const p of porAsistente) {
+        const card = document.createElement('div');
+        card.className = 'menu-card';
+        const header = document.createElement('div');
+        header.className = 'menu-card-header';
+        const titleWrap = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'menu-card-title';
+        title.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/,'') || '—';
+        const sub = document.createElement('div');
+        sub.className = 'menu-card-subtitle';
+        sub.textContent = `DNI ${p.dni} · ${p.fechaAcreditacion || 'sin fecha'}`;
+        titleWrap.appendChild(title);
+        titleWrap.appendChild(sub);
+        const badge = document.createElement('span');
+        badge.className = 'menu-card-badge ' + (badgeClass2[p.alimentacion] || 'badge-sin');
+        badge.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+        header.appendChild(titleWrap);
+        header.appendChild(badge);
+        const meta = document.createElement('div');
+        meta.className = 'menu-card-meta';
+        const chip1 = document.createElement('span'); chip1.className='menu-chip'; chip1.innerHTML = `☕ <strong>${p.desayunos}</strong> desayunos`;
+        const chip2 = document.createElement('span'); chip2.className='menu-chip'; chip2.innerHTML = `🫖 <strong>${p.meriendas}</strong> meriendas`;
+        const chip3 = document.createElement('span'); chip3.className='menu-chip menu-chip--highlight'; chip3.innerHTML = `Total <strong>${p.total}</strong>`;
+        meta.append(chip1, chip2, chip3);
+        card.append(header, meta);
+        cardsAsistentes.appendChild(card);
+      }
+    }
   }
 }
 
@@ -1593,6 +1933,7 @@ const ponenteFotoLabel = el('ponenteFotoLabel');
 
 let ponentes = [];
 let diasPonentes = [];
+let ponenteInscriptos = new Map();
 let compressedFoto = null;
 
 function escapeHtml(text) {
@@ -1655,11 +1996,35 @@ function renderTablaPonentes() {
     badge.textContent = ETIQUETAS_TIPO_PONENTE[p.tipo] || p.tipo;
     tdTipo.appendChild(badge);
     if (p.tipo === 'taller') {
+      const cupo = Number(p.cupo ?? 20);
+      const inscriptos = ponenteInscriptos.get(Number(p.id)) ?? null;
+      const libres = inscriptos !== null ? Math.max(0, cupo - inscriptos) : null;
       const linea = document.createElement('div');
-      linea.style.fontSize = '0.75rem';
+      linea.style.fontSize = '0.72rem';
       linea.style.marginTop = '4px';
-      linea.style.color = 'var(--color-texto-suave)';
-      linea.textContent = `Cupo: ${p.cupo ?? 20}`;
+      linea.style.lineHeight = '1.3';
+      linea.style.display = 'flex';
+      linea.style.flexWrap = 'wrap';
+      linea.style.gap = '0.35rem';
+      const chipCupo = document.createElement('span');
+      chipCupo.className = 'badge badge-sin';
+      chipCupo.style.fontSize = '0.70rem';
+      chipCupo.textContent = `Cupo ${cupo}`;
+      linea.appendChild(chipCupo);
+      if (inscriptos !== null) {
+        const chipInsc = document.createElement('span');
+        chipInsc.className = 'badge badge-sin';
+        chipInsc.style.fontSize = '0.70rem';
+        chipInsc.textContent = `${inscriptos} inscriptos`;
+        linea.appendChild(chipInsc);
+      }
+      if (libres !== null) {
+        const chipLibres = document.createElement('span');
+        chipLibres.style.fontSize = '0.70rem';
+        chipLibres.className = 'badge ' + (libres === 0 ? 'badge-pago no_pagado' : libres <= 5 ? 'badge-pago pago_parcial' : 'badge-pago pago_completo');
+        chipLibres.textContent = libres === 0 ? 'Sin cupos' : `${libres} libres`;
+        linea.appendChild(chipLibres);
+      }
       tdTipo.appendChild(linea);
     }
 
@@ -1736,9 +2101,10 @@ async function guardarFechasPonentes() {
 }
 
 async function cargarPonentes() {
-  const [ponentesRes, diasRes] = await Promise.all([
+  const [ponentesRes, diasRes, talleresRes] = await Promise.all([
     api('/api/admin/ponentes'),
     api('/api/admin/ponentes/dias'),
+    api('/api/admin/talleres').catch(() => ({ ok: false, data: [] })),
   ]);
   if (!ponentesRes.ok) {
     mostrarMensaje(mensajePonente, ponentesRes.data.error || 'No se pudieron cargar los ponentes.', 'error');
@@ -1746,6 +2112,20 @@ async function cargarPonentes() {
   }
   ponentes = ponentesRes.data || [];
   diasPonentes = diasRes.ok ? diasRes.data || [] : [];
+  // mapear inscriptos por ponente (unificando 2 partes)
+  ponenteInscriptos = new Map();
+  if (talleresRes && talleresRes.ok && Array.isArray(talleresRes.data)) {
+    const porPonente = new Map();
+    for (const t of talleresRes.data) {
+      const pid = t.ponente_id ? Number(t.ponente_id) : null;
+      if (!pid) continue;
+      const ins = Number(t.inscriptos) || 0;
+      if (!porPonente.has(pid)) porPonente.set(pid, ins);
+      else porPonente.set(pid, Math.max(porPonente.get(pid), ins));
+    }
+    for (const [pid, ins] of porPonente.entries()) ponenteInscriptos.set(pid, ins);
+    // ponentes sin taller vinculado quedan sin dato
+  }
   renderTablaPonentes();
   renderDiasPonentes();
 }
@@ -2022,12 +2402,14 @@ const planDescripcion = el('planDescripcion');
 const planMonto = el('planMonto');
 const planCuotas = el('planCuotas');
 const planActivo = el('planActivo');
+const planTallerista = el('planTallerista');
 const botonGuardarPlan = el('botonGuardarPlan');
 const botonCancelarPlan = el('botonCancelarPlan');
 const tablaPlanes = el('tablaPlanes');
 const formAsignarPlan = el('formAsignarPlan');
 const asignarDni = el('asignarDni');
 const asignarPlan = el('asignarPlan');
+const asignarTallerista = el('asignarTallerista');
 const botonAsignarPlan = el('botonAsignarPlan');
 const tablaPagos = el('tablaPagos');
 const resumenPagos = el('resumenPagos');
@@ -2089,7 +2471,8 @@ function prellenarSelectPlanes() {
   for (const p of planesPago) {
     const opcion = document.createElement('option');
     opcion.value = p.id;
-    opcion.textContent = `${p.nombre} — ${formatearMoneda(p.monto_total)} / ${p.cantidad_cuotas} cuota(s)`;
+    const marcaTallerista = p.es_tallerista ? ' [Tallerista 50%]' : '';
+    opcion.textContent = `${p.nombre}${marcaTallerista} — ${formatearMoneda(p.monto_total)} / ${p.cantidad_cuotas} cuota(s)`;
     asignarPlan.appendChild(opcion);
   }
 }
@@ -2100,7 +2483,7 @@ function renderPlanesPago() {
   if (planesPago.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.textContent = 'No hay planes creados.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -2123,6 +2506,18 @@ function renderPlanesPago() {
         ? `${detalleCuotas.length} × ${formatearMoneda(detalleCuotas[0].monto)}`
         : detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' + ')
       : String(p.cantidad_cuotas);
+    const tdTallerista = document.createElement('td');
+    tdTallerista.style.textAlign = 'center';
+    if (p.es_tallerista) {
+      const badge = document.createElement('span');
+      badge.className = 'badge badge-tallerista';
+      badge.textContent = 'Tallerista 50%';
+      badge.title = 'Este plan está marcado como de talleristas';
+      tdTallerista.appendChild(badge);
+    } else {
+      tdTallerista.textContent = '—';
+      tdTallerista.style.color = 'var(--color-texto-suave)';
+    }
     const tdActivo = document.createElement('td');
     tdActivo.textContent = p.activo ? 'Sí' : 'No';
     tdActivo.className = p.activo ? 'encuentro-si' : 'encuentro-no';
@@ -2142,7 +2537,7 @@ function renderPlanesPago() {
     cont.appendChild(btnEditar);
     cont.appendChild(btnEliminar);
     tdAcciones.appendChild(cont);
-    tr.append(tdNombre, tdDesc, tdMonto, tdCuotas, tdActivo, tdAcciones);
+    tr.append(tdNombre, tdDesc, tdMonto, tdCuotas, tdTallerista, tdActivo, tdAcciones);
     tbody.appendChild(tr);
   }
 }
@@ -2154,6 +2549,7 @@ function editarPlanPago(p) {
   planMonto.value = p.monto_total;
   planCuotas.value = p.cantidad_cuotas;
   planActivo.checked = Boolean(p.activo);
+  if (planTallerista) planTallerista.checked = Boolean(p.es_tallerista);
   botonGuardarPlan.textContent = 'Actualizar plan';
   botonCancelarPlan.hidden = false;
 }
@@ -2162,6 +2558,7 @@ function resetFormPlan() {
   planIdEditando.value = '';
   formPlanPago.reset();
   planActivo.checked = true;
+  if (planTallerista) planTallerista.checked = false;
   botonCancelarPlan.hidden = true;
   botonGuardarPlan.textContent = 'Guardar plan';
 }
@@ -2190,6 +2587,7 @@ formPlanPago.addEventListener('submit', async (e) => {
       monto_total: Number(planMonto.value) || 0,
       cantidad_cuotas: Number(planCuotas.value) || 1,
       activo: planActivo.checked,
+      es_tallerista: planTallerista ? planTallerista.checked : false,
     }),
   });
   if (!res.ok) {
@@ -2217,13 +2615,15 @@ formAsignarPlan.addEventListener('submit', async (e) => {
   botonAsignarPlan.disabled = true;
   const res = await api('/api/admin/pagos/asignar', {
     method: 'POST',
-    body: JSON.stringify({ dni, plan_id: Number(asignarPlan.value) }),
+    body: JSON.stringify({ dni, plan_id: Number(asignarPlan.value), es_tallerista: asignarTallerista ? asignarTallerista.checked : false }),
   });
   if (!res.ok) {
     mostrarMensaje(mensajePagos, res.data.error || 'No se pudo asignar el plan.', 'error');
   } else {
-    mostrarMensaje(mensajePagos, 'Plan asignado.', 'ok');
+    const esTall = asignarTallerista && asignarTallerista.checked;
+    mostrarMensaje(mensajePagos, esTall ? 'Plan asignado (tallerista 50%).' : 'Plan asignado.', 'ok');
     asignarDni.value = '';
+    if (asignarTallerista) asignarTallerista.checked = false;
     await cargarPagos();
   }
   botonAsignarPlan.disabled = false;
@@ -2234,11 +2634,12 @@ function renderPagos() {
   tbody.innerHTML = '';
   const dniFiltro = filtroPagoDni.value.trim().replace(/\D/g, '');
   const visibles = pagosAsistentes.filter((a) => !dniFiltro || String(a.dni).includes(dniFiltro));
-  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length}.`;
+  const talleristasCount = pagosAsistentes.filter((x) => x.esTallerista || x.es_tallerista).length;
+  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length} · Talleristas 50%: ${talleristasCount} · Estándar: ${pagosAsistentes.length - talleristasCount}.`;
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.textContent = dniFiltro ? 'Sin resultados.' : 'No hay asistentes con plan asignado.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -2250,6 +2651,7 @@ function renderPagos() {
     const pagadas = cuotaPagadaSet(a);
     const n = Number(a.cantidadCuotas) || 1;
     const detalleCuotas = a.cuotasDetalle || [];
+    const esTallerista = Boolean(a.esTallerista || a.es_tallerista);
 
     const tdDni = document.createElement('td');
     tdDni.className = 'celda-dni';
@@ -2258,9 +2660,41 @@ function renderPagos() {
     tdNombre.textContent = [a.apellido, a.nombre].filter(Boolean).join(', ') || '—';
     const tdPlan = document.createElement('td');
     tdPlan.textContent = a.planNombre || '—';
+    const tdModo = document.createElement('td');
+    tdModo.style.textAlign = 'center';
+    const badgeModo = document.createElement('span');
+    badgeModo.className = esTallerista ? 'badge badge-tallerista' : 'badge badge-estandar';
+    badgeModo.textContent = esTallerista ? 'Tallerista 50%' : 'Estándar';
+    badgeModo.title = esTallerista ? 'Paga el 50% del plan' : 'Paga el 100%';
+    tdModo.appendChild(badgeModo);
+    // toggle button
+    const btnToggle = document.createElement('button');
+    btnToggle.type = 'button';
+    btnToggle.className = 'boton boton-chico boton-secundario';
+    btnToggle.style.marginTop = '0.25rem';
+    btnToggle.style.fontSize = '0.72rem';
+    btnToggle.style.padding = '0.15rem 0.4rem';
+    btnToggle.textContent = esTallerista ? 'Quitar 50%' : 'Aplicar 50%';
+    btnToggle.title = esTallerista ? 'Volver a pago completo (100%)' : 'Cambiar a tallerista (paga 50%)';
+    btnToggle.addEventListener('click', async () => {
+      btnToggle.disabled = true;
+      const res = await api(`/api/admin/pagos/${a.asistentePlanId}/tallerista`, {
+        method: 'PUT',
+        body: JSON.stringify({ es_tallerista: !esTallerista }),
+      });
+      if (!res.ok) {
+        mostrarMensaje(mensajePagos, res.data.error || 'No se pudo actualizar modo tallerista.', 'error');
+      } else {
+        mostrarMensaje(mensajePagos, !esTallerista ? 'Modo tallerista 50% activado.' : 'Modo tallerista desactivado.', 'ok');
+        await cargarPagos();
+      }
+      btnToggle.disabled = false;
+    });
+    tdModo.appendChild(document.createElement('br'));
+    tdModo.appendChild(btnToggle);
     const tdTotal = document.createElement('td');
     tdTotal.textContent = detalleCuotas.length
-      ? `${formatearMoneda(a.montoTotal)} · ${detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' / ')}`
+      ? `${formatearMoneda(a.montoTotal)}${esTallerista ? ' (50%)' : ''} · ${detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' / ')}`
       : `${formatearMoneda(a.montoTotal)} / ${formatearMoneda(montoCuota(a, 1))}`;
     tdTotal.className = 'pagos-total';
 
@@ -2276,7 +2710,7 @@ function renderPagos() {
       const tope = infoCuota && infoCuota.fecha_tope ? ` · vence ${formatearFechaTope(infoCuota.fecha_tope)}` : '';
       chip.className = 'pagos-cuota' + (pagada ? ' pagos-cuota-pagada' : '');
       chip.textContent = pagada ? `✓ ${i}` : `${i}`;
-      chip.title = `Cuota ${i} · ${formatearMoneda(montoEsperado)}${tope}`;
+      chip.title = `Cuota ${i} · ${formatearMoneda(montoEsperado)}${tope}${esTallerista ? ' (50% tallerista)' : ''}`;
       chip.addEventListener('click', () => abrirModalCuota(a, i, pagada));
       caja.appendChild(chip);
     }
@@ -2290,7 +2724,7 @@ function renderPagos() {
     spanEstado.textContent = ETIQUETAS_PAGO[estado] || '—';
     tdEstado.appendChild(spanEstado);
 
-    tr.append(tdDni, tdNombre, tdPlan, tdTotal, tdCuotas, tdEstado);
+    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado);
     tbody.appendChild(tr);
   }
 }
@@ -2545,12 +2979,286 @@ formNotificacion.addEventListener('submit', async (e) => {
 
 botonCancelarNotif.addEventListener('click', resetFormNotificacion);
 
+// ── Dashboard (solo frontend) ───────────────────────────────────
+function formatearMoneda(valor) {
+  const n = Number(valor) || 0;
+  return n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
+}
+
+async function cargarDashboard() {
+  const resumen = el('resumenDashboard');
+  const kpiInscritosValor = el('kpiInscriptosValor');
+  const kpiInscriptosSub = el('kpiInscriptosSub');
+  const kpiTalleresValor = el('kpiTalleresValor');
+  const kpiTalleresSub = el('kpiTalleresSub');
+  const kpiTalleresBar = el('kpiTalleresBar');
+  const kpiRecaudadoValor = el('kpiRecaudadoValor');
+  const kpiRecaudadoSub = el('kpiRecaudadoSub');
+  if (resumen) resumen.textContent = 'Cargando…';
+  if (kpiInscriptosValor) kpiInscriptosValor.textContent = '—';
+  if (kpiTalleresValor) kpiTalleresValor.textContent = '—';
+  if (kpiRecaudadoValor) kpiRecaudadoValor.textContent = '—';
+
+  const [tRes, iRes, pRes, aRes, eRes] = await Promise.all([
+    api('/api/admin/talleres'),
+    api('/api/admin/inscripciones'),
+    api('/api/admin/pagos'),
+    api('/api/admin/asistentes'),
+    api('/api/admin/encuentro'),
+  ]);
+
+  // --- KPI 1: Inscriptos en general (DNI únicos del encuentro + fallback) ---
+  let totalGeneral = 0;
+  if (eRes && eRes.ok && eRes.data && typeof eRes.data.total === 'number') {
+    totalGeneral = Number(eRes.data.total) || 0;
+  } else if (eRes && eRes.ok && Array.isArray(eRes.data.personas)) {
+    totalGeneral = eRes.data.personas.length;
+  } else if (aRes.ok && Array.isArray(aRes.data)) {
+    totalGeneral = aRes.data.length;
+  } else if (iRes.ok && Array.isArray(iRes.data)) {
+    totalGeneral = new Set(iRes.data.map((x) => String(x.dni))).size;
+  }
+  // fallback: si no hay encuentro, usar asistentes + inscripciones como total
+  if (totalGeneral === 0 && iRes.ok && Array.isArray(iRes.data)) {
+    totalGeneral = new Set(iRes.data.map((x) => String(x.dni))).size;
+  }
+  const totalInscripciones = iRes.ok && Array.isArray(iRes.data) ? iRes.data.length : 0;
+  if (kpiInscriptosValor) kpiInscriptosValor.textContent = String(totalGeneral);
+  if (kpiInscriptosSub) kpiInscriptosSub.textContent = `${totalGeneral} inscriptos en total`;
+
+  // --- KPI 2: Inscriptos a talleres / faltantes (sobre total general) - unifica 2-partes ---
+  let cupoTotal = 0;
+  let totalSlots = 0;
+  let talleresParaKpi = [];
+  if (tRes.ok && Array.isArray(tRes.data)) {
+    const mapa = new Map();
+    for (const t of tRes.data) {
+      const key = t.pareja_id ? Number(t.pareja_id) : Number(t.id);
+      const nombreBase = String(t.nombre || '').replace(/\s*\(\d+°\s*parte\)\s*/gi, '').trim();
+      if (!mapa.has(key)) {
+        mapa.set(key, { id: key, nombre: nombreBase || t.nombre, cupo: Number(t.cupo) || 0, inscriptos: Number(t.inscriptos) || 0 });
+      } else {
+        const cur = mapa.get(key);
+        // cupo se controla unificado (tomar el del bloque principal)
+        cur.inscriptos = Math.max(cur.inscriptos, Number(t.inscriptos) || 0);
+      }
+    }
+    talleresParaKpi = [...mapa.values()];
+    for (const t of talleresParaKpi) {
+      cupoTotal += t.cupo;
+      totalSlots += t.inscriptos;
+    }
+  }
+  // asistentes = personas con al menos un taller asignado (total DISTINCT en inscripciones)
+  const asistentesConTaller = aRes.ok && Array.isArray(aRes.data) ? aRes.data.length : new Set(
+    (iRes.ok && Array.isArray(iRes.data) ? iRes.data : []).map((x) => String(x.dni))
+  ).size;
+  // Cálculo correcto basado en encuentro (fuente de verdad para faltantes)
+  // Antes: faltan = totalGeneral - asistentesConTaller daba 1 porque 13 inscriptos no están en encuentro
+  // Ahora: faltan = encuentro sin taller (14)
+  let encuentroConTaller = 0;
+  let encuentroSin = 0;
+  if (eRes && eRes.ok && Array.isArray(eRes.data?.personas)) {
+    encuentroConTaller = eRes.data.personas.filter((p) => p.tiene_talleres).length;
+    const encTotal = typeof eRes.data.total === 'number' ? eRes.data.total : eRes.data.personas.length;
+    encuentroSin = Math.max(0, encTotal - encuentroConTaller);
+  } else {
+    encuentroConTaller = asistentesConTaller;
+    encuentroSin = Math.max(0, totalGeneral - asistentesConTaller);
+  }
+  const pctInscriptosTalleres = totalGeneral > 0 ? Math.round((encuentroConTaller / totalGeneral) * 100) : 0;
+  if (kpiTalleresValor) {
+    kpiTalleresValor.textContent = `${encuentroConTaller} / ${encuentroSin}`;
+    kpiTalleresValor.title = 'Click para filtrar faltantes en Importadas del encuentro';
+  }
+  const kpiTalleresCard = el('kpiTalleres');
+  if (kpiTalleresCard) {
+    kpiTalleresCard.style.cursor = 'pointer';
+    kpiTalleresCard.title = 'Click para ver sin taller en Importadas del encuentro';
+  }
+  if (kpiTalleresSub) kpiTalleresSub.textContent = totalGeneral > 0
+    ? `${encuentroSin} sin taller en encuentro · ${pctInscriptosTalleres}% con taller`
+    : `${encuentroConTaller} con taller`;
+  if (kpiTalleresBar) kpiTalleresBar.style.width = `${Math.min(100, pctInscriptosTalleres)}%`;
+  // actualizar sub de KPI1 con detalle de faltantes + extras no en encuentro
+  if (kpiInscriptosSub && totalGeneral > 0) {
+    const extraNoEncuentro = Math.max(0, asistentesConTaller - encuentroConTaller);
+    let texto = `${totalGeneral} en total (encuentro) · ${encuentroConTaller} con taller · ${encuentroSin} sin taller`;
+    if (extraNoEncuentro > 0) {
+      texto += ` (+${extraNoEncuentro} inscriptos fuera del listado del encuentro; total con taller ${asistentesConTaller})`;
+    }
+    kpiInscriptosSub.textContent = texto;
+    kpiInscriptosSub.title = extraNoEncuentro > 0 ? `Hay ${extraNoEncuentro} DNIs inscriptos a talleres que no figuran en el listado del encuentro (ej. carga manual). Por eso el cálculo anterior 65-66=1 no coincidía con los 14 sin taller del listado.` : '';
+  }
+
+  // --- KPI 3: Monto recaudado ---
+  let recaudado = 0;
+  let cuotasPagadas = 0;
+  if (pRes.ok && Array.isArray(pRes.data)) {
+    for (const ap of pRes.data) {
+      const cuotas = Array.isArray(ap.cuotas) ? ap.cuotas : [];
+      for (const c of cuotas) {
+        recaudado += Number(c.monto) || 0;
+        cuotasPagadas += 1;
+      }
+    }
+  }
+  if (kpiRecaudadoValor) kpiRecaudadoValor.textContent = formatearMoneda(recaudado);
+  if (kpiRecaudadoSub) kpiRecaudadoSub.textContent = `${cuotasPagadas} cuotas registradas · actualizado`;
+
+  if (resumen) {
+    const pagTxt = pRes.ok ? 'pagos ok' : 'pagos no disponible';
+    resumen.textContent = `Actualizado: ${new Date().toLocaleString('es-AR', { timeZone: TZ_SALTA })} · ${pagTxt}`;
+  }
+
+  // --- Ranking ---
+  renderRankingTalleres(talleresParaKpi);
+
+  // --- Últimos 5 ---
+  const inscripciones = iRes.ok && Array.isArray(iRes.data) ? iRes.data : [];
+  renderUltimos5(inscripciones);
+}
+
+// KPI Inscriptos a talleres / Faltantes: click filtra sin taller en Importadas del encuentro
+(function initKpiTalleresClick() {
+  const card = el('kpiTalleres');
+  if (!card) return;
+  card.addEventListener('click', () => {
+    cambiarVista('inscripciones');
+    activarSubTabInscripcion('encuentro');
+    const sel = el('filtroEncuentroEstado');
+    if (sel) sel.value = 'sin_taller';
+    // asegurar que encuentroPersonas esté cargado; si no, forzar render cuando llegue
+    renderEncuentroPersonas(encuentroPersonas);
+    // resaltar filtro visualmente
+    if (sel) {
+      sel.style.outline = '2px solid var(--color-primario)';
+      setTimeout(() => { sel.style.outline = ''; }, 1200);
+    }
+    // scroll al listado filtrado
+    const anchor = el('subInscripcionesEncuentro');
+    if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+})();
+
+function renderRankingTalleres(talleres) {
+  const cont = el('rankingTalleres');
+  const sub = el('rankingSub');
+  if (!cont) return;
+  cont.innerHTML = '';
+  if (!Array.isArray(talleres) || talleres.length === 0) {
+    cont.innerHTML = '<div class="ranking-empty">No hay talleres cargados.</div>';
+    if (sub) sub.textContent = 'Sin datos';
+    return;
+  }
+  const ordenados = [...talleres].sort((a, b) => Number(a.inscriptos) - Number(b.inscriptos)).slice(0, 5);
+  const max = Math.max(...ordenados.map((t) => Number(t.inscriptos) || 0), 1);
+  if (sub) sub.textContent = `Top 5 de menor a mayor ocupación · ${talleres.length} talleres`;
+  for (const t of ordenados) {
+    const ins = Number(t.inscriptos) || 0;
+    const cupo = Number(t.cupo) || 0;
+    const pct = Math.round((ins / max) * 100);
+    const pctCupo = cupo > 0 ? Math.round((ins / cupo) * 100) : 0;
+    const row = document.createElement('div');
+    row.className = 'ranking-row';
+    const label = document.createElement('div');
+    label.className = 'ranking-label';
+    label.textContent = t.nombre || '—';
+    label.title = t.nombre || '';
+    const meta = document.createElement('div');
+    meta.className = 'ranking-meta';
+    meta.textContent = cupo ? `${ins}/${cupo} · ${pctCupo}%` : `${ins} inscriptos`;
+    const barWrap = document.createElement('div');
+    barWrap.className = 'ranking-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'ranking-bar';
+    bar.style.width = `${pct}%`;
+    if (pctCupo >= 90) bar.style.background = 'var(--color-error)';
+    else if (pctCupo >= 70) bar.style.background = '#f59e0b';
+    barWrap.appendChild(bar);
+    row.append(label, meta, barWrap);
+    cont.appendChild(row);
+  }
+}
+
+function renderUltimos5(inscripciones) {
+  const tbody = document.querySelector('#tablaUltimos5 tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!Array.isArray(inscripciones) || inscripciones.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = 'No hay inscripciones.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  // DNI únicos: tomar los 5 más recientes por persona
+  const porDni = new Map();
+  const ordenadas = [...inscripciones].sort((a, b) => {
+    const da = new Date(a.creado_en || 0).getTime();
+    const db = new Date(b.creado_en || 0).getTime();
+    return db - da;
+  });
+  for (const row of ordenadas) {
+    const dni = String(row.dni || '').trim();
+    if (!dni) continue;
+    if (!porDni.has(dni)) porDni.set(dni, row);
+    if (porDni.size >= 5) break;
+  }
+  // si no hay suficientes DNI únicos, completar con ordenadas (evita vacío)
+  const ultimos = [...porDni.values()];
+  if (ultimos.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = 'No hay inscripciones.';
+    td.style.color = 'var(--color-texto-suave)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const i of ultimos) {
+    // agréga todos los talleres de ese DNI si existen
+    const filasDni = inscripciones.filter((r) => String(r.dni) === String(i.dni));
+    const talleres = [...new Set(filasDni.map((r) => r.taller).filter(Boolean))].join(', ');
+    const tr = document.createElement('tr');
+    const tdDni = document.createElement('td');
+    tdDni.className = 'celda-dni';
+    tdDni.textContent = i.dni || '—';
+    const tdNombre = document.createElement('td');
+    tdNombre.textContent = `${i.apellido || ''} ${i.nombre || ''}`.trim() || `${i.nombre || ''} ${i.apellido || ''}`.trim() || '—';
+    const tdTaller = document.createElement('td');
+    tdTaller.textContent = talleres || i.taller || '—';
+    tdTaller.title = talleres || i.taller || '';
+    const tdPago = document.createElement('td');
+    const spanPago = document.createElement('span');
+    const estado = i.estado_pago || 'no_pagado';
+    const iconMap = { pago_completo: '✓', pago_parcial: '⚠', no_pagado: '✕' };
+    const icon = iconMap[estado] || '•';
+    spanPago.className = `estado-pago-texto ${estado}`;
+    spanPago.textContent = `${icon} ${ETIQUETAS_PAGO[estado] || estado}`;
+    tdPago.appendChild(spanPago);
+    const tdHora = document.createElement('td');
+    tdHora.textContent = i.creado_en ? formatearFecha(i.creado_en) : '—';
+    tdHora.title = i.creado_en ? String(i.creado_en) : '';
+    tr.append(tdDni, tdNombre, tdTaller, tdPago, tdHora);
+    tbody.appendChild(tr);
+  }
+}
+
 (async () => {
   try {
     const resVersion = await fetch('/api/version', { credentials: 'include' });
     if (resVersion.ok) {
       const datosVersion = await resVersion.json();
-      if (datosVersion && datosVersion.version) el('versionApp').textContent = datosVersion.version;
+      if (datosVersion && datosVersion.version) {
+        el('versionApp').textContent = datosVersion.version;
+        const vF = el('versionAppFooter');
+        if (vF) vF.textContent = datosVersion.version;
+      }
     }
   } catch (_e) {
     /* la versión es informativa */

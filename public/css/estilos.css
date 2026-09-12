@@ -45,7 +45,7 @@ body {
 }
 
 .encabezado {
-  background: linear-gradient(135deg, var(--color-primario),#853d06,#615221, #a16812,#145d77);
+  background: linear-gradient(135deg, var(--color-secundario),#853d06,#615221, #a16812,#145d77);
   color: #fff;
   padding: 1.75rem 1.25rem;
   text-align: center;
@@ -376,57 +376,132 @@ body {
   margin-top: 1rem;
 }
 
-.tabla-envoltura { overflow-x: auto; }
+.tabla-envoltura {
+  overflow-x: auto;
+  border: 1px solid var(--color-borde);
+  border-radius: 10px;
+  background: var(--color-tarjeta);
+  box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+  -webkit-overflow-scrolling: touch;
+}
+.tabla-envoltura table {
+  margin: 0;
+}
 
 table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.92rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
 }
 
 th, td {
   text-align: left;
-  padding: 0.6rem 0.75rem;
+  padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--color-borde);
   vertical-align: middle;
 }
 
 th {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   color: var(--color-texto-suave);
-  white-space: normal;
+  white-space: nowrap;
+  background: var(--color-fondo);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 2px solid var(--color-borde);
 }
 
 td {
   white-space: normal;
   overflow-wrap: anywhere;
+  font-size: 0.88rem;
 }
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:nth-child(even) { background: rgba(148,163,184,0.06); }
+body.dark tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+tbody tr:hover { background: rgba(90,155,67,0.06); }
+body.dark tbody tr:hover { background: rgba(90,155,67,0.10); }
 
 #tablaEncuentroPersonas {
   table-layout: fixed;
-  font-size: 0.82rem;
+  font-size: 0.80rem;
 }
 
 #tablaEncuentroPersonas th,
 #tablaEncuentroPersonas td {
-  padding: 0.45rem 0.5rem;
+  padding: 0.5rem 0.55rem;
 }
 
-.celda-dni { white-space: nowrap; }
+.celda-dni {
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 
 .acciones-fila {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
   justify-content: center;
 }
 
 #tablaInscripciones th,
-#tablaInscripciones td {
+#tablaInscripciones td,
+#tablaAsistentes th,
+#tablaAsistentes td {
   text-align: center;
+  vertical-align: middle;
 }
+
+/* Badges para legibilidad en tablas inscripciones */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.badge-encuentro-si { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.badge-encuentro-no { background: #f1f5f9; color: #64748b; border-color: var(--color-borde); }
+body.dark .badge-encuentro-si { background: rgba(34,197,94,0.15); color: #4ade80; border-color: rgba(34,197,94,0.25); }
+body.dark .badge-encuentro-no { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.2); }
+
+.badge-alim { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.badge-alim.vegano { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.badge-alim.sin_tacc { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+.badge-alim.sin_lactosa { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+.badge-alim.otro { background: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
+.badge-alim.sin_restriccion { background: #f8fafc; color: #64748b; border-color: var(--color-borde); }
+body.dark .badge-alim.vegano { background: rgba(34,197,94,0.15); color: #4ade80; }
+body.dark .badge-alim.sin_tacc { background: rgba(245,158,11,0.15); color: #fbbf24; }
+body.dark .badge-alim.sin_lactosa { background: rgba(59,130,246,0.15); color: #60a5fa; }
+body.dark .badge-alim.otro { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+.badge-tallerista { background: #e0e7ff; color: #4338ca; border-color: #c7d2fe; }
+.badge-estandar { background: #f1f5f9; color: #64748b; border-color: var(--color-borde); }
+body.dark .badge-tallerista { background: rgba(99,102,241,0.18); color: #a5b4fc; border-color: rgba(99,102,241,0.3); }
+body.dark .badge-estandar { background: rgba(148,163,184,0.12); color: #94a3b8; border-color: rgba(148,163,184,0.2); }
+
+.badge-pago { font-size: 0.75rem; padding: 0.18rem 0.5rem; }
+.badge-pago.pago_completo { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.badge-pago.pago_parcial { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.badge-pago.no_pagado { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+body.dark .badge-pago.pago_completo { background: rgba(34,197,94,0.15); color: #4ade80; }
+body.dark .badge-pago.pago_parcial { background: rgba(245,158,11,0.15); color: #fbbf24; }
+body.dark .badge-pago.no_pagado { background: rgba(239,68,68,0.15); color: #f87171; }
 
 .encuentro-si { color: var(--color-ok); font-weight: 600; }
 .encuentro-no { color: var(--color-error); }

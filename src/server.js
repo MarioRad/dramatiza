@@ -1435,6 +1435,7 @@ app.post('/api/admin/pagos/planes', requireAuth, requirePermiso('perm_inscripcio
       descripcion: String(body.descripcion || ''),
       montoTotal: Number(body.monto_total) || 0,
       cantidadCuotas: Math.max(1, Number(body.cantidad_cuotas) || 1),
+      esTallerista: body.es_tallerista === true || body.es_tallerista === 1 || String(body.es_tallerista).toLowerCase() === 'true',
     });
     res.json({ ok: true });
   } catch (e) {
@@ -1458,6 +1459,7 @@ app.put('/api/admin/pagos/planes/:id', requireAuth, requirePermiso('perm_inscrip
       cantidadCuotas: Math.max(1, Number(body.cantidad_cuotas) || 1),
       activo: body.activo !== false,
       cuotas: body.cuotas,
+      esTallerista: body.es_tallerista === true || body.es_tallerista === 1 || String(body.es_tallerista).toLowerCase() === 'true',
     });
     res.json({ ok: true });
   } catch (e) {
@@ -1487,7 +1489,21 @@ app.get('/api/admin/pagos', requireAuth, requirePermiso('perm_inscripciones'), a
 app.post('/api/admin/pagos/asignar', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const body = req.body || {};
-    await db.asignarPlanAsistente(String(body.dni || '').trim(), Number(body.plan_id));
+    const esTallerista = body.es_tallerista === true || body.es_tallerista === 1 || String(body.es_tallerista).toLowerCase() === 'true';
+    await db.asignarPlanAsistente(String(body.dni || '').trim(), Number(body.plan_id), esTallerista);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/pagos/:asistentePlanId/tallerista', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { asistentePlanId } = req.params;
+    if (!esIdValido(asistentePlanId)) throw new db.HttpError(400, 'ID inválido.');
+    const body = req.body || {};
+    const esTallerista = body.es_tallerista === true || body.es_tallerista === 1 || String(body.es_tallerista).toLowerCase() === 'true';
+    await db.actualizarEsTalleristaAsistente(Number(asistentePlanId), esTallerista);
     res.json({ ok: true });
   } catch (e) {
     next(e);

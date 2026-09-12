@@ -17,8 +17,14 @@ async function getClient() {
     throw new Error('Falta DATABASE_URL en las variables de entorno.');
   }
   const u = new URL(process.env.DATABASE_URL);
+  const sslmode = u.searchParams.get('sslmode');
   u.searchParams.delete('sslmode');
-  const client = new Client({ connectionString: u.toString(), ssl: { rejectUnauthorized: false } });
+  const isPrivate = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(u.hostname);
+  let ssl = false;
+  if (sslmode === 'require' || sslmode === 'verify-ca' || sslmode === 'verify-full') ssl = { rejectUnauthorized: false };
+  else if (isPrivate || sslmode === 'disable' || sslmode === 'allow') ssl = false;
+  else if (/supabase\.co|pooler\.supabase\.com/.test(u.hostname)) ssl = { rejectUnauthorized: false };
+  const client = new Client({ connectionString: u.toString(), ssl });
   await client.connect();
   return client;
 }

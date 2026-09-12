@@ -21,9 +21,21 @@ async function initPool() {
   };
   if (process.env.DATABASE_URL) {
     const url = new URL(process.env.DATABASE_URL);
+    const sslmode = url.searchParams.get('sslmode');
     url.searchParams.delete('sslmode');
     poolConfig.connectionString = url.toString();
-    poolConfig.ssl = { rejectUnauthorized: false };
+    // SSL solo si sslmode=require/verify-* o host es Supabase/externo.
+    // Para IPs privadas (192.168.x.x, 10.x, localhost) con sslmode=disable → sin SSL.
+    const isPrivateHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(url.hostname);
+    if (sslmode === 'require' || sslmode === 'verify-ca' || sslmode === 'verify-full') {
+      poolConfig.ssl = { rejectUnauthorized: false };
+    } else if (sslmode === 'disable' || sslmode === 'allow' || isPrivateHost) {
+      poolConfig.ssl = false;
+    } else if (/supabase\.co|pooler\.supabase\.com/.test(url.hostname)) {
+      poolConfig.ssl = { rejectUnauthorized: false };
+    } else {
+      poolConfig.ssl = false;
+    }
   } else {
     poolConfig.host = process.env.DB_HOST || '127.0.0.1';
     poolConfig.port = Number(process.env.DB_PORT || 5432);
@@ -1232,7 +1244,7 @@ async function asignarPlanesAutomaticos(personas) {
 
 async function listarPlanesPago() {
   const planes = await query(
-    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, creado_en
+    `SELECT id, nombre, descripcion, monto_total, cantidad_cuotas, cuotas, activo, es_tallerista, creado_en
      FROM planes_pago ORDER BY id`
   );
   return planes.map((p) => ({
@@ -1240,23 +1252,24 @@ async function listarPlanesPago() {
     id: Number(p.id),
     monto_total: Number(p.monto_total),
     cantidad_cuotas: Number(p.cantidad_cuotas),
+    es_tallerista: Boolean(p.es_tallerista),
     cuotas: normalizarDetalleCuotas(p.cuotas, p.cantidad_cuotas, p.monto_total),
   }));
 }
 
-async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1, cuotas = null }) {
+async function crearPlanPago({ nombre, descripcion = '', montoTotal = 0, cantidadCuotas = 1, cuotas = null, esTallerista = false }) {
   return mutation(
-    `INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas, cuotas) VALUES (?, ?, ?, ?, ?)`,
-    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null]
+    `INSERT INTO planes_pago (nombre, descripcion, monto_total, cantidad_cuotas, cuotas, es_tallerista) VALUES (?, ?, ?, ?, ?, ?)`,
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null, esTallerista ? true : false]
   );
 }
 
-async function actualizarPlanPago(id, { nombre, descripcion, montoTotal, cantidadCuotas, activo, cuotas = null }) {
+async function actualizarPlanPago(id, { nombre, descripcion, montoTotal, cantidadCuotas, activo, cuotas = null, esTallerista = false }) {
   const existe = await queryOne('SELECT id FROM planes_pago WHERE id = ?', [id]);
   if (!existe) throw new HttpError(404, 'Plan no encontrado.');
   await mutation(
-    'UPDATE planes_pago SET nombre = ?, descripcion = ?, monto_total = ?, cantidad_cuotas = ?, cuotas = ?, activo = ? WHERE id = ?',
-    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null, activo ? true : false, id]
+    'UPDATE planes_pago SET nombre = ?, descripcion = ?, monto_total = ?, cantidad_cuotas = ?, cuotas = ?, activo = ?, es_tallerista = ? WHERE id = ?',
+    [nombre, descripcion, formatearMonto(montoTotal), Number(cantidadCuotas) || 1, cuotas ? JSON.stringify(cuotas) : null, activo ? true : false, esTallerista ? true : false, id]
   );
 }
 
@@ -1264,11 +1277,26 @@ async function eliminarPlanPago(id) {
   await mutation('DELETE FROM planes_pago WHERE id = ?', [id]);
 }
 
-async function asignarPlanAsistente(dni, planId) {
+function aplicarDescuentoTalleristaACuotas(cuotasRaw, factor) {
+  if (factor === 1) return cuotasRaw ? (typeof cuotasRaw === 'string' ? cuotasRaw : JSON.stringify(cuotasRaw)) : null;
+  let arr = null;
+  if (Array.isArray(cuotasRaw)) arr = cuotasRaw;
+  else if (typeof cuotasRaw === 'string') { try { arr = JSON.parse(cuotasRaw); } catch (_) { arr = null; } }
+  else if (cuotasRaw && typeof cuotasRaw === 'object') arr = cuotasRaw;
+  if (!Array.isArray(arr) || arr.length === 0) return cuotasRaw ? (typeof cuotasRaw === 'string' ? cuotasRaw : JSON.stringify(cuotasRaw)) : null;
+  const conDescuento = arr.map((c) => ({ ...c, monto: Number(c.monto || 0) * factor }));
+  return JSON.stringify(conDescuento);
+}
+
+async function asignarPlanAsistente(dni, planId, esTallerista = false) {
   if (!/^\d{7,8}$/.test(String(dni || '').trim())) throw new HttpError(400, 'DNI inválido.');
-  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas, cuotas FROM planes_pago WHERE id = ?', [planId]);
+  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas, cuotas, es_tallerista FROM planes_pago WHERE id = ?', [planId]);
   if (!plan) throw new HttpError(404, 'Plan no encontrado.');
   const dniLimpio = String(dni).trim();
+  const factor = esTallerista ? 0.5 : 1;
+  // Si el plan base ya es de tallerista, no volver a descontar si esTallerista ya true - pero si plan es_tallerista, el monto del plan ya es el base; el asistente paga 50% con flag
+  const montoFinal = formatearMonto(Number(plan.monto_total) * factor);
+  const cuotasFinal = aplicarDescuentoTalleristaACuotas(plan.cuotas, factor);
   await transaction(async (run) => {
     const previos = await run(
       `SELECT ap.id, p.nombre FROM asistente_planes ap JOIN planes_pago p ON p.id = ap.plan_id WHERE ap.dni = ?`,
@@ -1280,17 +1308,35 @@ async function asignarPlanAsistente(dni, planId) {
       }
     }
     await run(
-      'INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas, cuotas) VALUES (?, ?, ?, ?, ?)',
-      [dniLimpio, planId, formatearMonto(plan.monto_total), Number(plan.cantidad_cuotas) || 1, plan.cuotas ? JSON.stringify(plan.cuotas) : null]
+      'INSERT INTO asistente_planes (dni, plan_id, monto_total, cantidad_cuotas, cuotas, es_tallerista) VALUES (?, ?, ?, ?, ?, ?)',
+      [dniLimpio, planId, montoFinal, Number(plan.cantidad_cuotas) || 1, cuotasFinal, esTallerista ? true : false]
     );
   });
   await sincronizarEstadoPagoPorDni(dniLimpio);
 }
 
+async function actualizarEsTalleristaAsistente(asistentePlanId, esTallerista) {
+  const existente = await queryOne('SELECT id, plan_id, monto_total, cuotas, es_tallerista FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  if (!existente) throw new HttpError(404, 'Plan de asistente no encontrado.');
+  if (Boolean(existente.es_tallerista) === Boolean(esTallerista)) return existente;
+  const plan = await queryOne('SELECT monto_total, cuotas FROM planes_pago WHERE id = ?', [existente.plan_id]);
+  if (!plan) throw new HttpError(404, 'Plan base no encontrado.');
+  const factor = esTallerista ? 0.5 : 1;
+  // Si se activa tallerista, partir del monto base del plan; si se desactiva, restaurar base
+  // Para cambios, recalcular desde plan base en vez de monto actual para evitar doble división
+  const montoFinal = formatearMonto(Number(plan.monto_total) * factor);
+  const cuotasFinal = aplicarDescuentoTalleristaACuotas(plan.cuotas, factor);
+  await mutation('UPDATE asistente_planes SET monto_total = ?, cuotas = ?, es_tallerista = ? WHERE id = ?', [montoFinal, cuotasFinal, esTallerista ? true : false, asistentePlanId]);
+  // sincronizar estado pago (por si cambió cantidad cuotas? no, solo monto)
+  const fila = await queryOne('SELECT dni FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  if (fila) await sincronizarEstadoPagoPorDni(String(fila.dni).trim());
+  return { ...existente, monto_total: montoFinal, es_tallerista: Boolean(esTallerista) };
+}
+
 async function listarPagos() {
-  const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas FROM planes_pago`);
+  const planes = query(`SELECT id, nombre, monto_total, cantidad_cuotas, es_tallerista FROM planes_pago`);
   const asistentes = query(
-    `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas,
+    `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas, a.es_tallerista,
             COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
             COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
      FROM asistente_planes a
@@ -1322,6 +1368,8 @@ async function listarPagos() {
     planNombre: planPorId.get(Number(a.plan_id))?.nombre || '',
     montoTotal: formatearMonto(a.monto_total),
     cantidadCuotas: Number(a.cantidad_cuotas) || 1,
+    es_tallerista: Boolean(a.es_tallerista),
+    esTallerista: Boolean(a.es_tallerista),
     cuotasDetalle: normalizarDetalleCuotas(a.cuotas, a.cantidad_cuotas, a.monto_total),
     cuotas: pagosPorPlan.get(Number(a.asistente_plan_id)) || [],
   }));
@@ -1540,6 +1588,7 @@ module.exports = {
   actualizarPlanPago,
   eliminarPlanPago,
   asignarPlanAsistente,
+  actualizarEsTalleristaAsistente,
   listarPagos,
   registrarPagoCuota,
   eliminarPagoCuota,
