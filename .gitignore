@@ -151,3 +151,6 @@ vite.config.ts.timestamp-*
 
 # Local ideas / mocks - no commitear
 ideas/
+
+# Archivos subidos por los usuarios (no se deben subir al repositorio)
+public/uploads

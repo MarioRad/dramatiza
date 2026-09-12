@@ -9,9 +9,9 @@
   <link rel="stylesheet" href="/programa.css">
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
-<body>
+<body class="is-login">
   <div class="app-layout" id="appLayout">
-    <aside id="sidebar" class="sidebar" aria-label="Menú principal">
+    <aside id="sidebar" class="sidebar" aria-label="Menú principal" hidden>
       <div class="sidebar-header">
         <img src="/logo.png" alt="Logo" class="sidebar-logo">
         <div class="sidebar-brand">
@@ -44,10 +44,10 @@
         <button type="button" class="dark-toggle" id="darkToggleSidebar"></button>
       </div>
     </aside>
-    <div id="sidebarOverlay" class="sidebar-overlay" aria-hidden="true"></div>
+    <div id="sidebarOverlay" class="sidebar-overlay" aria-hidden="true" hidden></div>
 
     <div class="app-main">
-      <header class="app-topbar">
+      <header class="app-topbar" hidden>
         <button type="button" class="btn-hamburger" id="btnToggleSidebar" aria-label="Alternar menú">☰</button>
         <div class="app-topbar-title" id="tituloPanel">Dashboard</div>
         <div class="app-topbar-actions">
@@ -991,6 +991,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=3"></script>
-  <script src="/js/admin.js?v=26"></script>
+  <script src="/js/admin.js?v=27"></script>
 </body>
 </html>

@@ -171,6 +171,25 @@ body.sidebar-collapsed .sidebar-footer .sidebar-user-info {
   text-overflow: ellipsis;
 }
 
+/* Login: ocultar chrome hasta autenticar (evita flash del sidebar) */
+.sidebar[hidden],
+.app-topbar[hidden],
+.sidebar-overlay[hidden] { display: none !important; }
+body.is-login .sidebar,
+body.is-login .sidebar-overlay,
+body.is-login .app-topbar { display: none !important; }
+body.is-login .app-layout { justify-content: center; }
+body.is-login .app-main { background: transparent; }
+body.is-login .contenedor-panel {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+}
+body.is-login #vistaLogin { max-width: 420px; width: 100%; margin: 2rem auto; }
+body.is-login #vistaPanel[hidden] { display: none !important; }
+
 /* Main area */
 .app-main {
   flex: 1;
