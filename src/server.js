@@ -2275,16 +2275,45 @@ app.get('/api/mobile/resumen/dia', async (req, res, next) => {
     const sesion = sesionMovilValida(req);
     if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
     const fecha = String(req.query.fecha || new Date().toISOString().slice(0,10));
-    const [totalAcreditados, porTaller, comidas, capacidadLoc, inscriptosEvento, inscriptosTalleres] = await Promise.all([
+    const [totalAcreditados, porTaller, comidas, capacidadLoc, inscriptosEvento, inscriptosTalleres, encuentroPersonas, ultimosRaw] = await Promise.all([
       db.contarAcreditados().catch(()=>0),
       db.listarAcreditacionesPorTaller().catch(()=>[]),
       db.resumenComidas().catch(()=>({ servicios: [] })),
       db.obtenerConfig('capacidad_locacion').catch(()=>null),
       db.contarEncuentro().catch(()=>0),
       db.contarAsistentesUnicos().catch(()=>0),
+      db.listarEncuentro().catch(()=>[]),
+      db.listarInscripciones().catch(()=>[]),
     ]);
     const totalMenus = comidas.servicios?.reduce((s, b)=> s + Number(b.asistentes||0), 0) || 0;
-    res.json({ ok: true, fecha, totalAcreditados, inscriptosEvento, inscriptosTalleres, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc });
+    // Encuentro con/sin taller — alineado con web (admin.js cargarDashboard)
+    let encuentroConTaller = 0;
+    let encuentroSin = 0;
+    if (Array.isArray(encuentroPersonas) && encuentroPersonas.length) {
+      encuentroConTaller = encuentroPersonas.filter(p => p.tiene_talleres).length;
+      encuentroSin = Math.max(0, Number(inscriptosEvento||0) - encuentroConTaller);
+    } else {
+      encuentroConTaller = Number(inscriptosTalleres||0);
+      encuentroSin = Math.max(0, Number(inscriptosEvento||0) - encuentroConTaller);
+    }
+    // Últimos 5 inscriptos (DNI único, más recientes) — igual lógica que renderUltimos5 en admin.js
+    let ultimos5 = [];
+    try {
+      const ordenadas = [...(Array.isArray(ultimosRaw)?ultimosRaw:[])].sort((a,b)=> new Date(b.creado_en||0)-new Date(a.creado_en||0));
+      const porDni = new Map();
+      for (const row of ordenadas) {
+        const dni = String(row.dni||'').trim();
+        if (!dni || porDni.has(dni)) continue;
+        porDni.set(dni, row);
+        if (porDni.size>=5) break;
+      }
+      ultimos5 = [...porDni.values()].map(r=>{
+        const filasDni = ultimosRaw.filter(x=> String(x.dni)===String(r.dni));
+        const talleres = [...new Set(filasDni.map(x=> x.taller).filter(Boolean))].join(', ');
+        return { dni: String(r.dni), nombre: r.nombre||'', apellido: r.apellido||'', email: r.email||'', taller: talleres|| r.taller||'', estado_pago: r.estado_pago||'no_pagado', creado_en: r.creado_en||'' };
+      });
+    } catch (_) { ultimos5=[]; }
+    res.json({ ok: true, fecha, totalAcreditados, inscriptosEvento, inscriptosTalleres, encuentroConTaller, encuentroSin, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc, ultimos5 });
   } catch (e) { next(e); }
 });
 
