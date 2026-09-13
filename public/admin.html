@@ -32,6 +32,7 @@
         <button type="button" class="tab sidebar-link" data-vista="pagos"><span class="sidebar-icon">💳</span><span>Pagos y cuotas</span></button>
         <button type="button" class="tab sidebar-link" data-vista="notificaciones"><span class="sidebar-icon">🔔</span><span>Notificaciones</span></button>
         <div class="sidebar-section-title">Operativo</div>
+        <button type="button" class="tab sidebar-link" data-vista="asignaciones"><span class="sidebar-icon">🔗</span><span>Asignaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="acreditaciones" hidden><span class="sidebar-icon">✅</span><span>Acreditaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="comidas" hidden><span class="sidebar-icon">🍽️</span><span>Gestión de Menús</span></button>
         <div class="sidebar-section-title">Sistema</div>
@@ -398,6 +399,37 @@
                   <tbody></tbody>
                 </table>
               </div>
+            </div>
+          </div>
+
+          <div id="vistaAsignaciones" class="tab-contenido" hidden>
+            <h3>Asignaciones</h3>
+            <p class="ayuda">Asigná operadores a talleres. Formato vigente: <code>Usuario -&gt; Mimo y pan... DD-MM-AAAA - por admin</code> (dos primeras palabras del taller).</p>
+            <div id="mensajeAsignaciones" class="mensaje" role="alert"></div>
+            <form id="formAsignacion" class="pagos-fila" style="align-items:flex-end;">
+              <input type="hidden" id="asignacionId">
+              <div class="campo">
+                <label for="asignacionOperador">Operador</label>
+                <select id="asignacionOperador" required></select>
+              </div>
+              <div class="campo">
+                <label for="asignacionTaller">Taller</label>
+                <select id="asignacionTaller" required></select>
+              </div>
+              <div class="campo">
+                <label for="asignacionDia">Día</label>
+                <input type="date" id="asignacionDia" required>
+              </div>
+              <button type="submit" class="boton" id="botonGuardarAsignacion">Asignar</button>
+              <button type="button" class="boton boton-secundario" id="botonCancelarAsignacion" hidden>Cancelar</button>
+            </form>
+            <div class="tabla-envoltura" style="margin-top:1rem;">
+              <table id="tablaAsignaciones">
+                <thead>
+                  <tr><th>Asignación vigente</th><th style="width:180px">Acciones</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
           </div>
 

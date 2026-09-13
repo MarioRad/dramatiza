@@ -2511,6 +2511,21 @@ app.delete('/api/mobile/asignaciones/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── Admin Asignaciones (web) ────────────────────────────────────────
+function esAdminOSuperior(req) { const r=req.sesion?.rol; return r==='admin'|| r==='superior'; }
+app.get('/api/admin/asignaciones', requireAuth, async (req, res, next) => {
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const filas=await db.query(`SELECT a.*, t.nombre as taller_nombre, b.titulo as bloque_titulo FROM operador_taller_asignaciones a LEFT JOIN talleres t ON t.id=a.taller_id LEFT JOIN programa_bloques b ON b.id=a.bloque_id ORDER BY a.dia DESC, a.id DESC LIMIT 200`); res.json(filas); } catch(e){ next(e); }
+});
+app.post('/api/admin/asignaciones', requireAuth, async (req, res, next) => {
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia YYYY-MM-DD requeridos'}); await db.query('INSERT INTO operador_taller_asignaciones (operador_username, taller_id, dia, bloque_id, creado_por) VALUES (?,?,?,?,?)', [op,tid,d,bloqueId||null, req.sesion.usuario]); await db.registrarEvento('asignacion_creada', `Asignación ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.status(201).json({ok:true}); } catch(e){ next(e); }
+});
+app.put('/api/admin/asignaciones/:id', requireAuth, async (req, res, next) => {
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia requeridos'}); const existe=await db.queryOne('SELECT id FROM operador_taller_asignaciones WHERE id=?',[id]); if(!existe) return res.status(404).json({error:'No encontrada'}); await db.query('UPDATE operador_taller_asignaciones SET operador_username=?, taller_id=?, dia=?, bloque_id=? WHERE id=?',[op,tid,d,bloqueId||null,id]); await db.registrarEvento('asignacion_reasignada', `Reasignación #${id}: ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
+});
+app.delete('/api/admin/asignaciones/:id', requireAuth, async (req, res, next) => {
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); await db.query('DELETE FROM operador_taller_asignaciones WHERE id=?',[id]); await db.registrarEvento('asignacion_eliminada', `Asignación #${id} eliminada por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
+});
+
 // Job avisos 10/30min (poll cada 60s, usa notificaciones)
 let __avisosInterval = null;
 function iniciarJobAvisos() {

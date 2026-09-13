@@ -36,6 +36,7 @@ const TITULOS_VISTA = {
   encuentro: 'Importar listado',
   pagos: 'Gestión de pagos y cuotas',
   notificaciones: 'Notificaciones a la app móvil',
+  asignaciones: 'Asignaciones',
   acreditaciones: 'Acreditaciones',
   comidas: 'Gestión de Menús',
   eventos: 'Registro de eventos',
@@ -193,8 +194,11 @@ function mostrarPanel() {
   for (const tab of document.querySelectorAll('.tab-admin')) tab.hidden = !esAdmin;
   const puedeAcreditar = esAdmin || Boolean(miSesion && miSesion.perm_acreditacion);
   for (const tab of document.querySelectorAll('.tab-acreditacion')) tab.hidden = !puedeAcreditar;
+  const esAdminOSuperior = miSesion && (miSesion.rol === 'admin' || miSesion.rol === 'superior');
+  for (const tab of document.querySelectorAll('[data-vista="asignaciones"]')) tab.hidden = !esAdminOSuperior;
   const vistasSinPermiso = ['eventos', 'usuarios', 'permisos'];
   if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas');
+  if (!esAdminOSuperior) vistasSinPermiso.push('asignaciones');
   if (vistasSinPermiso.includes(vistaActiva)) {
     cambiarVista('dashboard');
   } else {
@@ -273,6 +277,9 @@ function cambiarVista(vista) {
   }
   if (vista === 'notificaciones') {
     cargarNotificaciones();
+  }
+  if (vista === 'asignaciones') {
+    cargarAsignacionesAdmin();
   }
 }
 
@@ -3068,6 +3075,98 @@ formNotificacion.addEventListener('submit', async (e) => {
 });
 
 botonCancelarNotif.addEventListener('click', resetFormNotificacion);
+
+// ── Asignaciones (admin/superior) ─────────────────────────────────
+const formAsignacion = el('formAsignacion');
+const asignacionOperador = el('asignacionOperador');
+const asignacionTaller = el('asignacionTaller');
+const asignacionDia = el('asignacionDia');
+const botonGuardarAsignacion = el('botonGuardarAsignacion');
+const botonCancelarAsignacion = el('botonCancelarAsignacion');
+const mensajeAsignaciones = el('mensajeAsignaciones');
+let asignacionEditandoId = null;
+
+function dosPalabras(titulo) {
+  const p = String(titulo||'').trim().split(/\s+/);
+  if (p.length<=2) return p.join(' ');
+  return p.slice(0,2).join(' ') + '...';
+}
+function formatearDia(dia) {
+  const m = String(dia||'').slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : String(dia||'').slice(0,10);
+}
+async function poblarAsignacionSelects() {
+  try {
+    const [uRes, tRes] = await Promise.all([api('/api/admin/usuarios'), api('/api/admin/talleres')]);
+    if (asignacionOperador) {
+      asignacionOperador.innerHTML = '<option value="">Seleccioná operador</option>';
+      const ops = (uRes.ok && Array.isArray(uRes.data) ? uRes.data : []).filter(u=>u.rol==='operador' && u.activo);
+      for (const o of ops) {
+        const opt=document.createElement('option'); opt.value=o.username; opt.textContent=`${o.username} — ${o.nombre||''}`.trim(); asignacionOperador.appendChild(opt);
+      }
+    }
+    if (asignacionTaller) {
+      asignacionTaller.innerHTML = '<option value="">Seleccioná taller</option>';
+      const lista = tRes.ok && Array.isArray(tRes.data) ? tRes.data : [];
+      for (const t of lista) {
+        const opt=document.createElement('option'); opt.value=t.id; opt.textContent=`${t.nombre} — ${t.fecha||''} ${t.hora||''}`.trim(); opt.dataset.fecha=t.fecha||''; asignacionTaller.appendChild(opt);
+      }
+      asignacionTaller.onchange = () => {
+        const sel = asignacionTaller.options[asignacionTaller.selectedIndex];
+        const f = sel?.dataset?.fecha || '';
+        const m = String(f).match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) asignacionDia.value = m[1];
+      };
+    }
+  } catch(_) {}
+}
+async function cargarAsignacionesAdmin() {
+  if (!el('vistaAsignaciones') || el('vistaAsignaciones').hidden) { /* aún no visible, igual poblar selects */ }
+  await poblarAsignacionSelects();
+  const res = await api('/api/admin/asignaciones');
+  if (!res.ok) { mostrarMensaje(mensajeAsignaciones, res.data.error || 'No se pudieron cargar asignaciones', 'error'); return; }
+  renderAsignacionesAdmin(res.data || []);
+}
+function renderAsignacionesAdmin(lista) {
+  const tbody = document.querySelector('#tablaAsignaciones tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!lista.length) {
+    const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=2; td.textContent='Sin asignaciones vigentes'; td.style.color='var(--color-texto-suave)'; tr.appendChild(td); tbody.appendChild(tr); return;
+  }
+  for (const a of lista) {
+    const tr=document.createElement('tr');
+    const tdMain=document.createElement('td');
+    const operador = a.operador_username || a.operador || '—';
+    const tituloFull = a.taller_nombre || a.taller || `Taller ${a.taller_id}`;
+    const tituloCorto = dosPalabras(tituloFull);
+    const diaFmt = formatearDia(a.dia);
+    const por = a.creado_por || 'admin';
+    tdMain.textContent = `${operador} -> ${tituloCorto} ${diaFmt} - por ${por}`;
+    tdMain.title = `${operador} -> ${tituloFull} ${diaFmt} - por ${por}`;
+    const tdAcc=document.createElement('td');
+    const wrap=document.createElement('div'); wrap.className='acciones-fila';
+    const btnEdit=document.createElement('button'); btnEdit.type='button'; btnEdit.className='boton boton-chico'; btnEdit.textContent='Editar';
+    btnEdit.addEventListener('click', ()=>{ asignacionEditandoId=a.id; if(asignacionOperador) asignacionOperador.value=operador; if(asignacionTaller) asignacionTaller.value=String(a.taller_id); if(asignacionDia) asignacionDia.value=String(a.dia||'').slice(0,10); botonGuardarAsignacion.textContent='Guardar'; botonCancelarAsignacion.hidden=false; });
+    const btnDel=document.createElement('button'); btnDel.type='button'; btnDel.className='boton boton-peligro boton-chico'; btnDel.textContent='Eliminar';
+    btnDel.addEventListener('click', async ()=>{ if(!window.confirm(`¿Eliminar asignación ${operador} -> ${tituloCorto}?`)) return; btnDel.disabled=true; const r=await api(`/api/admin/asignaciones/${a.id}`,{method:'DELETE'}); if(!r.ok) mostrarMensaje(mensajeAsignaciones, r.data.error||'No se pudo eliminar','error'); else { mostrarMensaje(mensajeAsignaciones,'Asignación eliminada','ok'); await cargarAsignacionesAdmin(); } btnDel.disabled=false; });
+    wrap.appendChild(btnEdit); wrap.appendChild(btnDel); tdAcc.appendChild(wrap);
+    tr.appendChild(tdMain); tr.appendChild(tdAcc); tbody.appendChild(tr);
+  }
+}
+if (formAsignacion) {
+  formAsignacion.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const payload={ operador: String(asignacionOperador.value||'').trim(), tallerId: Number(asignacionTaller.value), dia: String(asignacionDia.value||'').trim() };
+    if(!payload.operador || !payload.tallerId || !/^\d{4}-\d{2}-\d{2}$/.test(payload.dia)){ mostrarMensaje(mensajeAsignaciones,'Completá operador, taller y día','error'); return; }
+    botonGuardarAsignacion.disabled=true;
+    const res = asignacionEditandoId ? await api(`/api/admin/asignaciones/${asignacionEditandoId}`,{method:'PUT', body:JSON.stringify(payload)}) : await api('/api/admin/asignaciones',{method:'POST', body:JSON.stringify(payload)});
+    if(!res.ok) mostrarMensaje(mensajeAsignaciones, res.data.error||'No se pudo guardar','error');
+    else { mostrarMensaje(mensajeAsignaciones, asignacionEditandoId?'Asignación actualizada':'Asignación creada','ok'); formAsignacion.reset(); asignacionEditandoId=null; botonGuardarAsignacion.textContent='Asignar'; botonCancelarAsignacion.hidden=true; await cargarAsignacionesAdmin(); }
+    botonGuardarAsignacion.disabled=false;
+  });
+}
+if (botonCancelarAsignacion) botonCancelarAsignacion.addEventListener('click', ()=>{ formAsignacion.reset(); asignacionEditandoId=null; botonGuardarAsignacion.textContent='Asignar'; botonCancelarAsignacion.hidden=true; });
 
 // ── Dashboard (solo frontend) ───────────────────────────────────
 function formatearMoneda(valor) {
