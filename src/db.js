@@ -54,6 +54,7 @@ async function initPool() {
       await pool.query('ALTER TABLE asistente_planes ADD COLUMN IF NOT EXISTS cuotas JSONB');
       await pool.query('ALTER TABLE planes_pago ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
       await pool.query('ALTER TABLE asistente_planes ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
+      await pool.query('ALTER TABLE notificaciones_leidas ADD COLUMN IF NOT EXISTS leido_en TIMESTAMPTZ DEFAULT NOW()');
     } catch (e) {
       console.error('[db] auto-migración es_tallerista/cuotas falló:', e.message);
     }
@@ -1525,17 +1526,26 @@ async function contarNotificacionesSinLeer(usuario) {
 
 async function marcarNotificacionLeida(usuario, notificacionId) {
   await query(
-    'INSERT INTO notificaciones_leidas (usuario, notificacion_id) VALUES (?, ?) ON CONFLICT (usuario, notificacion_id) DO NOTHING',
+    'INSERT INTO notificaciones_leidas (usuario, notificacion_id, leido_en) VALUES (?, ?, NOW()) ON CONFLICT (usuario, notificacion_id) DO UPDATE SET leido_en = NOW()',
     [usuario, notificacionId]
   );
 }
 
 async function marcarTodasNotificacionesLeidas(usuario) {
   await query(
-    `INSERT INTO notificaciones_leidas (usuario, notificacion_id)
-     SELECT ?, id FROM notificaciones WHERE activa = TRUE
-     ON CONFLICT (usuario, notificacion_id) DO NOTHING`,
+    `INSERT INTO notificaciones_leidas (usuario, notificacion_id, leido_en)
+     SELECT ?, id, NOW() FROM notificaciones WHERE activa = TRUE
+     ON CONFLICT (usuario, notificacion_id) DO UPDATE SET leido_en = NOW()`,
     [usuario]
+  );
+}
+
+async function listarNotificacionLectores(notificacionId) {
+  return query(
+    `SELECT l.usuario, l.leido_en, COALESCE(u.nombre,'') as nombre, COALESCE(u.rol,'') as rol
+     FROM notificaciones_leidas l LEFT JOIN usuarios u ON u.username=l.usuario
+     WHERE l.notificacion_id=? ORDER BY l.leido_en DESC`,
+    [notificacionId]
   );
 }
 
@@ -1652,6 +1662,7 @@ module.exports = {
   contarNotificacionesSinLeer,
   marcarNotificacionLeida,
   marcarTodasNotificacionesLeidas,
+  listarNotificacionLectores,
   crearNotificacion,
   actualizarNotificacion,
   eliminarNotificacion,

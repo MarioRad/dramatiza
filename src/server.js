@@ -2119,6 +2119,14 @@ app.delete('/api/admin/notificaciones/:id', requireAuth, async (req, res, next) 
   }
 });
 
+app.get('/api/admin/notificaciones/:id/leidos', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    res.json(await db.listarNotificacionLectores(id));
+  } catch (e) { next(e); }
+});
+
 app.get('/api/mobile/notificaciones', async (req, res, next) => {
   try {
     const sesion = sesionMovilValida(req);
@@ -2434,10 +2442,16 @@ app.get('/api/mobile/asignaciones', async (req, res, next) => {
     if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
     if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
     try {
-      const filas = await db.query('SELECT * FROM operador_taller_asignaciones ORDER BY dia DESC, id DESC LIMIT 100');
+      const filas = await db.query(`
+        SELECT a.*, t.nombre as taller_nombre, b.titulo as bloque_titulo
+        FROM operador_taller_asignaciones a
+        LEFT JOIN talleres t ON t.id=a.taller_id
+        LEFT JOIN programa_bloques b ON b.id=a.bloque_id
+        ORDER BY a.dia DESC, a.id DESC LIMIT 100`);
       return res.json({ ok: true, asignaciones: filas });
     } catch (_) {
-      return res.json({ ok: true, asignaciones: [] });
+      const filas2 = await db.query('SELECT * FROM operador_taller_asignaciones ORDER BY dia DESC, id DESC LIMIT 100').catch(()=>[]);
+      return res.json({ ok: true, asignaciones: filas2 });
     }
   } catch (e) { next(e); }
 });

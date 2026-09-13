@@ -2972,12 +2972,32 @@ function renderNotificaciones(lista) {
     btnEditar.className = 'boton boton-chico';
     btnEditar.textContent = 'Editar';
     btnEditar.addEventListener('click', () => editarNotificacion(n));
+    const btnLeidos = document.createElement('button');
+    btnLeidos.type = 'button';
+    btnLeidos.className = 'boton boton-chico';
+    btnLeidos.textContent = 'Leídos';
+    btnLeidos.title = 'Ver quién leyó (username + fecha)';
+    btnLeidos.addEventListener('click', async () => {
+      btnLeidos.disabled = true; btnLeidos.textContent = '…';
+      const r = await api(`/api/admin/notificaciones/${n.id}/leidos`);
+      if (!r.ok) { mostrarMensaje(mensajeNotificaciones, r.data.error || 'No se pudo cargar leídos', 'error'); }
+      else {
+        const lista = Array.isArray(r.data) ? r.data : [];
+        if (!lista.length) mostrarMensaje(mensajeNotificaciones, `Nadie leyó "${n.titulo}" aún.`, 'info');
+        else {
+          const txt = lista.map(x=> `${x.usuario}${x.nombre?` (${x.nombre})`:''} · ${x.rol||''} · ${formatearFechaCompleta(x.leido_en)}`.trim()).join('\n');
+          mostrarMensaje(mensajeNotificaciones, `${lista.length} leyeron "${n.titulo}":\n${txt}`, 'ok');
+        }
+      }
+      btnLeidos.disabled = false; btnLeidos.textContent = 'Leídos';
+    });
     const btnEliminar = document.createElement('button');
     btnEliminar.type = 'button';
     btnEliminar.className = 'boton boton-peligro boton-chico';
     btnEliminar.textContent = 'Eliminar';
     btnEliminar.addEventListener('click', () => eliminarNotificacion(n));
     cont.appendChild(btnEditar);
+    cont.appendChild(btnLeidos);
     cont.appendChild(btnEliminar);
     tdAcciones.appendChild(cont);
 
