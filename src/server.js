@@ -2275,12 +2275,16 @@ app.get('/api/mobile/resumen/dia', async (req, res, next) => {
     const sesion = sesionMovilValida(req);
     if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
     const fecha = String(req.query.fecha || new Date().toISOString().slice(0,10));
-    const totalAcreditados = await db.contarAcreditados().catch(()=>0);
-    const porTaller = await db.listarAcreditacionesPorTaller().catch(()=>[]);
-    const comidas = await db.resumenComidas().catch(()=>({ servicios: [] }));
+    const [totalAcreditados, porTaller, comidas, capacidadLoc, inscriptosEvento, inscriptosTalleres] = await Promise.all([
+      db.contarAcreditados().catch(()=>0),
+      db.listarAcreditacionesPorTaller().catch(()=>[]),
+      db.resumenComidas().catch(()=>({ servicios: [] })),
+      db.obtenerConfig('capacidad_locacion').catch(()=>null),
+      db.contarEncuentro().catch(()=>0),
+      db.contarAsistentesUnicos().catch(()=>0),
+    ]);
     const totalMenus = comidas.servicios?.reduce((s, b)=> s + Number(b.asistentes||0), 0) || 0;
-    const capacidadLoc = await db.obtenerConfig('capacidad_locacion').catch(()=>null);
-    res.json({ ok: true, fecha, totalAcreditados, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc });
+    res.json({ ok: true, fecha, totalAcreditados, inscriptosEvento, inscriptosTalleres, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc });
   } catch (e) { next(e); }
 });
 
