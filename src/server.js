@@ -2191,6 +2191,38 @@ app.get('/api/mobile/talleres', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Dashboard web espejo para móvil: mismos 5 sources que admin.js cargarDashboard
+app.get('/api/mobile/dashboard/talleres', async (req, res, next) => {
+  try {
+    const s=sesionMovilValida(req); if(!s) return res.status(401).json({error:'No autorizado.'});
+    const t=await db.listarTalleres(); res.json(t.map(x=>({...x, inscriptos:Number(x.inscriptos), cupo:Number(x.cupo), duracion_hs:Number(x.duracion_hs), pareja_id:x.pareja_id?Number(x.pareja_id):null})));
+  } catch(e){next(e);}
+});
+app.get('/api/mobile/dashboard/inscripciones', async (req, res, next) => {
+  try {
+    const s=sesionMovilValida(req); if(!s) return res.status(401).json({error:'No autorizado.'});
+    const l=await db.listarInscripciones(); res.json(l.map(i=>({...i,en_encuentro:Boolean(i.en_encuentro)})));
+  } catch(e){next(e);}
+});
+app.get('/api/mobile/dashboard/asistentes', async (req, res, next) => {
+  try {
+    const s=sesionMovilValida(req); if(!s) return res.status(401).json({error:'No autorizado.'});
+    const l=await db.listarAsistentes(); res.json(l.map(a=>({dni:a.dni,nombre:a.nombre,apellido:a.apellido,email:a.email,telefono:a.telefono||'',alimentacion:a.alimentacion||'sin_restriccion',en_encuentro:Boolean(a.en_encuentro),estado_pago:a.estado_pago||'no_pagado',creado_en:a.creado_en,cantidad_talleres:Number(a.cantidad_talleres),talleres_nombres:a.talleres_nombres||'',talleres_ids:a.talleres_ids||''})));
+  } catch(e){next(e);}
+});
+app.get('/api/mobile/dashboard/encuentro', async (req, res, next) => {
+  try {
+    const s=sesionMovilValida(req); if(!s) return res.status(401).json({error:'No autorizado.'});
+    const personas=await db.listarEncuentro(); res.json({total:personas.length, personas});
+  } catch(e){next(e);}
+});
+app.get('/api/mobile/dashboard/pagos', async (req, res, next) => {
+  try {
+    const s=sesionMovilValida(req); if(!s) return res.status(401).json({error:'No autorizado.'});
+    res.json(await db.listarPagos());
+  } catch(e){next(e);}
+});
+
 app.get('/api/mobile/talleres/asignados', async (req, res, next) => {
   try {
     const sesion = sesionMovilValida(req);
@@ -2275,7 +2307,7 @@ app.get('/api/mobile/resumen/dia', async (req, res, next) => {
     const sesion = sesionMovilValida(req);
     if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
     const fecha = String(req.query.fecha || new Date().toISOString().slice(0,10));
-    const [totalAcreditados, porTaller, comidas, capacidadLoc, inscriptosEvento, inscriptosTalleres, encuentroPersonas, ultimosRaw] = await Promise.all([
+    const [totalAcreditados, porTaller, comidas, capacidadLoc, inscriptosEvento, inscriptosTalleres, encuentroPersonas, ultimosRaw, pagosRaw] = await Promise.all([
       db.contarAcreditados().catch(()=>0),
       db.listarAcreditacionesPorTaller().catch(()=>[]),
       db.resumenComidas().catch(()=>({ servicios: [] })),
@@ -2284,8 +2316,17 @@ app.get('/api/mobile/resumen/dia', async (req, res, next) => {
       db.contarAsistentesUnicos().catch(()=>0),
       db.listarEncuentro().catch(()=>[]),
       db.listarInscripciones().catch(()=>[]),
+      db.listarPagos().catch(()=>[]),
     ]);
     const totalMenus = comidas.servicios?.reduce((s, b)=> s + Number(b.asistentes||0), 0) || 0;
+    // Recaudado idéntico a web: suma cuotas pagadas (admin.js cargarDashboard)
+    let recaudado = 0; let cuotasPagadas = 0;
+    try {
+      for (const ap of (Array.isArray(pagosRaw)? pagosRaw: [])) {
+        const cuotas = Array.isArray(ap.cuotas) ? ap.cuotas : [];
+        for (const c of cuotas) { recaudado += Number(c.monto)||0; cuotasPagadas++; }
+      }
+    } catch(_) {}
     // Encuentro con/sin taller — alineado con web (admin.js cargarDashboard)
     let encuentroConTaller = 0;
     let encuentroSin = 0;
@@ -2313,7 +2354,7 @@ app.get('/api/mobile/resumen/dia', async (req, res, next) => {
         return { dni: String(r.dni), nombre: r.nombre||'', apellido: r.apellido||'', email: r.email||'', taller: talleres|| r.taller||'', estado_pago: r.estado_pago||'no_pagado', creado_en: r.creado_en||'' };
       });
     } catch (_) { ultimos5=[]; }
-    res.json({ ok: true, fecha, totalAcreditados, inscriptosEvento, inscriptosTalleres, encuentroConTaller, encuentroSin, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc, ultimos5 });
+    res.json({ ok: true, fecha, totalAcreditados, inscriptosEvento, inscriptosTalleres, encuentroConTaller, encuentroSin, totalMenus, recaudado, cuotasPagadas, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc, ultimos5 });
   } catch (e) { next(e); }
 });
 
