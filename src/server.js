@@ -2172,6 +2172,25 @@ app.get('/api/mobile/menu/resumen', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+app.get('/api/mobile/operadores', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
+    const filas = await db.query("SELECT username, nombre, rol, activo FROM usuarios WHERE rol='operador' AND activo=TRUE ORDER BY username");
+    res.json({ ok: true, operadores: filas.map(u=>({ username: u.username, nombre: u.nombre, rol: u.rol })) });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/talleres', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    const talleres = await db.listarTalleres();
+    res.json({ ok: true, talleres });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/mobile/talleres/asignados', async (req, res, next) => {
   try {
     const sesion = sesionMovilValida(req);
