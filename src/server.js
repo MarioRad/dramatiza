@@ -884,6 +884,76 @@ app.delete('/api/admin/usuarios/:id', requireAdmin, async (req, res, next) => {
   }
 });
 
+// ── Mobile Usuarios (admin) ────────────────────────────────────────
+app.get('/api/mobile/usuarios', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin') return res.status(403).json({ error: 'Solo admin.' });
+    res.json(await db.listarUsuarios());
+  } catch (e) { next(e); }
+});
+app.post('/api/mobile/usuarios', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin') return res.status(403).json({ error: 'Solo admin.' });
+    const body = req.body || {};
+    const username = String(body.username || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    const nombre = String(body.nombre || '').trim();
+    const rol = String(body.rol || 'operador').trim();
+    if (!/^[a-z0-9._-]{3,50}$/.test(username)) throw new db.HttpError(400, 'Nombre de usuario inválido (3 a 50 caracteres: letras, números, punto o guión).');
+    if (password.length < 4) throw new db.HttpError(400, 'La contraseña debe tener al menos 4 caracteres.');
+    if (!ROLES_VALIDOS.includes(rol)) throw new db.HttpError(400, 'Rol inválido.');
+    if (await db.buscarUsuario(username)) throw new db.HttpError(409, 'Ese nombre de usuario ya existe.');
+    const id = await db.crearUsuario({ username, passwordHash: hashPassword(password), nombre, rol });
+    await db.registrarEvento('usuario_creado', `Usuario creado (móvil): ${username} (rol ${rol})`, sesion.usuario);
+    res.status(201).json({ ok: true, id });
+  } catch (e) { next(e); }
+});
+app.put('/api/mobile/usuarios/:id', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin') return res.status(403).json({ error: 'Solo admin.' });
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de usuario inválido.');
+    const body = req.body || {};
+    const nombre = String(body.nombre || '').trim();
+    const rol = String(body.rol || 'operador').trim();
+    const activoRaw = body.activo;
+    const activo = activoRaw === undefined || activoRaw === null ? true : activoRaw === true || activoRaw === 1 || activoRaw === '1' || String(activoRaw).toLowerCase() === 'true';
+    const password = String(body.password || '');
+    if (!ROLES_VALIDOS.includes(rol)) throw new db.HttpError(400, 'Rol inválido.');
+    if (password && password.length < 4) throw new db.HttpError(400, 'La contraseña debe tener al menos 4 caracteres.');
+    const usuarios = await db.listarUsuarios();
+    const objetivo = usuarios.find((u) => Number(u.id) === Number(id));
+    if (!objetivo) throw new db.HttpError(404, 'Usuario no encontrado.');
+    if (sesion.usuario === objetivo.username && rol !== 'admin') throw new db.HttpError(400, 'No podés quitarte el rol de administrador a vos mismo.');
+    if (sesion.usuario === objetivo.username && !activo) throw new db.HttpError(400, 'No podés desactivar tu propio usuario.');
+    await db.actualizarUsuario(id, { nombre, rol, activo, passwordHash: password ? hashPassword(password) : null, permInscripciones: body.perm_inscripciones !== false && body.perm_inscripciones !== 0, permTalleres: body.perm_talleres !== false && body.perm_talleres !== 0, permEncuentro: body.perm_encuentro !== false && body.perm_encuentro !== 0, permAcreditacion: body.perm_acreditacion !== false && body.perm_acreditacion !== 0 });
+    await db.registrarEvento('usuario_modificado', `Usuario actualizado (móvil): ${objetivo.username} (rol ${rol})`, sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+app.delete('/api/mobile/usuarios/:id', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin') return res.status(403).json({ error: 'Solo admin.' });
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de usuario inválido.');
+    const usuarios = await db.listarUsuarios();
+    const objetivo = usuarios.find((u) => Number(u.id) === Number(id));
+    if (!objetivo) throw new db.HttpError(404, 'Usuario no encontrado.');
+    if (sesion.usuario === objetivo.username) throw new db.HttpError(400, 'No podés eliminar tu propio usuario.');
+    await db.eliminarUsuario(id);
+    await db.registrarEvento('usuario_eliminado', `Usuario eliminado (móvil): ${objetivo.username}`, sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
@@ -2390,6 +2460,40 @@ app.post('/api/mobile/asignaciones', async (req, res, next) => {
     }
     await db.registrarEvento('asignacion_creada', `Asignación ${op} → taller ${tid} día ${d} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
     res.status(201).json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.put('/api/mobile/asignaciones/:id', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const { operador, tallerId, dia, bloqueId } = req.body || {};
+    const op = String(operador||'').trim().toLowerCase();
+    const tid = Number(tallerId);
+    const d = String(dia||'').trim();
+    if (!op || !tid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'operador, tallerId y dia YYYY-MM-DD requeridos.' });
+    const existe = await db.queryOne('SELECT id FROM operador_taller_asignaciones WHERE id=?', [id]);
+    if (!existe) return res.status(404).json({ error: 'Asignación no encontrada.' });
+    await db.query('UPDATE operador_taller_asignaciones SET operador_username=?, taller_id=?, dia=?, bloque_id=? WHERE id=?', [op, tid, d, bloqueId||null, id]);
+    await db.registrarEvento('asignacion_reasignada', `Reasignación #${id}: ${op} → taller ${tid} día ${d} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/mobile/asignaciones/:id', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const r = await db.query('DELETE FROM operador_taller_asignaciones WHERE id=?', [id]);
+    // pg returns rows, check rowCount via mutation? usar query y verificar
+    await db.registrarEvento('asignacion_eliminada', `Asignación #${id} eliminada por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
