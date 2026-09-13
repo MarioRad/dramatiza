@@ -39,7 +39,14 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 }));
 
 const DURACION_SESION_MS = 12 * 60 * 60 * 1000;
-const ROLES_VALIDOS = ['admin', 'operador'];
+const ROLES_VALIDOS = ['admin', 'superior', 'menu', 'operador'];
+const HERENCIA_ROL = {
+  admin: ['admin','superior','menu','operador'],
+  superior: ['superior','menu','operador'],
+  menu: ['menu'],
+  operador: ['operador'],
+};
+function rolIncluye(rol, requerido) { const h = HERENCIA_ROL[rol] || [rol]; return h.includes(requerido); }
 
 function firmarToken(payload, duracionMs) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: Math.floor(duracionMs / 1000) });
@@ -1202,7 +1209,7 @@ app.post('/api/mobile/login', async (req, res, next) => {
     if (!usuario || !usuario.activo || !verificarPassword(password, usuario.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
-    if (!usuario.perm_acreditacion) {
+    if (!usuario.perm_acreditacion && usuario.rol !== 'admin' && usuario.rol !== 'superior') {
       return res.status(403).json({ error: 'El usuario no tiene permiso de acreditación.' });
     }
     const token = firmarToken(
@@ -1320,6 +1327,8 @@ function clasificarServicioComida(titulo) {
   const t = String(titulo || '').toLowerCase();
   if (t.includes('merienda')) return 'merienda';
   if (t.includes('desayuno')) return 'desayuno';
+  if (t.includes('almuerzo')) return 'almuerzo';
+  if (t.includes('cena')) return 'cena';
   return 'otro';
 }
 
@@ -2122,6 +2131,210 @@ app.post('/api/mobile/notificaciones/:id/leer', async (req, res, next) => {
     next(e);
   }
 });
+
+
+// ── Móvil Fase 1-4: Menú, Talleres, Resumen Día, Asignaciones ─────────
+
+app.post('/api/mobile/menu/entregar', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    // Menu y superior requieren perm acreditacion, admin/superior bypass parcial
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') {
+      const u = await db.buscarUsuario(sesion.usuario);
+      if (!u || !u.perm_acreditacion) return res.status(403).json({ error: 'Sin permiso de acreditación.' });
+    }
+    const { codigo, dni } = extraerDatosQr((req.body || {}).codigo || (req.body || {}).dni);
+    let persona = null;
+    if (codigo) persona = await db.queryOne('SELECT dni, nombre, apellido, alimentacion, qr_code FROM inscripciones WHERE qr_code = ? LIMIT 1', [codigo]);
+    if (!persona && dni && /^\d{7,8}$/.test(dni)) persona = await db.buscarAcreditacionPorDni(dni) || await db.queryOne('SELECT dni, nombre, apellido, alimentacion, qr_code FROM inscripciones WHERE dni=? LIMIT 1', [dni]);
+    if (!persona) return res.status(404).json({ error: 'Asistente no encontrado.' });
+    const servicioActivo = await db.obtenerServicioComidaActivo(30*60*1000);
+    if (!servicioActivo) return res.status(400).json({ error: 'Fuera del horario de servicio (30min margen).' });
+    const yaRetirado = await db.tieneAsistenciaComida(persona.dni, servicioActivo.id);
+    if (yaRetirado) return res.json({ ok: false, yaRetirado: true, mensaje: 'Ya retiró su porción de ' + servicioActivo.titulo });
+    await db.registrarAsistenciaComida(persona.dni, servicioActivo.id);
+    await db.registrarEvento('menu_entregado', `Menú entregado a ${persona.nombre} ${persona.apellido} (DNI ${persona.dni}) servicio ${servicioActivo.titulo}`, sesion.usuario).catch(()=>{});
+    res.json({ ok: true, dni: persona.dni, servicio: { id: servicioActivo.id, titulo: servicioActivo.titulo, categoria: clasificarServicioComida(servicioActivo.titulo) } });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/menu/resumen', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    const data = await db.resumenComidas().catch(()=>null);
+    if (!data) return res.json({ servicios: [] });
+    // filtrar servicios del día actual
+    const hoy = new Date().toISOString().slice(0,10);
+    const serviciosHoy = (data.servicios || []).filter(s => s.dia === hoy);
+    res.json({ ok: true, servicios: data.servicios, serviciosHoy, totalInscriptos: data.totalInscriptos, inscriptosPorDieta: data.inscriptosPorDieta });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/talleres/asignados', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol === 'admin' || sesion.rol === 'superior') {
+      const talleres = await db.listarTalleres();
+      return res.json({ talleres });
+    }
+    // operador: buscar asignaciones propias; fallback: todos
+    try {
+      const asign = await db.query('SELECT taller_id FROM operador_taller_asignaciones WHERE operador_username=?', [sesion.usuario]);
+      if (asign.length > 0) {
+        const ids = asign.map(a=>Number(a.taller_id));
+        const talleres = await db.query(`SELECT * FROM talleres WHERE id IN (${ids.map(()=> '?').join(',')})`, ids);
+        return res.json({ talleres });
+      }
+    } catch (_) {}
+    const talleres = await db.listarTalleres();
+    res.json({ talleres: talleres.slice(0, 5) });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/mobile/taller/asistencia', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    const { codigo, dni: dniBody, tallerId, tipo } = req.body || {};
+    const taller_id = Number(tallerId || taller_id);
+    const tipoNorm = String(tipo||'ingreso').toLowerCase() === 'egreso' ? 'egreso' : 'ingreso';
+    if (!taller_id) return res.status(400).json({ error: 'tallerId requerido.' });
+    let dni = String(dniBody||'').replace(/\D/g,'');
+    if (!dni) {
+      const ext = extraerDatosQr(codigo);
+      dni = ext.dni || ext.codigo.replace(/\D/g,'');
+    }
+    if (!/^\d{7,8}$/.test(dni)) return res.status(400).json({ error: 'DNI inválido (7-8 dígitos) o QR no reconocido.' });
+    // verificar inscripción al taller (permitir si admin/superior)
+    const insc = await db.queryOne('SELECT id FROM inscripciones WHERE dni=? AND taller_id=? LIMIT 1', [dni, taller_id]);
+    if (!insc && sesion.rol === 'operador') {
+      // operador solo puede marcar a inscriptos
+      return res.status(404).json({ error: 'El DNI no está inscripto en ese taller.' });
+    }
+    // intentar insertar en taller_asistencias si existe tabla
+    try {
+      await db.query('INSERT INTO taller_asistencias (dni, taller_id, tipo, usuario) VALUES (?,?,?,?)', [dni, taller_id, tipoNorm, sesion.usuario]);
+    } catch (e) {
+      if (String(e.message).includes('no existe') || String(e.message).includes('does not exist') || e.code==='42P01') {
+        // fallback: registrar como evento y acreditacion
+        await db.registrarEvento('asistencia_taller', `${tipoNorm} DNI ${dni} taller ${taller_id} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+        return res.json({ ok: true, fallback: true, mensaje: 'Registrado (fallback sin tabla taller_asistencias)' });
+      }
+      if (e.code==='23505') return res.status(409).json({ error: `Ya se registró ${tipoNorm} para ese DNI/taller/bloque.` });
+      throw e;
+    }
+    await db.registrarEvento('asistencia_taller', `${tipoNorm} DNI ${dni} taller ${taller_id} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+    res.json({ ok: true, dni, taller_id, tipo: tipoNorm });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/talleres/:id/estado', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const taller = await db.queryOne('SELECT id, nombre, cupo FROM talleres WHERE id=?', [id]);
+    if (!taller) return res.status(404).json({ error: 'Taller no encontrado.' });
+    const inscriptosRow = await db.queryOne('SELECT COUNT(*) as n FROM inscripciones WHERE taller_id=?', [id]);
+    const inscriptos = Number(inscriptosRow?.n || 0);
+    let presentes = 0;
+    try {
+      const p = await db.queryOne("SELECT COUNT(DISTINCT dni) as n FROM taller_asistencias WHERE taller_id=? AND tipo='ingreso'", [id]);
+      presentes = Number(p?.n || 0);
+    } catch (_) { presentes = Math.min(inscriptos, 0); }
+    const cupo = Number(taller.cupo||0);
+    res.json({ taller_id: id, taller: taller.nombre, cupo, inscriptos, presentes, faltantes: Math.max(0, cupo - presentes), porcentaje: cupo? Math.round(presentes/cupo*100):0 });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/resumen/dia', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    const fecha = String(req.query.fecha || new Date().toISOString().slice(0,10));
+    const totalAcreditados = await db.contarAcreditados().catch(()=>0);
+    const porTaller = await db.listarAcreditacionesPorTaller().catch(()=>[]);
+    const comidas = await db.resumenComidas().catch(()=>({ servicios: [] }));
+    const totalMenus = comidas.servicios?.reduce((s, b)=> s + Number(b.asistentes||0), 0) || 0;
+    const capacidadLoc = await db.obtenerConfig('capacidad_locacion').catch(()=>null);
+    res.json({ ok: true, fecha, totalAcreditados, totalMenus, porTaller: porTaller.map(t=>({ ...t, porcentaje: t.cupo? Math.round(((t.acreditados||0)/t.cupo)*100):0 })), servicios: comidas.servicios, capacidadLocacion: capacidadLoc });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/mobile/asignaciones', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
+    try {
+      const filas = await db.query('SELECT * FROM operador_taller_asignaciones ORDER BY dia DESC, id DESC LIMIT 100');
+      return res.json({ ok: true, asignaciones: filas });
+    } catch (_) {
+      return res.json({ ok: true, asignaciones: [] });
+    }
+  } catch (e) { next(e); }
+});
+
+app.post('/api/mobile/asignaciones', async (req, res, next) => {
+  try {
+    const sesion = sesionMovilValida(req);
+    if (!sesion) return res.status(401).json({ error: 'No autorizado.' });
+    if (sesion.rol !== 'admin' && sesion.rol !== 'superior') return res.status(403).json({ error: 'Solo admin/superior.' });
+    const { operador, tallerId, dia, bloqueId } = req.body || {};
+    const op = String(operador||'').trim().toLowerCase();
+    const tid = Number(tallerId);
+    const d = String(dia||'').trim();
+    if (!op || !tid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'operador, tallerId y dia YYYY-MM-DD requeridos.' });
+    try {
+      await db.query('INSERT INTO operador_taller_asignaciones (operador_username, taller_id, dia, bloque_id, creado_por) VALUES (?,?,?,?,?)', [op, tid, d, bloqueId||null, sesion.usuario]);
+    } catch (e) {
+      if (String(e.message).includes('no existe') || e.code==='42P01') return res.status(503).json({ error: 'Tabla operador_taller_asignaciones no existe. Ejecutá migración 007.' });
+      throw e;
+    }
+    await db.registrarEvento('asignacion_creada', `Asignación ${op} → taller ${tid} día ${d} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+    res.status(201).json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Job avisos 10/30min (poll cada 60s, usa notificaciones)
+let __avisosInterval = null;
+function iniciarJobAvisos() {
+  if (__avisosInterval) return;
+  __avisosInterval = setInterval(async () => {
+    try {
+      const bloques = await db.listarPrograma().catch(()=>[]);
+      const ahora = Date.now();
+      for (const b of bloques) {
+        const d = String(b.dia||'').split('-').map(Number);
+        if (d.length<3) continue;
+        const hi = String(b.hora_inicio||'').split(':').map(Number);
+        const hf = String(b.hora_fin||'').split(':').map(Number);
+        const inicio = new Date(d[0], d[1]-1, d[2], hi[0]||0, hi[1]||0).getTime();
+        const fin = new Date(d[0], d[1]-1, d[2], hf[0]||23, hf[1]||59).getTime();
+        if (Number.isNaN(inicio) || Number.isNaN(fin)) continue;
+        const ms10 = 10*60*1000, ms30 = 30*60*1000;
+        // 10 min antes de finalizar → superior recordatorio (una vez)
+        if (ahora >= fin - ms10 - 30000 && ahora <= fin - ms10 + 30000) {
+          const titulo = `Finaliza en 10 min: ${b.titulo}`;
+          const existe = await db.queryOne("SELECT id FROM notificaciones WHERE titulo=? AND creado_en > NOW() - INTERVAL '20 minutes' LIMIT 1", [titulo]).catch(()=>null);
+          if (!existe) await db.crearNotificacion({ titulo, mensaje: `El bloque ${b.titulo} (${b.hora_inicio}-${b.hora_fin}) finaliza en 10 minutos.`, tipo: 'recordatorio', activa: true, creadoPor: 'sistema' }).catch(()=>{});
+        }
+        // 30 min antes de iniciar break → menu info
+        if (String(b.tipo)==='break' && ahora >= inicio - ms30 - 30000 && ahora <= inicio - ms30 + 30000) {
+          const titulo = `Preparar servicio: ${b.titulo} en 30 min`;
+          const existe = await db.queryOne("SELECT id FROM notificaciones WHERE titulo=? AND creado_en > NOW() - INTERVAL '20 minutes' LIMIT 1", [titulo]).catch(()=>null);
+          if (!existe) await db.crearNotificacion({ titulo, mensaje: `El servicio ${b.titulo} inicia a las ${b.hora_inicio}. Preparar entrega.`, tipo: 'info', activa: true, creadoPor: 'sistema' }).catch(()=>{});
+        }
+      }
+    } catch (e) { console.error('[avisos] error', e.message); }
+  }, 60000);
+}
+if (!EN_VERCEL) setTimeout(iniciarJobAvisos, 5000);
+
 
 app.get('/api/version', (_req, res) => {
   const pkg = require('../package.json');
