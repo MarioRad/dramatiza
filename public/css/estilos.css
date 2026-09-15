@@ -461,6 +461,57 @@ body.dark tbody tr:hover { background: rgba(90,155,67,0.10); }
   vertical-align: middle;
 }
 
+/* Tabla Inscripciones a talleres — 2 filas por registro */
+.tabla-inscripciones-dosfilas {
+  border-collapse: separate;
+  border-spacing: 0 0.7rem;
+}
+.tabla-inscripciones-dosfilas thead th {
+  background: var(--color-fondo-card);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-texto-suave);
+  padding: 0.45rem 0.5rem;
+  border-bottom: 2px solid var(--color-borde);
+}
+.tabla-inscripciones-dosfilas .header-fila1 th {
+  border-bottom: 1px dashed var(--color-borde);
+  background: var(--color-fondo);
+}
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td {
+  background: #f8fafc;
+  border-top: 1px solid var(--color-borde);
+  border-bottom: none;
+  padding: 0.65rem 0.5rem 0.35rem;
+  font-size: 0.88rem;
+}
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td {
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-borde);
+  border-top: 1px solid #e2e8f0;
+  padding: 0.35rem 0.5rem 0.65rem;
+}
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td:first-child,
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td:first-child {
+  border-left: 1px solid var(--color-borde);
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td:last-child,
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td:last-child {
+  border-right: 1px solid var(--color-borde);
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 0; }
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 0; }
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td:first-child { border-top-left-radius: 0; border-bottom-left-radius: 8px; }
+.tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td:last-child { border-top-right-radius: 0; border-bottom-right-radius: 8px; }
+body.dark .tabla-inscripciones-dosfilas .fila-inscripcion.fila1 td { background: rgba(30,41,59,0.6); }
+body.dark .tabla-inscripciones-dosfilas .fila-inscripcion.fila2 td { background: rgba(15,23,42,0.9); }
+body.dark .tabla-inscripciones-dosfilas thead th { background: rgba(15,23,42,0.9); }
+
 /* Badges para legibilidad en tablas inscripciones */
 .badge {
   display: inline-flex;
@@ -1566,4 +1617,31 @@ body.dark .taller-badge-noche {
 #tablaAsistentes .chip-taller {
   font-size: 0.72rem;
   padding: 0.12rem 0.45rem;
+}
+
+/* ── Paginación eventos ─────────────────────────────── */
+.paginacion {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding: 0.5rem 0;
+}
+.paginacion[hidden] { display: none !important; }
+.pag-btn.activo {
+  background: var(--color-primario);
+  border-color: var(--color-primario);
+  color: #fff;
+  font-weight: 700;
+}
+.pag-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pag-sep {
+  padding: 0 0.2rem;
+  color: var(--color-texto-suave);
+  font-weight: 700;
 }

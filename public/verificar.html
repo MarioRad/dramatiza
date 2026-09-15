@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verificar Certificado – Dramatiza</title>
+<link rel="stylesheet" href="/css/estilos.css">
+<style>
+.verify-wrap { max-width: 720px; margin: 2rem auto; padding: 1rem; }
+.verify-card { border:1px solid var(--color-borde); border-radius:12px; padding:1.2rem; background: var(--color-fondo-card); }
+.verify-ok { border-left:6px solid #1a9e4a; }
+.verify-bad { border-left:6px solid #c0392b; }
+.verify-hash { font-family: monospace; word-break: break-all; font-size:0.82rem; }
+</style>
+</head>
+<body>
+<div class="verify-wrap">
+  <h1>Verificación de certificado</h1>
+  <p class="ayuda">Escaneá el QR del certificado o ingresá el código para comprobar su validez y firma electrónica.</p>
+  <div class="campo" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+    <div style="flex:1;min-width:220px;">
+      <label for="codigoInput">Código del certificado</label>
+      <input type="text" id="codigoInput" placeholder="Ej: CERT-A1B2C3D4E5" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;">
+    </div>
+    <button id="btnVerificar" class="boton" type="button">Verificar</button>
+    <a href="/" class="boton boton-secundario">Volver</a>
+  </div>
+  <div id="resultado" style="margin-top:1rem;"></div>
+  <p class="ayuda" style="margin-top:1.2rem;">El QR del certificado contiene la URL de verificación con el código. La firma electrónica es un HMAC-SHA256 del código+DNI+nombre con secreto del servidor; si el documento fue adulterado, la firma no coincidirá.</p>
+</div>
+<script>
+function getParam(name){ const u=new URL(location.href); return u.searchParams.get(name)||''; }
+async function verificar(codigo){
+  const c = String(codigo||'').trim().toUpperCase();
+  if(!c) return;
+  const resEl=document.getElementById('resultado');
+  resEl.innerHTML='<p class="ayuda">Verificando…</p>';
+  try{
+    const r=await fetch(`/api/certificados/verificar/${encodeURIComponent(c)}`);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok || !d.valido){
+      resEl.innerHTML=`<div class="verify-card verify-bad"><h3 style="margin:0 0 0.4rem 0;color:#c0392b;">✕ No válido</h3><p>${d.error||'Certificado no encontrado'}</p><p><strong>Código:</strong> ${c}</p></div>`;
+      return;
+    }
+    const det=d.detalle||{};
+    let detalleHtml='';
+    // Diferenciación automática taller/ponencia según detalle asociado
+    const esTaller = det.esTaller === true || String(det.tipoPonencia||'').toLowerCase()==='taller';
+    if(d.tipo==='asistente' && det.talleres) detalleHtml=`<p><strong>Participando de los talleres:</strong> ${det.talleres.map(t=>t.taller||t.nombre).join(', ')}</p>`;
+    else if(d.tipo==='ponente' || d.tipo==='tallerista'){
+      const isTaller = esTaller || d.tipo==='tallerista';
+      const label = isTaller ? 'Taller' : 'Ponencia';
+      if(det.titulo) detalleHtml=`<p><strong>${label}:</strong> ${det.titulo}</p>`;
+      else if(det.talleres && det.talleres[0]) detalleHtml=`<p><strong>${label}:</strong> ${det.talleres[0].taller||det.talleres[0].nombre}</p>`;
+    } else if(det.titulo) detalleHtml=`<p><strong>Título:</strong> ${det.titulo}</p>`;
+    let emitidoHtml='—';
+    if(d.creado_en){
+      const f=new Date(d.creado_en);
+      if(!isNaN(f)){
+        const fechaStr=f.toLocaleDateString('es-AR',{timeZone:'America/Argentina/Salta', day:'2-digit', month:'2-digit', year:'numeric'});
+        const horaStr=f.toLocaleTimeString('es-AR',{timeZone:'America/Argentina/Salta', hour:'2-digit', minute:'2-digit', hour12:false});
+        emitidoHtml=`${fechaStr} - ${horaStr} - por Dramatiza Nodo Salta 2026`;
+      }
+    }
+    resEl.innerHTML=`<div class="verify-card verify-ok">
+      <h3 style="margin:0 0 0.4rem 0;color:#1a9e4a;">✓ Válido</h3>
+      <p><strong>Código:</strong> ${d.codigo} &nbsp; <span style="background:#eef;border-radius:6px;padding:2px 6px;font-size:0.8rem;">${d.tipo}</span></p>
+      <p><strong>Otorgado a:</strong> ${d.nombre} ${d.apellido} ${d.dni?`(DNI ${d.dni})`:''}</p>
+      ${detalleHtml}
+      <p><strong>Emitido:</strong> ${emitidoHtml}</p>
+      <p class="verify-hash"><strong>Firma electrónica:</strong> ${d.hash_firma}<br><span style="color:${d.firmaValida?'#1a9e4a':'#c0392b'};">${d.firmaValida?'✓ Firma electrónica válida':'✕ Firma electrónica inválida'}</span></p>
+      <p style="margin-top:0.8rem;"><a href="/api/admin/certificados/${encodeURIComponent(d.codigo)}/pdf" target="_blank" class="boton boton-chico">Ver PDF</a> <span class="ayuda"> (requiere sesión admin)</span></p>
+      <p class="ayuda" style="margin-top:0.6rem;">QR verifica en: <code>${d.qr_data||''}</code></p>
+    </div>`;
+  }catch(e){
+    resEl.innerHTML=`<div class="verify-card verify-bad"><h3>Error</h3><p>${e.message}</p></div>`;
+  }
+}
+document.getElementById('btnVerificar').addEventListener('click', ()=> verificar(document.getElementById('codigoInput').value));
+document.getElementById('codigoInput').addEventListener('keydown', e=>{ if(e.key==='Enter') verificar(e.target.value); });
+const preset = getParam('c')||getParam('codigo')||getParam('code');
+if(preset){ document.getElementById('codigoInput').value=preset; verificar(preset); }
+(function(){
+  // si URL es /verificar.html?CERT-XXX o contiene CERT- en hash
+  const h=location.hash.replace('#','').trim().toUpperCase();
+  if(h && h.startsWith('CERT-')){ document.getElementById('codigoInput').value=h; verificar(h); }
+})();
+</script>
+</body>
+</html>

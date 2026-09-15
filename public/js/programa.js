@@ -124,6 +124,32 @@ const ProgramaUI = (() => {
     });
   }
 
+  function coPonentesDe(p) {
+    // Para taller: buscar taller que contiene a p y devolver otros ponentes del mismo taller
+    if (p.tipo === 'taller') {
+      const t = talleres.find(x => Array.isArray(x.ponentes) && x.ponentes.some(y=> Number(y.id)===Number(p.id)));
+      if (t && t.ponentes.length > 1) {
+        return t.ponentes.filter(y=> Number(y.id) !== Number(p.id));
+      }
+      // fallback por disertante string
+      if (t && t.disertante && t.disertante.includes('—')) {
+        const partes = t.disertante.split('—').map(s=> s.trim()).filter(Boolean);
+        if (partes.length > 1) return partes.filter(n=> n !== p.nombre).map(n=> ({ nombre: n }));
+      }
+    }
+    // Para ponencia/conversatorio: buscar bloque que contiene a p y devolver otros con mismo título (co-presentación)
+    if (p.tipo === 'ponencia' || p.tipo === 'conversatorio') {
+      const b = bloques.find(x => Array.isArray(x.ponentes) && x.ponentes.some(y=> Number(y.id)===Number(p.id)));
+      if (b && b.ponentes.length > 1) {
+        // Si hay varios ponentes en el mismo bloque con mismo título que p, son co-ponentes de la misma ponencia
+        const mismoTitulo = b.ponentes.filter(y=> Number(y.id) !== Number(p.id) && String(y.titulo||'').trim() === String(p.titulo||'').trim() && String(p.titulo||'').trim() !== '');
+        if (mismoTitulo.length) return mismoTitulo;
+        // Si no hay mismo título, mostrar otros del bloque como referencia? no
+      }
+    }
+    return [];
+  }
+
   function tarjetaDisertanteHtml(p) {
     const tipos = ['taller', 'ponencia', 'conversatorio'];
     const cls = tipos.includes(p.tipo) ? p.tipo : 'general';
@@ -136,11 +162,15 @@ const ProgramaUI = (() => {
       ? '<span class="programa-sd-badge"><span class="n">2</span><span class="t">días</span></span>'
       : '';
     const desc = String(p.descripcion || '').trim();
+    const co = coPonentesDe(p);
+    const coHtml = co.length ? `<div class="programa-sd-con">Con: ${co.map(c=> escapeHtml(c.nombre)).join(' • ')}</div>` : '';
+    const coFotos = co.filter(c=> c.foto).map(c=> `<img class="programa-sd-foto programa-sd-foto-co" src="${escapeHtml(c.foto)}" alt="${escapeHtml(c.nombre)}">`).join('');
     return `
       <div class="programa-sd-card type-${cls}">
-        <div class="programa-sd-card-foto">${iniciales}${foto}${sello}</div>
+        <div class="programa-sd-card-foto">${iniciales}${foto}${coFotos}${sello}</div>
         <div class="programa-sd-card-info">
           <div class="programa-sd-nombre">${escapeHtml(p.nombre || '')}</div>
+          ${coHtml}
           <div class="programa-sd-rol">${escapeHtml(rolPonente(p))}</div>
           ${horario ? `<div class="programa-sd-horario">\u{1F550} ${escapeHtml(horario)} hs</div>` : ''}
           ${p.titulo ? `<div class="programa-sd-titulo">${escapeHtml(p.titulo)}</div>` : ''}
@@ -465,7 +495,12 @@ const ProgramaUI = (() => {
       </div>`;
   }
 
-  function fotoDisertante(disertante) {
+  function fotoDisertante(disertante, tallerObj) {
+    // Si el taller tiene ponentes múltiples, usar la foto del primer ponente que tenga foto
+    if (tallerObj && Array.isArray(tallerObj.ponentes) && tallerObj.ponentes.length) {
+      const conFoto = tallerObj.ponentes.find(p => p.foto);
+      if (conFoto) return conFoto.foto;
+    }
     if (!disertante || !ponentes.length) return null;
     const d = disertante.toLowerCase();
     const dWords = d.split(/[\s,–\-\/]+/).filter(w => w.length > 2);
@@ -505,8 +540,22 @@ const ProgramaUI = (() => {
       const botonInscribirse = mode === 'seleccion' && !lleno
         ? `<button type="button" class="ws-inscribir-btn" data-taller-id="${t.id}" onclick="ProgramaUI.seleccionarTaller(${t.id})">Inscribirme</button>`
         : '';
-      const foto = fotoDisertante(t.disertante);
+      const foto = fotoDisertante(t.disertante, t);
       const fotoHtml = foto ? `<img class="ws-foto" src="${escapeHtml(foto)}" alt="${escapeHtml(t.disertante || '')}">` : '';
+      // Si el taller tiene múltiples ponentes, mostrar nombres separados
+      let speakerHtml = '';
+      if (Array.isArray(t.ponentes) && t.ponentes.length > 1) {
+        speakerHtml = `<div class="ws-speaker">${escapeHtml(t.ponentes.map(p=> p.nombre).join(' • '))}</div>`;
+        // fotos múltiples si hay más de una
+        const fotosConFoto = t.ponentes.filter(p=> p.foto);
+        if (fotosConFoto.length > 1) {
+          const avatars = fotosConFoto.slice(0,3).map(p=> `<img class="ws-foto ws-foto-multi" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre)}">`).join('');
+          // reemplazar fotoHtml por mosaico si hay varias
+          // ya tenemos foto principal, añadir resto como mini
+        }
+      } else {
+        speakerHtml = t.disertante ? `<div class="ws-speaker">${escapeHtml(t.disertante)}</div>` : '';
+      }
       html += `
         <div class="programa-workshop-card${lleno ? ' ws-lleno' : ''}" data-taller-id="${t.id}">
           ${fotoHtml}
@@ -515,7 +564,7 @@ const ProgramaUI = (() => {
             ${esDosDias ? '<span class="ws-dias">2 días</span>' : ''}
           </div>
           <div class="ws-title">${escapeHtml(t.nombre)}</div>
-          ${t.disertante ? `<div class="ws-speaker">${escapeHtml(t.disertante)}</div>` : ''}
+          ${speakerHtml}
           ${t.descripcion ? `<div class="ws-descripcion">${escapeHtml(t.descripcion)}</div>` : ''}
           <div class="ws-footer">
             <div class="ws-cupo${lleno ? ' lleno' : ''}">${lleno ? 'Lleno' : `${cupo - inscriptos} cupos`}</div>
@@ -528,24 +577,44 @@ const ProgramaUI = (() => {
   }
 
   function ponentesDeBloque(bloque, tipo) {
+    // Si el bloque tiene ponentes múltiples explícitos (bloque_ponentes), usarlos filtrando por tipo
+    if (bloque && Array.isArray(bloque.ponentes) && bloque.ponentes.length) {
+      const filtrados = bloque.ponentes.filter(p => !tipo || p.tipo === tipo);
+      if (filtrados.length) return filtrados;
+      // si no filtra por tipo, devolver todos los del bloque
+      return bloque.ponentes;
+    }
+    // Fallback histórico: filtrar por fecha y tipo
     const fecha = bloque.dia;
     return ponentes.filter((p) => p.tipo === tipo && p.fecha_dia === fecha);
+  }
+
+  function agruparPorTitulo(lista) {
+    const map = new Map();
+    for (const p of lista) {
+      const key = String(p.titulo || '').trim() ? String(p.titulo||'').trim().toLowerCase() : `__id_${p.id}`;
+      if (!map.has(key)) map.set(key, { titulo: p.titulo || p.nombre || '', horario: p.horario || '', ponentes: [] });
+      map.get(key).ponentes.push(p);
+    }
+    return [...map.values()];
   }
 
   function renderPonencias(bloque) {
     const lista = ponentesDeBloque(bloque, 'ponencia');
     if (lista.length === 0) return '<p style="color:var(--pg-text-muted);font-size:0.85rem;">Sin ponentes confirmados.</p>';
+    const grupos = agruparPorTitulo(lista);
     let html = '';
-    lista.forEach((p, i) => {
+    grupos.forEach((g, i) => {
       if (i > 0) html += '<hr class="programa-ponencia-divider">';
-      const foto = p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '';
+      const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '').join('');
+      const nombres = g.ponentes.map(p=> escapeHtml(p.nombre||'')).join(' • ');
       html += `<div class="programa-ponencia-item">
         <div class="programa-ponencia-linea">
-          ${foto}
+          ${fotos}
           <div>
-            ${p.horario ? `<span class="programa-ponencia-hora">${escapeHtml(p.horario)}</span>` : ''}
-            <strong>${escapeHtml(p.titulo || p.nombre || '')}</strong><br>
-            <em>${escapeHtml(p.nombre || '')}</em>
+            ${g.horario ? `<span class="programa-ponencia-hora">${escapeHtml(g.horario)}</span>` : ''}
+            <strong>${escapeHtml(g.titulo || '')}</strong><br>
+            <em>${nombres}</em>
           </div>
         </div>
       </div>`;
@@ -557,16 +626,20 @@ const ProgramaUI = (() => {
     const lista = ponentesDeBloque(bloque, 'conversatorio');
     let html = '';
     if (lista.length > 0) {
-      lista.forEach((p, i) => {
+      const grupos = agruparPorTitulo(lista);
+      grupos.forEach((g, i) => {
         if (i > 0) html += '<hr class="programa-ponencia-divider">';
-        const foto = p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '';
+        const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '').join('');
+        const nombres = g.ponentes.map(p=> escapeHtml(p.nombre||'')).join(' • ');
+        const titulo = g.ponentes[0]?.titulo || '';
+        const horario = g.horario || g.ponentes[0]?.horario || '';
         html += `<div class="programa-ponencia-item">
           <div class="programa-ponencia-linea">
-            ${foto}
+            ${fotos}
             <div>
-              ${p.horario ? `<span class="programa-ponencia-hora">${escapeHtml(p.horario)}</span>` : ''}
-              <strong>${escapeHtml(p.nombre || '')}</strong><br>
-              ${p.titulo ? `<em>${escapeHtml(p.titulo)}</em>` : ''}
+              ${horario ? `<span class="programa-ponencia-hora">${escapeHtml(horario)}</span>` : ''}
+              <strong>${nombres}</strong><br>
+              ${titulo ? `<em>${escapeHtml(titulo)}</em>` : ''}
             </div>
           </div>
         </div>`;

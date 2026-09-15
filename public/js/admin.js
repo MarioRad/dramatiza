@@ -39,6 +39,7 @@ const TITULOS_VISTA = {
   asignaciones: 'Asignaciones',
   acreditaciones: 'Acreditaciones',
   comidas: 'Gestión de Menús',
+  certificados: 'Certificados',
   eventos: 'Registro de eventos',
   usuarios: 'Usuarios',
   permisos: 'Permisos del sistema',
@@ -125,6 +126,9 @@ let encuentroPersonas = [];
 let encuentroEditando = null;
 let asistentesData = [];
 let asistenteEditando = null;
+let eventosData = [];
+let eventosPaginaActual = 1;
+const EVENTOS_POR_PAGINA = 5;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -199,6 +203,7 @@ function mostrarPanel() {
   const vistasSinPermiso = ['eventos', 'usuarios', 'permisos'];
   if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas');
   if (!esAdminOSuperior) vistasSinPermiso.push('asignaciones');
+  // certificados visible para todos autenticados; control fino en backend por perm_certificados, pero no ocultamos aquí
   if (vistasSinPermiso.includes(vistaActiva)) {
     cambiarVista('dashboard');
   } else {
@@ -280,6 +285,9 @@ function cambiarVista(vista) {
   }
   if (vista === 'asignaciones') {
     cargarAsignacionesAdmin();
+  }
+  if (vista === 'certificados') {
+    cargarCertificados();
   }
 }
 
@@ -525,7 +533,7 @@ function renderInscripciones(inscripciones) {
     else noPagados++;
   }
   resumenInscripciones.textContent =
-    `Personas: ${personas.length} (${inscripciones.length} inscripciones en talleres) · ` +
+    `Personas: ${personas.length} ` +
     `en encuentro: ${enEncuentro} · pagos: ${completos} completo(s) · ${parciales} parcial(es) · ${noPagados} no pagado(s).`;
 
   const dniFiltro = buscarDni.value.trim().replace(/\D/g, '');
@@ -537,9 +545,11 @@ function renderInscripciones(inscripciones) {
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 10;
+    td.colSpan = 6;
     td.textContent = dniFiltro || pagoFiltro ? 'Sin resultados para el filtro.' : 'No hay inscripciones.';
     td.style.color = 'var(--color-texto-suave)';
+    td.style.textAlign = 'center';
+    td.style.padding = '1.2rem';
     tr.appendChild(td);
     cuerpo.appendChild(tr);
     return;
@@ -559,7 +569,9 @@ function renderInscripciones(inscripciones) {
     const filas = porDni.get(dni);
     const i = filas[0];
 
-    const tr = document.createElement('tr');
+    // Fila 1: DNI, Nombre y Apellido, email, telefono
+    const tr1 = document.createElement('tr');
+    tr1.className = 'fila-inscripcion fila1';
 
     const tdDni = document.createElement('td');
     tdDni.className = 'celda-dni';
@@ -567,12 +579,23 @@ function renderInscripciones(inscripciones) {
 
     const tdNombre = document.createElement('td');
     tdNombre.textContent = `${i.nombre} ${i.apellido}`;
+    tdNombre.style.fontWeight = '600';
 
     const tdEmail = document.createElement('td');
     tdEmail.textContent = i.email;
+    tdEmail.style.fontSize = '0.85rem';
+    tdEmail.style.wordBreak = 'break-all';
 
     const tdTelefono = document.createElement('td');
     tdTelefono.textContent = i.telefono || '—';
+    tdTelefono.colSpan = 3;
+    tdTelefono.style.whiteSpace = 'nowrap';
+
+    tr1.append(tdDni, tdNombre, tdEmail, tdTelefono);
+
+    // Fila 2: Alimentación, talleres, encuentro, pago, fecha y botones
+    const tr2 = document.createElement('tr');
+    tr2.className = 'fila-inscripcion fila2';
 
     const tdAlimentacion = document.createElement('td');
     const alimKey = i.alimentacion || 'sin_restriccion';
@@ -581,6 +604,7 @@ function renderInscripciones(inscripciones) {
     badgeAlim.textContent = ETIQUETAS_ALIMENTACION[alimKey] || alimKey || '—';
     badgeAlim.title = ETIQUETAS_ALIMENTACION[alimKey] || alimKey;
     tdAlimentacion.appendChild(badgeAlim);
+    tdAlimentacion.style.whiteSpace = 'nowrap';
 
     const tdTaller = document.createElement('td');
     const talleresUnicos = [...new Map(filas.map((f) => [f.taller, f])).values()];
@@ -663,8 +687,9 @@ function renderInscripciones(inscripciones) {
     contenedorAcciones.appendChild(botonEliminar);
     tdAccion.appendChild(contenedorAcciones);
 
-    tr.append(tdDni, tdNombre, tdEmail, tdTelefono, tdAlimentacion, tdTaller, tdEncuentro, tdPago, tdFecha, tdAccion);
-    cuerpo.appendChild(tr);
+    tr2.append(tdAlimentacion, tdTaller, tdEncuentro, tdPago, tdFecha, tdAccion);
+    cuerpo.appendChild(tr1);
+    cuerpo.appendChild(tr2);
   }
 }
 
@@ -1023,9 +1048,9 @@ function renderAsistentes(lista) {
     return grupos.has(tallerFiltro);
   });
   if (tallerFiltro || q) {
-    resumenAsistentes.textContent = `Asistentes: ${visibles.length} de ${asistentesData.length} · ${totalInscripciones} inscripciones en talleres${tallerFiltro ? ' · filtrado por taller' : ''}.`;
+    resumenAsistentes.textContent = `Asistentes: ${visibles.length} de ${asistentesData.length} · ${tallerFiltro ? ' · filtrado por taller' : ''}.`;
   } else {
-    resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} · ${totalInscripciones} inscripciones en talleres.`;
+    resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} `;
   }
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
@@ -1189,24 +1214,120 @@ botonGuardarAsistente.addEventListener('click', async()=>{
 });
 
 function renderEventos(eventos) {
+  eventosData = Array.isArray(eventos) ? eventos : [];
+  eventosPaginaActual = 1;
+  renderPaginaEventos();
+}
+
+function renderPaginaEventos() {
   const cuerpo = document.querySelector('#tablaEventos tbody');
   cuerpo.innerHTML = '';
-  resumenEventos.textContent = `Total: ${eventos.length} evento(s).`;
+  const total = eventosData.length;
+  const totalPaginas = Math.max(1, Math.ceil(total / EVENTOS_POR_PAGINA));
+  if (eventosPaginaActual > totalPaginas) eventosPaginaActual = totalPaginas;
+  if (eventosPaginaActual < 1) eventosPaginaActual = 1;
 
-  for (const ev of eventos) {
+  if (total === 0) {
+    resumenEventos.textContent = 'Total: 0 evento(s).';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.textContent = 'No hay eventos registrados.';
+    td.style.color = 'var(--color-texto-suave)';
+    td.style.textAlign = 'center';
+    td.style.padding = '1.2rem';
+    tr.appendChild(td);
+    cuerpo.appendChild(tr);
+    renderPaginacionEventos(total, totalPaginas);
+    return;
+  }
+
+  const inicio = (eventosPaginaActual - 1) * EVENTOS_POR_PAGINA;
+  const fin = Math.min(inicio + EVENTOS_POR_PAGINA, total);
+  resumenEventos.textContent = `Total: ${total} evento(s) · Mostrando ${inicio + 1}–${fin} · Página ${eventosPaginaActual} de ${totalPaginas}.`;
+  const paginaEventos = eventosData.slice(inicio, fin);
+  for (const ev of paginaEventos) {
     const tr = document.createElement('tr');
     const tdFecha = document.createElement('td');
     tdFecha.textContent = formatearFecha(ev.creado_en);
+    tdFecha.style.whiteSpace = 'nowrap';
+    tdFecha.style.fontSize = '0.82rem';
     const tdTipo = document.createElement('td');
-    tdTipo.textContent = ETIQUETAS_EVENTO[ev.tipo] || ev.tipo;
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-encuentro-si';
+    badge.style.fontSize = '0.75rem';
+    badge.textContent = ETIQUETAS_EVENTO[ev.tipo] || ev.tipo;
+    tdTipo.appendChild(badge);
     const tdDetalle = document.createElement('td');
     tdDetalle.textContent = ev.detalle || '';
     tdDetalle.style.whiteSpace = 'normal';
+    tdDetalle.style.maxWidth = '420px';
     const tdUsuario = document.createElement('td');
     tdUsuario.textContent = ev.usuario || '—';
+    tdUsuario.style.whiteSpace = 'nowrap';
     tr.append(tdFecha, tdTipo, tdDetalle, tdUsuario);
     cuerpo.appendChild(tr);
   }
+  renderPaginacionEventos(total, totalPaginas);
+}
+
+function renderPaginacionEventos(total, totalPaginas) {
+  const cont = el('paginacionEventos');
+  if (!cont) return;
+  cont.innerHTML = '';
+  if (total <= EVENTOS_POR_PAGINA) {
+    cont.hidden = true;
+    return;
+  }
+  cont.hidden = false;
+
+  const crearBoton = (texto, pagina, disabled = false, activo = false) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = activo ? 'boton boton-chico pag-btn activo' : 'boton boton-secundario boton-chico pag-btn';
+    btn.textContent = texto;
+    btn.disabled = disabled;
+    if (!disabled && !activo) {
+      btn.addEventListener('click', () => {
+        eventosPaginaActual = pagina;
+        renderPaginaEventos();
+      });
+    }
+    return btn;
+  };
+
+  cont.appendChild(crearBoton('‹ Anterior', eventosPaginaActual - 1, eventosPaginaActual === 1));
+
+  // ventana de páginas: mostrar hasta 5 números alrededor de la actual
+  const ventana = 2;
+  let inicioPag = Math.max(1, eventosPaginaActual - ventana);
+  let finPag = Math.min(totalPaginas, eventosPaginaActual + ventana);
+  if (eventosPaginaActual <= ventana) finPag = Math.min(totalPaginas, 1 + ventana * 2);
+  if (eventosPaginaActual > totalPaginas - ventana) inicioPag = Math.max(1, totalPaginas - ventana * 2);
+
+  if (inicioPag > 1) {
+    cont.appendChild(crearBoton('1', 1));
+    if (inicioPag > 2) {
+      const sep = document.createElement('span');
+      sep.textContent = '…';
+      sep.className = 'pag-sep';
+      cont.appendChild(sep);
+    }
+  }
+  for (let p = inicioPag; p <= finPag; p++) {
+    cont.appendChild(crearBoton(String(p), p, false, p === eventosPaginaActual));
+  }
+  if (finPag < totalPaginas) {
+    if (finPag < totalPaginas - 1) {
+      const sep = document.createElement('span');
+      sep.textContent = '…';
+      sep.className = 'pag-sep';
+      cont.appendChild(sep);
+    }
+    cont.appendChild(crearBoton(String(totalPaginas), totalPaginas));
+  }
+
+  cont.appendChild(crearBoton('Siguiente ›', eventosPaginaActual + 1, eventosPaginaActual === totalPaginas));
 }
 
 function abrirModalUsuario(usuario) {
@@ -1222,6 +1343,7 @@ function abrirModalUsuario(usuario) {
   el('permUsuarioTalleres').checked = usuario ? usuario.perm_talleres : true;
   el('permUsuarioEncuentro').checked = usuario ? usuario.perm_encuentro : true;
   el('permUsuarioAcreditacion').checked = usuario ? usuario.perm_acreditacion : true;
+  const pc = el('permUsuarioCertificados'); if (pc) pc.checked = usuario ? (usuario.perm_certificados ?? true) : true;
   modalUsuario.hidden = false;
   modalUsuario.setAttribute('aria-hidden', 'false');
 }
@@ -1246,6 +1368,7 @@ botonGuardarUsuario.addEventListener('click', async () => {
     perm_talleres: el('permUsuarioTalleres').checked,
     perm_encuentro: el('permUsuarioEncuentro').checked,
     perm_acreditacion: el('permUsuarioAcreditacion').checked,
+    perm_certificados: (el('permUsuarioCertificados')?.checked ?? true),
   };
   if (!esNuevo && !payload.username) delete payload.username;
   if (!esNuevo && !payload.password) delete payload.password;
@@ -1548,10 +1671,10 @@ function renderComidas(datos) {
   const dietasInscriptos = datos.inscriptosPorDieta || {};
   // Resumen al estilo Inscripciones: Personas: 65 (253 inscripciones) · desglose por dieta
   const desglose = ['sin_restriccion','vegano','sin_tacc','sin_lactosa','otro'].map(k => `${ETIQUETAS_ALIMENTACION[k]}: ${Number(dietasInscriptos[k]||0)}`).join(' · ');
-  resumenComidas.textContent = `Personas: ${totalInscriptos} (${totalInscripcionesTalleres} inscripciones en talleres) · ${desglose} · Acreditados: ${totalAcreditados}. Hora del servidor: ${datos.horaServidor || '—'}`;
+  resumenComidas.textContent = `Personas: ${totalInscriptos} · ${desglose} · Acreditados: ${totalAcreditados}. Hora del servidor: ${datos.horaServidor || '—'}`;
   const resumenInscriptos = el('resumenComidasInscriptos');
   if (resumenInscriptos) {
-    resumenInscriptos.textContent = `Personas: ${totalInscriptos} (${totalInscripcionesTalleres} inscripciones) · Vegano: ${Number(dietasInscriptos.vegano||0)} · Sin TACC: ${Number(dietasInscriptos.sin_tacc||0)} · Sin lactosa: ${Number(dietasInscriptos.sin_lactosa||0)} · Sin restricción: ${Number(dietasInscriptos.sin_restriccion||0)} · Otro: ${Number(dietasInscriptos.otro||0)}`;
+    resumenInscriptos.textContent = `Personas: ${totalInscriptos} · Vegano: ${Number(dietasInscriptos.vegano||0)} · Sin TACC: ${Number(dietasInscriptos.sin_tacc||0)} · Sin lactosa: ${Number(dietasInscriptos.sin_lactosa||0)} · Sin restricción: ${Number(dietasInscriptos.sin_restriccion||0)} · Otro: ${Number(dietasInscriptos.otro||0)}`;
   }
 
   // ── Inscriptos por dieta (global, DNI únicos) ──
@@ -1624,7 +1747,7 @@ function renderComidas(datos) {
       if (d.clave === 'total') {
         const meta = document.createElement('div');
         meta.className = 'menu-card-subtitle';
-        meta.textContent = `${totalInscripcionesTalleres} inscripciones en talleres`;
+        // meta.textContent = `${totalInscripcionesTalleres} inscripciones en talleres`;
         card.appendChild(meta);
       }
       cardsDieta.appendChild(card);
@@ -1845,7 +1968,9 @@ async function cargarDatos() {
   if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
   if (esAdmin) {
     const [, , , eventos, usuarios, config] = respuestas;
-    renderEventos(eventos.data || []);
+    const eventosRaw = eventos.data;
+    const eventosLista = Array.isArray(eventosRaw) ? eventosRaw : (Array.isArray(eventosRaw?.eventos) ? eventosRaw.eventos : []);
+    renderEventos(eventosLista);
     renderUsuarios(usuarios.data || []);
     renderPermisos(usuarios.data || []);
   }
@@ -1960,6 +2085,7 @@ function renderPermisos(usuarios) {
     { key: 'perm_talleres', label: 'Talleres' },
     { key: 'perm_encuentro', label: 'Encuentro' },
     { key: 'perm_acreditacion', label: 'Acreditación' },
+    { key: 'perm_certificados', label: 'Certificados' },
   ];
   for (const u of usuarios) {
     const tr = document.createElement('tr');
@@ -2012,6 +2138,7 @@ let ponentes = [];
 let diasPonentes = [];
 let ponenteInscriptos = new Map();
 let compressedFoto = null;
+let prevSegundoId = null;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -2065,7 +2192,13 @@ function renderTablaPonentes() {
     tdFoto.appendChild(thumb);
 
     const tdNombre = document.createElement('td');
-    tdNombre.innerHTML = `<strong>${escapeHtml(p.nombre)}</strong>`;
+    const co = coPonentesPorPonente.get(Number(p.id)) || [];
+    let coHtml = '';
+    if (co.length) {
+      const nombres = co.map(c=> escapeHtml(c.nombre)).join(' • ');
+      coHtml = `<div style="font-size:0.72rem;color:var(--color-texto-suave);margin-top:3px">Con: ${nombres}</div>`;
+    }
+    tdNombre.innerHTML = `<strong>${escapeHtml(p.nombre)}</strong>${coHtml}`;
 
     const tdTipo = document.createElement('td');
     const badge = document.createElement('span');
@@ -2177,11 +2310,16 @@ async function guardarFechasPonentes() {
   }
 }
 
+let talleresCache = [];
+let bloquesCache = [];
+let coPonentesPorPonente = new Map(); // ponenteId -> [{id,nombre,tallerId|bloqueId}]
+
 async function cargarPonentes() {
-  const [ponentesRes, diasRes, talleresRes] = await Promise.all([
+  const [ponentesRes, diasRes, talleresRes, programaRes] = await Promise.all([
     api('/api/admin/ponentes'),
     api('/api/admin/ponentes/dias'),
     api('/api/admin/talleres').catch(() => ({ ok: false, data: [] })),
+    api('/api/admin/programa').catch(() => ({ ok: false, data: { bloques: [] } })),
   ]);
   if (!ponentesRes.ok) {
     mostrarMensaje(mensajePonente, ponentesRes.data.error || 'No se pudieron cargar los ponentes.', 'error');
@@ -2189,25 +2327,57 @@ async function cargarPonentes() {
   }
   ponentes = ponentesRes.data || [];
   diasPonentes = diasRes.ok ? diasRes.data || [] : [];
-  // mapear inscriptos por ponente (unificando 2 partes)
+  talleresCache = (talleresRes && talleresRes.ok && Array.isArray(talleresRes.data)) ? talleresRes.data : [];
+  bloquesCache = (programaRes && programaRes.ok) ? (Array.isArray(programaRes.data) ? programaRes.data : (programaRes.data.bloques || [])) : [];
+  // mapear inscriptos por ponente (unificando 2 partes) - ahora usando ponentes[] array
   ponenteInscriptos = new Map();
-  if (talleresRes && talleresRes.ok && Array.isArray(talleresRes.data)) {
+  if (talleresCache.length) {
     const porPonente = new Map();
-    for (const t of talleresRes.data) {
-      const pid = t.ponente_id ? Number(t.ponente_id) : null;
-      if (!pid) continue;
-      const ins = Number(t.inscriptos) || 0;
-      if (!porPonente.has(pid)) porPonente.set(pid, ins);
-      else porPonente.set(pid, Math.max(porPonente.get(pid), ins));
+    for (const t of talleresCache) {
+      const pids = Array.isArray(t.ponentes) && t.ponentes.length ? t.ponentes.map(p=> Number(p.id)) : (t.ponente_id ? [Number(t.ponente_id)] : []);
+      for (const pid of pids) {
+        const ins = Number(t.inscriptos) || 0;
+        if (!porPonente.has(pid)) porPonente.set(pid, ins);
+        else porPonente.set(pid, Math.max(porPonente.get(pid), ins));
+      }
     }
     for (const [pid, ins] of porPonente.entries()) ponenteInscriptos.set(pid, ins);
-    // ponentes sin taller vinculado quedan sin dato
+  }
+  // construir mapa de co-ponentes por ponente (para mostrar "con X, Y")
+  coPonentesPorPonente = new Map();
+  for (const t of talleresCache) {
+    const pids = Array.isArray(t.ponentes) ? t.ponentes : [];
+    if (pids.length > 1) {
+      for (const p of pids) {
+        const otros = pids.filter(x=> Number(x.id) !== Number(p.id));
+        if (!coPonentesPorPonente.has(Number(p.id))) coPonentesPorPonente.set(Number(p.id), []);
+        for (const o of otros) {
+          if (!coPonentesPorPonente.get(Number(p.id)).some(x=> Number(x.id)===Number(o.id))) {
+            coPonentesPorPonente.get(Number(p.id)).push({ id: Number(o.id), nombre: o.nombre, contexto: `Taller: ${t.nombre}`, tallerId: Number(t.id) });
+          }
+        }
+      }
+    }
+  }
+  for (const b of bloquesCache) {
+    const pids = Array.isArray(b.ponentes) ? b.ponentes : [];
+    if (pids.length > 1) {
+      for (const p of pids) {
+        const otros = pids.filter(x=> Number(x.id) !== Number(p.id));
+        if (!coPonentesPorPonente.has(Number(p.id))) coPonentesPorPonente.set(Number(p.id), []);
+        for (const o of otros) {
+          if (!coPonentesPorPonente.get(Number(p.id)).some(x=> Number(x.id)===Number(o.id))) {
+            coPonentesPorPonente.get(Number(p.id)).push({ id: Number(o.id), nombre: o.nombre, contexto: `${b.tipo}: ${b.titulo}`, bloqueId: Number(b.id) });
+          }
+        }
+      }
+    }
   }
   renderTablaPonentes();
   renderDiasPonentes();
 }
 
-function abrirModalPonente(id) {
+async function abrirModalPonente(id) {
   ponenteEditandoId = id ?? null;
   formPonente.reset();
   compressedFoto = null;
@@ -2218,6 +2388,24 @@ function abrirModalPonente(id) {
   el('modalPonenteTitulo').textContent = id ? 'Editar ponente' : 'Nuevo ponente';
   mostrarMensaje(mensajePonente, '', '');
 
+  // Poblar datalist de segundo ponente (hasta 2 ponentes por actividad) con todos los ponentes excepto el actual
+  const inputSegundo = el('ponenteSegundoNombre');
+  const datalist = el('datalistPonentes');
+  const hiddenSegundo = el('ponenteSegundo');
+  if (datalist) {
+    datalist.innerHTML = '';
+    for (const o of ponentes) {
+      if (id && Number(o.id) === Number(id)) continue;
+      const opt = document.createElement('option');
+      opt.value = o.nombre;
+      opt.label = o.titulo ? `${o.nombre} — ${o.titulo.slice(0,35)}` : o.nombre;
+      datalist.appendChild(opt);
+    }
+  }
+  if (inputSegundo) inputSegundo.value = '';
+  if (hiddenSegundo) hiddenSegundo.value = '';
+
+  let coSeleccionados = [];
   if (id) {
     const p = ponentes.find((x) => Number(x.id) === Number(id));
     if (p) {
@@ -2237,7 +2425,51 @@ function abrirModalPonente(id) {
         ponenteFotoPreview.style.display = 'block';
         ponenteFotoLabel.textContent = 'Imagen actual (solo se reemplaza si elegís una nueva)';
       }
+      // Determinar co-ponentes actuales según talleres/bloques
+      const co = coPonentesPorPonente.get(Number(p.id)) || [];
+      coSeleccionados = co.map(c=> String(c.id));
+      // También intentar fetch directo por si el cache está desactualizado (taller o bloque)
+      if (!coSeleccionados.length) {
+        try {
+          if (p.tipo === 'taller') {
+            const taller = talleresCache.find(t=> (t.ponentes||[]).some(x=> Number(x.id)===Number(p.id)) || Number(t.ponente_id)===Number(p.id));
+            if (taller) {
+              const r = await api(`/api/admin/talleres/${taller.id}/ponentes`);
+              if (r.ok) coSeleccionados = (r.data.ponentes||[]).filter(x=> Number(x.id)!==Number(p.id)).map(x=> String(x.id));
+            }
+          } else if (p.tipo === 'ponencia' || p.tipo === 'conversatorio') {
+            const bloque = bloquesCache.find(b=> (b.ponentes||[]).some(x=> Number(x.id)===Number(p.id)));
+            if (bloque) {
+              const r = await api(`/api/admin/programa/bloques/${bloque.id}/ponentes`);
+              if (r.ok) coSeleccionados = (r.data.ponentes||[]).filter(x=> Number(x.id)!==Number(p.id)).map(x=> String(x.id));
+            }
+          }
+        } catch(_) {}
+      }
     }
+  }
+  prevSegundoId = coSeleccionados[0] ? Number(coSeleccionados[0]) : null;
+  if (inputSegundo) {
+    if (coSeleccionados.length) {
+      const cid = coSeleccionados[0];
+      const ponCo = ponentes.find(x=> String(x.id)===String(cid));
+      inputSegundo.value = ponCo ? ponCo.nombre : '';
+      if (hiddenSegundo) hiddenSegundo.value = cid;
+    } else {
+      inputSegundo.value = '';
+      if (hiddenSegundo) hiddenSegundo.value = '';
+    }
+    // Sincronizar hidden al escribir/elegir (reemplaza listeners previos)
+    inputSegundo.oninput = () => {
+      const val = inputSegundo.value.trim();
+      const encontrado = ponentes.find(p=> p.nombre.toLowerCase() === val.toLowerCase());
+      if (hiddenSegundo) hiddenSegundo.value = encontrado ? String(encontrado.id) : '';
+    };
+    inputSegundo.onchange = () => {
+      const val = inputSegundo.value.trim();
+      const encontrado = ponentes.find(p=> p.nombre.toLowerCase() === val.toLowerCase());
+      if (hiddenSegundo) hiddenSegundo.value = encontrado ? String(encontrado.id) : '';
+    };
   }
   modalPonente.hidden = false;
   modalPonente.setAttribute('aria-hidden', 'false');
@@ -2340,9 +2572,123 @@ formPonente.addEventListener('submit', async (e) => {
     mostrarMensaje(mensajePonente, data.error || 'No se pudo guardar el ponente.', 'error');
     return;
   }
+  // Guardar segundo ponente si se ingresó nombre (permite ingreso libre y posterior certificado)
+  const ponenteIdFinal = esEdicion ? ponenteEditandoId : (data.id || null);
+  let coIds = [];
+  const inputSegundo = el('ponenteSegundoNombre');
+  const hiddenSegundo = el('ponenteSegundo');
+  const segundoNombreRaw = inputSegundo ? inputSegundo.value.trim() : '';
+  const tipoSel = el('ponenteTipo').value;
+  if (segundoNombreRaw) {
+    // Intentar resolver por id oculto o por nombre existente
+    let segundoId = hiddenSegundo && hiddenSegundo.value ? Number(hiddenSegundo.value) : null;
+    if (!segundoId) {
+      const porNombre = ponentes.find(p=> p.nombre.toLowerCase() === segundoNombreRaw.toLowerCase());
+      if (porNombre) segundoId = Number(porNombre.id);
+    }
+    if (segundoId) {
+      coIds = [segundoId];
+    } else {
+      // Crear nuevo ponente con mismo tipo/título/día/horario que el principal para permitir certificado
+      try {
+        const fd2 = new FormData();
+        fd2.append('nombre', segundoNombreRaw);
+        fd2.append('tipo', tipoSel);
+        fd2.append('cupo', el('ponenteCupo').value || '20');
+        fd2.append('dia', el('ponenteDia').value || '1');
+        fd2.append('horario', el('ponenteHorario').value || '');
+        fd2.append('dia2', el('ponenteDia2').value || '');
+        fd2.append('horario2', el('ponenteHorario2').value || '');
+        fd2.append('titulo', el('ponenteTitulo').value || '');
+        fd2.append('descripcion', el('ponenteDescripcion').value || '');
+        fd2.append('foto_pos', '');
+        fd2.append('skipSync', '1');
+        fd2.append('esSegundo', '1');
+        const r2 = await fetch('/api/admin/ponentes', { method: 'POST', body: fd2 });
+        let d2 = {}; try { d2 = await r2.json(); } catch {}
+        if (r2.ok && d2.id) {
+          coIds = [Number(d2.id)];
+          mostrarMensaje(mensajePonente, `Segundo ponente "${segundoNombreRaw}" creado. Ahora podés generar su certificado.`, 'ok');
+          // actualizar cache local para que bloque/taller lo encuentre
+          ponentes.push({ id: Number(d2.id), nombre: segundoNombreRaw, tipo: tipoSel, titulo: el('ponenteTitulo').value || '', dia: Number(el('ponenteDia').value)||1, horario: el('ponenteHorario').value||'' });
+        } else {
+          // fallback: recargar y buscar por nombre
+          await cargarPonentes();
+          const nuevo = ponentes.find(p=> p.nombre.toLowerCase() === segundoNombreRaw.toLowerCase());
+          if (nuevo) coIds = [Number(nuevo.id)];
+          else mostrarMensaje(mensajePonente, r2.ok ? 'Segundo ponente creado' : (d2.error || 'No se pudo crear el segundo ponente'), r2.ok ? 'ok' : 'error');
+        }
+      } catch (e2) {
+        console.error('Error creando segundo ponente', e2);
+        mostrarMensaje(mensajePonente, 'Error creando segundo ponente: ' + e2.message, 'error');
+      }
+    }
+  }
+  try {
+    if (ponenteIdFinal) {
+      // Necesitamos recargar primero para conocer el taller/bloque asociado al ponente recién creado
+      await cargarPonentes();
+      if (tipoSel === 'taller') {
+        // Buscar taller que contiene al ponente
+        let taller = talleresCache.find(t=> (t.ponentes||[]).some(p=> Number(p.id)===Number(ponenteIdFinal)) || Number(t.ponente_id)===Number(ponenteIdFinal));
+        if (!taller) {
+          // fallback: recargar talleres y reintentar
+          const r = await api('/api/admin/talleres');
+          if (r.ok) talleresCache = r.data || [];
+          taller = talleresCache.find(t=> (t.ponentes||[]).some(p=> Number(p.id)===Number(ponenteIdFinal)) || Number(t.ponente_id)===Number(ponenteIdFinal));
+        }
+        if (taller) {
+          const todos = [ponenteIdFinal, ...coIds];
+          const unicos = [...new Set(todos.map(Number).filter(n=> n>0))];
+          const rr = await api(`/api/admin/talleres/${taller.id}/ponentes`, { method: 'PUT', body: JSON.stringify({ ponenteIds: unicos }) });
+          if (!rr.ok) mostrarMensaje(mensajePonente, rr.data.error || 'Ponente guardado pero no se pudieron asignar co-ponentes al taller.', 'error');
+        }
+      } else if (tipoSel === 'ponencia' || tipoSel === 'conversatorio') {
+        let bloque = bloquesCache.find(b=> (b.ponentes||[]).some(p=> Number(p.id)===Number(ponenteIdFinal)));
+        if (!bloque) {
+          // fallback: buscar bloque por tipo y dia (creado por fecha)
+          const diaVal = Number(el('ponenteDia').value) || null;
+          if (diaVal) {
+            const fechaObj = diasPonentes.find(d=> Number(d.dia)===diaVal);
+            let fechaIso = '';
+            if (fechaObj && fechaObj.fecha) {
+              const m = String(fechaObj.fecha).match(/^(\d{2})-(\d{2})-(\d{4})$/);
+              fechaIso = m ? `${m[3]}-${m[2]}-${m[1]}` : String(fechaObj.fecha);
+            }
+            if (fechaIso) bloque = bloquesCache.find(b=> b.dia===fechaIso && b.tipo===tipoSel);
+          }
+        }
+        if (bloque) {
+          // Para bloque, preservar otros ponentes del mismo bloque (ej. otra ponencia en mismo horario) y solo agregar/quitar el segundo de esta ponencia
+          let existentes = [];
+          try {
+            const rExist = await api(`/api/admin/programa/bloques/${bloque.id}/ponentes`);
+            if (rExist.ok) existentes = (rExist.data.ponentes||[]).map(p=> Number(p.id));
+            else existentes = (bloque.ponentes||[]).map(p=> Number(p.id));
+          } catch(_) { existentes = (bloque.ponentes||[]).map(p=> Number(p.id)); }
+          let nuevos = [...existentes];
+          // quitar previo segundo si cambió o se eliminó
+          if (prevSegundoId && !coIds.includes(prevSegundoId)) {
+            nuevos = nuevos.filter(id=> id !== prevSegundoId);
+          }
+          if (!nuevos.includes(ponenteIdFinal)) nuevos.push(ponenteIdFinal);
+          for (const cid of coIds) if (!nuevos.includes(cid)) nuevos.push(cid);
+          const unicos = [...new Set(nuevos.filter(n=> n>0))];
+          const rr = await api(`/api/admin/programa/bloques/${bloque.id}/ponentes`, { method: 'PUT', body: JSON.stringify({ ponenteIds: unicos }) });
+          if (!rr.ok) mostrarMensaje(mensajePonente, rr.data.error || 'Ponente guardado pero no se pudieron asignar co-ponentes al bloque.', 'error');
+        } else if (coIds.length) {
+          mostrarMensaje(mensajePonente, 'Ponente creado, pero no se encontró bloque de '+tipoSel+' para asignar co-ponentes. Creá primero el bloque en Programa.', 'error');
+        }
+      }
+    }
+  } catch(e) {
+    console.error('Error guardando co-ponentes', e);
+  }
   mostrarMensaje(mensajePonente, esEdicion ? 'Ponente actualizado.' : 'Ponente creado.', 'ok');
   cerrarModalPonente();
   await cargarPonentes();
+  // también refrescar programa por si cambió bloque
+  try { await recargarProgramaAdmin(); } catch(_){}
 });
 
 async function eliminarPonente(id) {
@@ -2398,7 +2744,28 @@ async function recargarProgramaAdmin() {
   ProgramaUI.render();
 }
 
-function abrirModalBloque(id) {
+async function poblarBloquePonentesSelect(selectedIds = []) {
+  const sel = el('bloquePonentes');
+  if (!sel) return;
+  // Asegurar que ponentes esté cargado; si no, fetch
+  if (!ponentes.length) {
+    try {
+      const r = await api('/api/admin/ponentes');
+      if (r.ok) ponentes = r.data || [];
+    } catch (_) {}
+  }
+  sel.innerHTML = '';
+  for (const p of ponentes) {
+    const opt = document.createElement('option');
+    opt.value = String(p.id);
+    opt.textContent = `${p.nombre} — ${p.titulo ? p.titulo.slice(0,40) : p.tipo}`;
+    opt.title = `${p.nombre} (${p.tipo})`;
+    if (selectedIds.map(String).includes(String(p.id))) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+async function abrirModalBloque(id) {
   formBloque.reset();
   el('bloqueId').value = '';
   el('bloqueDia').value = '';
@@ -2411,7 +2778,7 @@ function abrirModalBloque(id) {
   el('bloqueOrden').value = '0';
   el('tituloModalBloque').textContent = 'Nuevo bloque';
   mostrarMensaje(mensajeBloque, '', '');
-
+  let selectedPonentes = [];
   if (id) {
     const b = bloquesPrograma.find((x) => Number(x.id) === Number(id));
     if (b) {
@@ -2425,8 +2792,20 @@ function abrirModalBloque(id) {
       el('bloqueDescripcion').value = b.descripcion || '';
       el('bloqueIcono').value = b.icono || '';
       el('bloqueOrden').value = b.orden ?? 0;
+      selectedPonentes = b.ponentes_ids || b.ponentes?.map(p=>p.id) || [];
+      // Si no hay ponentes_ids pero es edición, intentar fetch directo
+      if (!selectedPonentes.length) {
+        try {
+          const r = await api(`/api/admin/programa/bloques/${id}/ponentes`);
+          if (r.ok) selectedPonentes = (r.data.ponentes||[]).map(p=>p.id);
+        } catch(_) {}
+      }
     }
   }
+  await poblarBloquePonentesSelect(selectedPonentes);
+  // Mostrar/ocultar campo según tipo
+  const campoPon = el('campoBloquePonentes');
+  if (campoPon) campoPon.hidden = false;
   modalBloque.hidden = false;
   modalBloque.setAttribute('aria-hidden', 'false');
   el('bloqueTitulo').focus();
@@ -2447,6 +2826,8 @@ formBloque.addEventListener('submit', async (e) => {
     mostrarMensaje(mensajeBloque, 'El título es obligatorio.', 'error');
     return;
   }
+  const sel = el('bloquePonentes');
+  const ponentesSel = sel ? [...sel.selectedOptions].map(o=> Number(o.value)).filter(n=> n>0) : [];
   const payload = {
     dia: el('bloqueDia').value,
     hora_inicio: el('bloqueHoraInicio').value,
@@ -2456,6 +2837,7 @@ formBloque.addEventListener('submit', async (e) => {
     descripcion: el('bloqueDescripcion').value.trim(),
     icono: el('bloqueIcono').value.trim(),
     orden: Number(el('bloqueOrden').value) || 0,
+    ponentes: ponentesSel,
   };
   const esEdicion = !!id;
   const res = esEdicion
@@ -3459,9 +3841,243 @@ function renderUltimos5(inscripciones) {
       nombre: res.data.nombre,
       rol: res.data.rol,
       perm_acreditacion: Boolean(res.data.perm_acreditacion),
+      perm_certificados: Boolean(res.data.perm_certificados ?? true),
     };
     await cargarDatos();
   } else {
     mostrarLogin();
   }
 })();
+
+// ── Certificados ────────────────────────────────────────────────────────
+let certElegibles = [];
+let certEmitidos = [];
+let certPonentesCache = [];
+
+async function cargarCertificados() {
+  await Promise.all([cargarCertAsistentesElegibles(), cargarCertEmitidos(), cargarCertPonentesLista()]);
+  await cargarCertFirmas();
+}
+
+async function cargarCertFirmas() {
+  const r = await api('/api/admin/certificados/config');
+  if (r.ok) {
+    const c = r.data;
+    const e1n = el('certFirma1Nombre'); if (e1n) e1n.value = c.firma1_nombre || '';
+    const e1c = el('certFirma1Cargo'); if (e1c) e1c.value = c.firma1_cargo || '';
+    const e2n = el('certFirma2Nombre'); if (e2n) e2n.value = c.firma2_nombre || '';
+    const e2c = el('certFirma2Cargo'); if (e2c) e2c.value = c.firma2_cargo || '';
+    const a1 = el('certAval1'); if (a1) a1.value = c.aval1 || '';
+    const a2 = el('certAval2'); if (a2) a2.value = c.aval2 || '';
+    const a3 = el('certAval3'); if (a3) a3.value = c.aval3 || '';
+    const a4 = el('certAval4'); if (a4) a4.value = c.aval4 || '';
+    const est = el('certConfigEstado'); if (est) est.textContent = '';
+  }
+}
+
+async function cargarCertAsistentesElegibles() {
+  const resumen = el('resumenCertAsistentes');
+  if (resumen) resumen.textContent = 'Cargando…';
+  const r = await api('/api/admin/certificados/elegibles');
+  if (!r.ok) { if (resumen) resumen.textContent = r.data.error || 'No se pudo cargar.'; return; }
+  certElegibles = r.data || [];
+  renderCertAsistentes();
+}
+
+function renderCertAsistentes() {
+  const tbody = document.querySelector('#tablaCertAsistentes tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const q = (el('buscarCertAsistente')?.value || '').trim().toLowerCase();
+  const filtro = el('filtroCertElegible')?.value || '';
+  const visibles = certElegibles.filter(a => {
+    const coincideQ = !q || String(a.dni||'').includes(q) || String(a.apellido||'').toLowerCase().includes(q) || String(a.nombre||'').toLowerCase().includes(q) || `${a.nombre||''} ${a.apellido||''}`.toLowerCase().includes(q);
+    if (!coincideQ) return false;
+    if (filtro==='elegible' && !a.elegible) return false;
+    if (filtro==='no_elegible' && a.elegible) return false;
+    return true;
+  });
+  const resumen = el('resumenCertAsistentes');
+  if (resumen) resumen.textContent = `Asistentes: ${visibles.length} de ${certElegibles.length} · Elegibles (ingreso+egreso en todos sus talleres): ${certElegibles.filter(a=>a.elegible).length}`;
+  if (visibles.length===0) {
+    const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=6;td.textContent=q||filtro?'Sin resultados para el filtro.':'No hay asistentes.';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return;
+  }
+  for (const a of visibles) {
+    const tr=document.createElement('tr');
+    const tdDni=document.createElement('td');tdDni.className='celda-dni';tdDni.textContent=a.dni;
+    const tdNombre=document.createElement('td');tdNombre.textContent=`${a.apellido}, ${a.nombre}`.replace(/^,\s*/,''); tdNombre.style.fontWeight='600';
+    const tdTalleres=document.createElement('td');tdTalleres.textContent=a.talleres_nombres||'—'; tdTalleres.title=a.talleres_nombres||''; tdTalleres.style.fontSize='0.82rem';
+    const tdAsist=document.createElement('td'); tdAsist.style.fontSize='0.78rem';
+    const asist = a.asistencias||[];
+    if (!asist.length) tdAsist.textContent='Sin talleres';
+    else {
+      const ul=document.createElement('div');
+      for (const t of asist) {
+        const linea=document.createElement('div');
+        const ok=t.completo;
+        linea.innerHTML = `${escapeHtml(t.taller)}: <span class="${ok?'encuentro-si':'encuentro-no'}">${ok?'✓ ingreso+egreso':`${t.tieneIngreso?'✓':'✕'} ingreso / ${t.tieneEgreso?'✓':'✕'} egreso`}</span>`;
+        ul.appendChild(linea);
+      }
+      tdAsist.appendChild(ul);
+    }
+    const tdEstado=document.createElement('td');
+    const badge=document.createElement('span'); badge.className=`badge ${a.elegible?'badge-encuentro-si':'badge-encuentro-no'}`; badge.textContent=a.elegible?'✓ Elegible':'✕ No elegible'; tdEstado.appendChild(badge);
+    const tdAcc=document.createElement('td');
+    const btn=document.createElement('button'); btn.type='button'; btn.className='boton boton-chico'; btn.textContent='Generar certificado';
+    btn.disabled = !a.elegible;
+    btn.title = a.elegible? 'Generar certificado de asistencia' : 'Debe registrar ingreso y egreso en todos sus talleres';
+    btn.addEventListener('click', async ()=>{
+      btn.disabled=true;
+      const r = await api('/api/admin/certificados/generar',{method:'POST', body: JSON.stringify({ tipo:'asistente', dni: a.dni })});
+      if (!r.ok) { mostrarMensaje(el('mensajeCertificados'), r.data.error||'No se pudo generar', 'error'); if (r.data.asistencias) console.log(r.data); }
+      else { mostrarMensaje(el('mensajeCertificados'), `Certificado ${r.data.codigo} generado para ${a.apellido}, ${a.nombre}`, 'ok'); await cargarCertEmitidos(); }
+      btn.disabled = !a.elegible;
+    });
+    tdAcc.appendChild(btn);
+    tr.append(tdDni, tdNombre, tdTalleres, tdAsist, tdEstado, tdAcc);
+    tbody.appendChild(tr);
+  }
+}
+
+async function cargarCertPonentesLista() {
+  const resumen = el('resumenCertPonentes');
+  if (resumen) resumen.textContent='Cargando…';
+  const r = await api('/api/admin/ponentes');
+  if (!r.ok) { if (resumen) resumen.textContent=r.data.error||'No se pudo cargar'; return; }
+  certPonentesCache = r.data||[];
+  renderCertPonentes();
+}
+
+function renderCertPonentes() {
+  const tbody=document.querySelector('#tablaCertPonentes tbody');
+  if(!tbody) return;
+  tbody.innerHTML='';
+  const q=(el('buscarCertPonente')?.value||'').trim().toLowerCase();
+  const filtroTipo = (el('filtroCertPonenteTipo')?.value || '').trim();
+  const visibles = certPonentesCache.filter(p=>{
+    if(q && !(String(p.nombre||'').toLowerCase().includes(q) || String(p.titulo||'').toLowerCase().includes(q))) return false;
+    if(filtroTipo && String(p.tipo||'')!==filtroTipo) return false;
+    return true;
+  });
+  const resumen=el('resumenCertPonentes'); if(resumen) resumen.textContent=`Ponentes: ${visibles.length} de ${certPonentesCache.length}`;
+  if(visibles.length===0){ const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent=(q||filtroTipo)?'Sin resultados':'No hay ponentes';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return; }
+  for(const p of visibles){
+    const tr=document.createElement('tr');
+    const tdNombre=document.createElement('td');tdNombre.textContent=p.nombre; tdNombre.style.fontWeight='600';
+    const tdTipo=document.createElement('td');const badge=document.createElement('span');badge.className=`ponente-badge badge-${p.tipo}`;badge.textContent=p.tipo==='taller'?'Taller':(p.tipo==='conversatorio'?'Conversatorio':'Ponencia');tdTipo.appendChild(badge);
+    const tdTitulo=document.createElement('td');tdTitulo.textContent=p.titulo||'—';tdTitulo.style.fontSize='0.82rem';
+    const tdDia=document.createElement('td');const slots=[];slots.push(`Día ${p.dia??1} · ${escapeHtml(p.horario||'—')}`);if(p.dia2) slots.push(`Día ${p.dia2} · ${escapeHtml(p.horario2||'—')}`);tdDia.innerHTML=slots.join('<br>');tdDia.style.fontSize='0.82rem';
+    const tdAcc=document.createElement('td');const btn=document.createElement('button');btn.type='button';btn.className='boton boton-chico';
+    // Diferenciación automática taller/ponencia según tipo asociado a la persona
+    const tipoAuto = String(p.tipo||'').toLowerCase()==='taller' ? 'tallerista' : 'ponente';
+    btn.textContent= tipoAuto==='tallerista' ? 'Cert. taller' : 'Cert. ponencia';
+    btn.title = `Generará: presentando ${tipoAuto==='tallerista'?'el taller':'la ponencia'}`;
+    btn.addEventListener('click', async()=>{
+      btn.disabled=true;
+      const r=await api('/api/admin/certificados/generar',{method:'POST', body: JSON.stringify({ tipo: tipoAuto, ponenteId: p.id })});
+      if(!r.ok) mostrarMensaje(el('mensajeCertificados'), r.data.error||'No se pudo generar','error');
+      else { mostrarMensaje(el('mensajeCertificados'), `Certificado ${r.data.codigo} (${tipoSel}) para ${p.nombre}`,'ok'); await cargarCertEmitidos(); }
+      btn.disabled=false;
+    });tdAcc.appendChild(btn);
+    tr.append(tdNombre,tdTipo,tdTitulo,tdDia,tdAcc);tbody.appendChild(tr);
+  }
+}
+
+async function cargarCertEmitidos(){
+  const resumen=el('resumenCertEmitidos'); if(resumen) resumen.textContent='Cargando…';
+  const r=await api('/api/admin/certificados');
+  if(!r.ok){ if(resumen) resumen.textContent=r.data.error||'No se pudo cargar'; return; }
+  certEmitidos=r.data||[];
+  const tbody=document.querySelector('#tablaCertEmitidos tbody'); if(!tbody) return;
+  tbody.innerHTML='';
+  if(resumen) resumen.textContent=`Emitidos: ${certEmitidos.length}`;
+  if(certEmitidos.length===0){ const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=9;td.textContent='Aún no se emitieron certificados.';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return; }
+  for(const c of certEmitidos){
+    const tr=document.createElement('tr');
+    const tdCodigo=document.createElement('td');tdCodigo.textContent=c.codigo;tdCodigo.style.fontFamily='monospace';tdCodigo.style.fontWeight='700';
+    const tdTipo=document.createElement('td');const badge=document.createElement('span');badge.className='badge badge-alim '+c.tipo;badge.textContent=c.tipo;tdTipo.appendChild(badge);
+    const tdNombre=document.createElement('td');tdNombre.textContent=`${c.apellido}, ${c.nombre}`.replace(/^,\s*/,'');
+    const tdDni=document.createElement('td');tdDni.textContent=c.dni|| (c.ponente_id?`Ponente #${c.ponente_id}`:'—');tdDni.className='celda-dni';
+    const tdDetalle=document.createElement('td');tdDetalle.style.fontSize='0.78rem';tdDetalle.style.maxWidth='220px';tdDetalle.style.overflow='hidden';tdDetalle.style.textOverflow='ellipsis';
+    const det=c.detalle||{};
+    if(c.tipo==='asistente' && det.talleres) tdDetalle.textContent=det.talleres.map(t=>t.taller||t.nombre).join(', ');
+    else if(det.titulo) tdDetalle.textContent=det.titulo;
+    else tdDetalle.textContent='—';
+    tdDetalle.title=tdDetalle.textContent;
+    const tdQR=document.createElement('td');const aQR=document.createElement('a');aQR.href=`/api/admin/certificados/${encodeURIComponent(c.codigo)}/qr.png`;aQR.target='_blank';aQR.textContent='QR';aQR.className='boton boton-chico';tdQR.appendChild(aQR);
+    const tdHash=document.createElement('td');tdHash.textContent=(c.hash_firma||'').slice(0,16)+'…';tdHash.title=c.hash_firma||'';tdHash.style.fontFamily='monospace';tdHash.style.fontSize='0.72rem';
+    const tdEmitido=document.createElement('td');tdEmitido.textContent=c.creado_en? formatearFecha(c.creado_en):'—';tdEmitido.style.fontSize='0.78rem';tdEmitido.title=String(c.creado_en||'');
+    const tdAcc=document.createElement('td');const cont=document.createElement('div');cont.className='acciones-fila';
+    const aPdf=document.createElement('a');aPdf.href=`/api/admin/certificados/${encodeURIComponent(c.codigo)}/pdf`;aPdf.target='_blank';aPdf.textContent='Ver PDF';aPdf.className='boton boton-chico';
+    const btnVerif=document.createElement('button');btnVerif.type='button';btnVerif.className='boton boton-secundario boton-chico';btnVerif.textContent='Verificar';btnVerif.addEventListener('click', async()=>{
+      const vr=await fetch(`/api/certificados/verificar/${encodeURIComponent(c.codigo)}`);
+      const jd=await vr.json().catch(()=>({}));
+      if(jd.valido) alert(`✓ Válido\n${c.codigo} – ${c.nombre} ${c.apellido} (${c.tipo})\nFirma elect.: ${jd.firmaValida?'válida':'INVÁLIDA'}\nEmitido: ${c.creado_en}`);
+      else alert('No válido: '+ (jd.error||'desconocido'));
+    });
+    const btnDel=document.createElement('button');btnDel.type='button';btnDel.className='boton boton-peligro boton-chico';btnDel.textContent='Eliminar';btnDel.addEventListener('click', async()=>{
+      if(!confirm(`¿Eliminar certificado ${c.codigo}?`)) return;
+      btnDel.disabled=true;
+      const rr=await api(`/api/admin/certificados/${c.id}`,{method:'DELETE'});
+      if(!rr.ok) mostrarMensaje(el('mensajeCertificados'), rr.data.error||'No se pudo eliminar','error');
+      else { mostrarMensaje(el('mensajeCertificados'), 'Eliminado','ok'); await cargarCertEmitidos(); }
+      btnDel.disabled=false;
+    });
+    cont.append(aPdf, btnVerif, btnDel); tdAcc.appendChild(cont);
+    tr.append(tdCodigo,tdTipo,tdNombre,tdDni,tdDetalle,tdQR,tdHash,tdEmitido,tdAcc); tbody.appendChild(tr);
+  }
+}
+
+// eventos certificados
+el('botonActualizarCertAsistentes')?.addEventListener('click', cargarCertAsistentesElegibles);
+el('buscarCertAsistente')?.addEventListener('input', renderCertAsistentes);
+el('filtroCertElegible')?.addEventListener('change', renderCertAsistentes);
+el('botonActualizarCertPonentes')?.addEventListener('click', cargarCertPonentesLista);
+el('buscarCertPonente')?.addEventListener('input', renderCertPonentes);
+el('filtroCertPonenteTipo')?.addEventListener('change', renderCertPonentes);
+el('botonActualizarCertEmitidos')?.addEventListener('click', cargarCertEmitidos);
+el('botonGuardarCertConfig')?.addEventListener('click', async ()=>{
+  const btn=el('botonGuardarCertConfig');
+  const est=el('certConfigEstado');
+  btn.disabled=true; if(est) est.textContent='Guardando…';
+  const payload={
+    certificado_firma1_nombre: el('certFirma1Nombre')?.value.trim()||'',
+    certificado_firma1_cargo: el('certFirma1Cargo')?.value.trim()||'',
+    certificado_firma2_nombre: el('certFirma2Nombre')?.value.trim()||'',
+    certificado_firma2_cargo: el('certFirma2Cargo')?.value.trim()||'',
+    certificado_aval1: el('certAval1')?.value.trim()||'',
+    certificado_aval2: el('certAval2')?.value.trim()||'',
+    certificado_aval3: el('certAval3')?.value.trim()||'',
+    certificado_aval4: el('certAval4')?.value.trim()||'',
+  };
+  const f1=el('certFirma1Imagen')?.files[0];
+  const f2=el('certFirma2Imagen')?.files[0];
+  async function toB64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+  if(f1) payload.firma1_imagen_base64 = await toB64(f1);
+  if(f2) payload.firma2_imagen_base64 = await toB64(f2);
+  const r=await api('/api/admin/certificados/config',{method:'PUT', body: JSON.stringify(payload)});
+  if(!r.ok){ mostrarMensaje(el('mensajeCertificados'), r.data.error||'No se pudo guardar config','error'); if(est) est.textContent='Error'; }
+  else { if(est) est.textContent='Guardado ✓'; el('certFirma1Imagen').value=''; el('certFirma2Imagen').value=''; setTimeout(()=>{if(est) est.textContent='';},2500); }
+  btn.disabled=false;
+});
+el('botonCertTalleristaDni')?.addEventListener('click', async ()=>{
+  const dni=String(el('certTalleristaDni')?.value||'').replace(/\D/g,'');
+  if(!/^\d{7,8}$/.test(dni)){ mostrarMensaje(el('mensajeCertificados'),'DNI inválido','error'); return; }
+  const btn=el('botonCertTalleristaDni'); btn.disabled=true;
+  const r=await api('/api/admin/certificados/generar',{method:'POST', body: JSON.stringify({ tipo:'tallerista', dni })});
+  if(!r.ok) mostrarMensaje(el('mensajeCertificados'), r.data.error||'No se pudo generar','error');
+  else { mostrarMensaje(el('mensajeCertificados'), `Certificado tallerista ${r.data.codigo} generado`,'ok'); await cargarCertEmitidos(); el('certTalleristaDni').value=''; }
+  btn.disabled=false;
+});
+document.querySelectorAll('#subTabsCertificados .sub-tab').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    for(const b of document.querySelectorAll('#subTabsCertificados .sub-tab')) b.classList.toggle('activo', b===btn);
+    const sub=btn.dataset.sub;
+    el('subCertAsistentes').hidden = sub!=='asistentes';
+    el('subCertPonentes').hidden = sub!=='ponentes';
+    el('subCertEmitidos').hidden = sub!=='emitidos';
+    if(sub==='emitidos') cargarCertEmitidos();
+    if(sub==='asistentes') cargarCertAsistentesElegibles();
+    if(sub==='ponentes') cargarCertPonentesLista();
+  });
+});

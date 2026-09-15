@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<certificado xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <encabezado>
+        <institucion>Red de Profesores de Teatro</institucion>
+        <nodo>Nodo Salta</nodo>
+        <evento>
+            <nombre>26° Encuentro Nacional de Profesores de Teatro</nombre>
+            <edicion>Dramatiza Salta 2026</edicion>
+            <lugar>
+                <ciudad>Salta</ciudad>
+                <provincia>Salta</provincia>
+                <pais>Argentina</pais>
+            </lugar>
+            <fechaInicio>2026-10-09</fechaInicio>
+            <fechaFin>2026-10-11</fechaFin>
+        </evento>
+    </encabezado>
+
+    <participante>
+        <nombre>Ester</nombre>
+        <apellido>Trozzo</apellido>
+        <tituloHonorifico>Dra.</tituloHonorifico>
+        <documento tipo="DNI">
+            <numero></numero> </documento>
+        <rol>Tallerista</rol>
+    </participante>
+
+    <actividad>
+        <tipo>Taller</tipo>
+        <titulo>Aprender a producir y apreciar teatro, un modo estratégico de acercamiento a la compleja realidad actual</titulo>
+        <cargaHoraria unidad="horas reloj">3</cargaHoraria>
+    </actividad>
+
+    <emision>
+        <lugarEmision>Salta</lugarEmision>
+        <fechaEmision>2026-10-11</fechaEmision>
+    </emision>
+
+    <firmantes>
+        <firmante id="1">
+            <nombre>Mónica E. Yapura</nombre>
+            <cargo>Referente Nacional Nodo Salta</cargo>
+        </firmante>
+        <firmante id="2">
+            <nombre>Romina Ayub</nombre>
+            <cargo>Referente Provincial Nodo Salta</cargo>
+        </firmante>
+    </firmantes>
+
+    <validacion>
+        <codigoCertificado>CERT-F948C65B8C</codigoCertificado>
+        <firmaElectronica>E20688FCOF30CSEE-F4FC385843048010</firmaElectronica>
+        <estado>Valido</estado>
+    </validacion>
+</certificado>

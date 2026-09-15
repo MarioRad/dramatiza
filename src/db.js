@@ -55,6 +55,23 @@ async function initPool() {
       await pool.query('ALTER TABLE planes_pago ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
       await pool.query('ALTER TABLE asistente_planes ADD COLUMN IF NOT EXISTS es_tallerista BOOLEAN NOT NULL DEFAULT FALSE');
       await pool.query('ALTER TABLE notificaciones_leidas ADD COLUMN IF NOT EXISTS leido_en TIMESTAMPTZ DEFAULT NOW()');
+      await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perm_certificados BOOLEAN NOT NULL DEFAULT TRUE');
+      try { await pool.query(`DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='usuarios_rol_check') THEN ALTER TABLE usuarios DROP CONSTRAINT usuarios_rol_check; END IF; EXCEPTION WHEN others THEN NULL; END $$;`); } catch(_){}
+      await pool.query(`ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK (rol IN ('admin','superior','menu','operador'))`).catch(()=>{});
+      await pool.query(`CREATE TABLE IF NOT EXISTS certificados (id SERIAL PRIMARY KEY, codigo VARCHAR(30) NOT NULL UNIQUE, tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('asistente','ponente','tallerista')), dni VARCHAR(20), ponente_id INTEGER REFERENCES ponentes(id) ON DELETE SET NULL, nombre TEXT NOT NULL, apellido TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', detalle JSONB, talleres_ids TEXT NOT NULL DEFAULT '', qr_data TEXT, hash_firma TEXT NOT NULL DEFAULT '', emitido_por TEXT NOT NULL DEFAULT '', creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_certificados_codigo ON certificados(codigo)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_certificados_dni ON certificados(dni)');
+      await pool.query('CREATE TABLE IF NOT EXISTS taller_asistencias (id SERIAL PRIMARY KEY, dni TEXT NOT NULL, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, bloque_id INTEGER REFERENCES programa_bloques(id) ON DELETE SET NULL, tipo TEXT NOT NULL CHECK (tipo IN (\'ingreso\',\'egreso\')), usuario TEXT, registrado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())').catch(()=>{});
+      await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_taller_asist ON taller_asistencias (dni, taller_id, COALESCE(bloque_id, -1), tipo)').catch(()=>{});
+      // 009_múltiple ponentes: talleres ↔ ponentes y bloques ↔ ponentes
+      await pool.query(`CREATE TABLE IF NOT EXISTS taller_ponentes (id SERIAL PRIMARY KEY, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, ponente_id INTEGER NOT NULL REFERENCES ponentes(id) ON DELETE CASCADE, orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (taller_id, ponente_id))`).catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_taller_ponentes_taller ON taller_ponentes(taller_id)').catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_taller_ponentes_ponente ON taller_ponentes(ponente_id)').catch(()=>{});
+      await pool.query(`CREATE TABLE IF NOT EXISTS bloque_ponentes (id SERIAL PRIMARY KEY, bloque_id INTEGER NOT NULL REFERENCES programa_bloques(id) ON DELETE CASCADE, ponente_id INTEGER NOT NULL REFERENCES ponentes(id) ON DELETE CASCADE, orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (bloque_id, ponente_id))`).catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_bloque_ponentes_bloque ON bloque_ponentes(bloque_id)').catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_bloque_ponentes_ponente ON bloque_ponentes(ponente_id)').catch(()=>{});
+      // Migrar datos existentes si las tablas estaban vacías
+      try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
       console.error('[db] auto-migración es_tallerista/cuotas falló:', e.message);
     }
@@ -111,12 +128,101 @@ async function transaction(fn) {
 }
 
 async function listarTalleres() {
-  return query(
-    `SELECT t.id, t.nombre, t.descripcion, t.cupo, t.duracion_hs, t.fecha, t.hora, t.lugar, t.disertante, t.pareja_id,
+  const talleres = await query(
+    `SELECT t.id, t.nombre, t.descripcion, t.cupo, t.duracion_hs, t.fecha, t.hora, t.lugar, t.disertante, t.pareja_id, t.ponente_id,
        (SELECT COUNT(*) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos
      FROM talleres t
      ORDER BY t.fecha, t.hora, t.id`
   );
+  // Adjuntar ponentes múltiples (taller_ponentes) + fallback a ponente_id/disertante
+  try {
+    const ids = talleres.map(t => Number(t.id));
+    if (ids.length) {
+      const filas = await query(
+        `SELECT tp.taller_id, p.id, p.nombre, p.foto, p.tipo, p.titulo
+         FROM taller_ponentes tp JOIN ponentes p ON p.id = tp.ponente_id
+         WHERE tp.taller_id IN (${ids.map(() => '?').join(',')})
+         ORDER BY tp.orden, p.nombre`,
+        ids
+      );
+      const porTaller = new Map();
+      for (const r of filas) {
+        const tid = Number(r.taller_id);
+        if (!porTaller.has(tid)) porTaller.set(tid, []);
+        porTaller.get(tid).push({ id: Number(r.id), nombre: r.nombre, foto: r.foto, tipo: r.tipo, titulo: r.titulo });
+      }
+      for (const t of talleres) {
+        const lista = porTaller.get(Number(t.id)) || [];
+        // Fallback: si no hay filas en junction pero hay ponente_id legacy, agregar
+        if (lista.length === 0 && t.ponente_id) {
+          try {
+            const p = await queryOne('SELECT id, nombre, foto, tipo, titulo FROM ponentes WHERE id = ?', [t.ponente_id]);
+            if (p) lista.push({ id: Number(p.id), nombre: p.nombre, foto: p.foto, tipo: p.tipo, titulo: p.titulo });
+          } catch (_) {}
+        }
+        t.ponentes = lista;
+        // mantener compat: ponente_id principal
+        t.ponente_id = lista[0] ? lista[0].id : (t.ponente_id ? Number(t.ponente_id) : null);
+        // Si disertante vacío pero hay ponentes, sintetizar
+        if ((!t.disertante || !String(t.disertante).trim()) && lista.length) {
+          t.disertante = lista.map(p => p.nombre).join(' — ');
+        }
+      }
+    } else {
+      for (const t of talleres) t.ponentes = [];
+    }
+  } catch (_) {
+    for (const t of talleres) t.ponentes = [];
+  }
+  return talleres;
+}
+
+async function obtenerTaller(id) {
+  const t = await queryOne('SELECT * FROM talleres WHERE id = ?', [id]);
+  if (!t) return null;
+  try {
+    const pon = await query(
+      `SELECT p.id, p.nombre, p.foto, p.tipo, p.titulo FROM taller_ponentes tp JOIN ponentes p ON p.id = tp.ponente_id WHERE tp.taller_id = ? ORDER BY tp.orden, p.nombre`,
+      [id]
+    );
+    t.ponentes = pon.map(r => ({ id: Number(r.id), nombre: r.nombre, foto: r.foto, tipo: r.tipo, titulo: r.titulo }));
+    if (!t.ponentes.length && t.ponente_id) {
+      const p = await queryOne('SELECT id, nombre, foto, tipo, titulo FROM ponentes WHERE id = ?', [t.ponente_id]);
+      if (p) t.ponentes = [{ id: Number(p.id), nombre: p.nombre, foto: p.foto, tipo: p.tipo, titulo: p.titulo }];
+    }
+  } catch (_) { t.ponentes = []; }
+  return t;
+}
+
+async function setTallerPonentes(tallerId, ponenteIds = [], run = null) {
+  const ids = [...new Set((ponenteIds || []).map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0))];
+  const exec = run ? run : async (sql, params) => query(sql, params);
+  // Para run transaction, run ya es wrapper que hace query
+  // Detectar si run es el wrapper transaction (retorna rows array con filasAfectadas) vs query
+  const q = run ? run : query;
+  // Limpiar
+  if (run) {
+    await q('DELETE FROM taller_ponentes WHERE taller_id = ?', [tallerId]);
+    for (let i = 0; i < ids.length; i++) {
+      await q('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, ?) ON CONFLICT (taller_id, ponente_id) DO UPDATE SET orden = EXCLUDED.orden', [tallerId, ids[i], i]);
+    }
+    if (ids.length) {
+      await q('UPDATE talleres SET ponente_id = ?, disertante = (SELECT STRING_AGG(p.nombre, \' — \' ORDER BY tp.orden) FROM taller_ponentes tp JOIN ponentes p ON p.id = tp.ponente_id WHERE tp.taller_id = ?) WHERE id = ?', [ids[0], tallerId, tallerId]);
+    } else {
+      await q('UPDATE talleres SET ponente_id = NULL WHERE id = ?', [tallerId]);
+    }
+  } else {
+    await query('DELETE FROM taller_ponentes WHERE taller_id = ?', [tallerId]);
+    for (let i = 0; i < ids.length; i++) {
+      await query('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, ?) ON CONFLICT (taller_id, ponente_id) DO UPDATE SET orden = EXCLUDED.orden', [tallerId, ids[i], i]);
+    }
+    if (ids.length) {
+      const fila = await queryOne('SELECT STRING_AGG(p.nombre, \' — \' ORDER BY tp.orden) as nombres FROM taller_ponentes tp JOIN ponentes p ON p.id = tp.ponente_id WHERE tp.taller_id = ?', [tallerId]);
+      await query('UPDATE talleres SET ponente_id = ?, disertante = ? WHERE id = ?', [ids[0], fila && fila.nombres ? fila.nombres : '', tallerId]);
+    } else {
+      await query('UPDATE talleres SET ponente_id = NULL WHERE id = ?', [tallerId]);
+    }
+  }
 }
 function bloquesHorario(t) {
   const fechaStr = String(t.fecha || '').trim();
@@ -383,11 +489,12 @@ function sufijoParte(n, total) {
   return ` (${n + 1}° parte)`;
 }
 
-async function crearTaller({ nombre, descripcion, cupo, lugar, disertante, parts = [] }) {
+async function crearTaller({ nombre, descripcion, cupo, lugar, disertante, parts = [], ponentes = [], ponenteIds = [] }) {
   const nombreBase = limpiarNombreParte(nombre);
   const n = Number(cupo);
   if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'El cupo debe ser un número entero mayor o igual a 0.');
   if (!parts.length) parts = [{ fecha: '', hora: '', duracion_hs: 3 }];
+  const ponIds = [...new Set([...(ponentes||[]), ...(ponenteIds||[])].map(v=> Number(v)).filter(v=> Number.isInteger(v) && v>0))];
 
   const ids = [];
   const fn = async (run) => {
@@ -398,12 +505,26 @@ async function crearTaller({ nombre, descripcion, cupo, lugar, disertante, parts
       const hora = String(p.hora || '').trim();
       const nombreParte = nombreBase + sufijoParte(i, parts.length);
       const parejaId = i > 0 ? ids[0] : null;
+      // Si hay ponentes múltiples, derivar disertante y ponente_id del primero
+      let disertanteEfectivo = disertante;
+      let ponenteIdEfectivo = ponIds[0] || null;
+      if (ponIds.length) {
+        try {
+          const nombresRows = await run(`SELECT p.nombre FROM ponentes p WHERE p.id IN (${ponIds.map(()=> '?').join(',')}) ORDER BY array_position(ARRAY[${ponIds.join(',')}]::int[], p.id)`, ponIds);
+          if (nombresRows && nombresRows.length) disertanteEfectivo = nombresRows.map(r=> r.nombre).join(' — ');
+        } catch(_) {}
+      }
 
       const filasRes = await run(
-        `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, parejaId]
+        `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id, ponente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertanteEfectivo, parejaId, ponenteIdEfectivo]
       );
-      ids.push(Number(filasRes[0].id));
+      const newId = Number(filasRes[0].id);
+      ids.push(newId);
+      // Insertar vínculos taller_ponentes para cada parte (main y pareja) con todos los ponentes
+      for (let oi = 0; oi < ponIds.length; oi++) {
+        await run('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, ?) ON CONFLICT (taller_id, ponente_id) DO UPDATE SET orden = EXCLUDED.orden', [newId, ponIds[oi], oi]);
+      }
     }
   };
 
@@ -419,7 +540,7 @@ async function crearTaller({ nombre, descripcion, cupo, lugar, disertante, parts
   return ids[0];
 }
 
-async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertante, parts = [] }) {
+async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertante, parts = [], ponentes = [], ponenteIds = [] }) {
   const n = Number(cupo);
   if (!Number.isInteger(n) || n < 0) throw new HttpError(400, 'El cupo debe ser un número entero mayor o igual a 0.');
   const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [id]);
@@ -427,11 +548,20 @@ async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertan
     throw new HttpError(409, `No se puede reducir el cupo: ya hay ${conteo[0].n} inscriptos.`);
   }
   if (!parts.length) parts = [{ id: null, fecha: '', hora: '', duracion_hs: 3 }];
+  const ponIds = [...new Set([...(ponentes||[]), ...(ponenteIds||[])].map(v=> Number(v)).filter(v=> Number.isInteger(v) && v>0))];
+  let disertanteEfectivo = disertante;
+  let ponenteIdEfectivo = ponIds[0] || null;
+  if (ponIds.length) {
+    try {
+      const filas = await query(`SELECT nombre FROM ponentes WHERE id IN (${ponIds.map(()=> '?').join(',')}) ORDER BY array_position(ARRAY[${ponIds.join(',')}]::int[], id)`, ponIds);
+      if (filas && filas.length) disertanteEfectivo = filas.map(r=> r.nombre).join(' — ');
+    } catch(_) {}
+  }
 
   const fn = async (run) => {
     const mainRes = await run(
-      'UPDATE talleres SET descripcion = ?, cupo = ?, lugar = ?, disertante = ? WHERE id = ?',
-      [descripcion, n, lugar, disertante, id]
+      'UPDATE talleres SET descripcion = ?, cupo = ?, lugar = ?, disertante = ?, ponente_id = ? WHERE id = ?',
+      [descripcion, n, lugar, disertanteEfectivo, ponenteIdEfectivo, id]
     );
     if (!mainRes.filasAfectadas) throw new HttpError(404, 'Taller no encontrado.');
 
@@ -450,6 +580,7 @@ async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertan
     const nombreBase = limpiarNombreParte(nombre);
     const totalParts = parts.length;
 
+    const idsFinales = [];
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       const duracionHs = Number(p.duracion_hs) || 3;
@@ -460,21 +591,34 @@ async function actualizarTaller(id, { nombre, descripcion, cupo, lugar, disertan
       if (p.id) {
         if (Number(p.id) === Number(id)) {
           await run(
-            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
-            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, p.id]
+            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, ponente_id = ? WHERE id = ?',
+            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertanteEfectivo, ponenteIdEfectivo, p.id]
           );
+          idsFinales.push(Number(p.id));
         } else {
           await run(
-            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ? WHERE id = ?',
-            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, p.id]
+            'UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, ponente_id = ? WHERE id = ?',
+            [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertanteEfectivo, ponenteIdEfectivo, p.id]
           );
+          idsFinales.push(Number(p.id));
         }
       } else {
         const parejaId = i === 0 ? null : id;
-        await run(
-          `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-          [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertante, parejaId]
+        const ins = await run(
+          `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, pareja_id, ponente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+          [nombreParte, descripcion, n, duracionHs, fecha, hora, lugar, disertanteEfectivo, parejaId, ponenteIdEfectivo]
         );
+        const newId = Number(ins[0].id);
+        idsFinales.push(newId);
+      }
+    }
+    if (!idsFinales.includes(Number(id))) idsFinales.unshift(Number(id));
+
+    // Sincronizar taller_ponentes para todos los ids finales
+    for (const tid of idsFinales) {
+      await run('DELETE FROM taller_ponentes WHERE taller_id = ?', [tid]);
+      for (let oi = 0; oi < ponIds.length; oi++) {
+        await run('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, ?) ON CONFLICT (taller_id, ponente_id) DO UPDATE SET orden = EXCLUDED.orden', [tid, ponIds[oi], oi]);
       }
     }
 
@@ -543,8 +687,18 @@ async function registrarEvento(tipo, detalle, usuario = 'admin') {
   await query('INSERT INTO eventos (tipo, detalle, usuario) VALUES (?, ?, ?)', [tipo, detalle, usuario]);
 }
 
-async function listarEventos() {
+async function listarEventos({ limit = null, offset = null } = {}) {
+  if (Number.isInteger(limit) && limit > 0) {
+    const lim = Math.min(100, limit);
+    const off = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    return query('SELECT id, tipo, detalle, usuario, creado_en FROM eventos ORDER BY id DESC LIMIT ? OFFSET ?', [lim, off]);
+  }
   return query('SELECT id, tipo, detalle, usuario, creado_en FROM eventos ORDER BY id DESC');
+}
+
+async function contarEventos() {
+  const filasRes = await query('SELECT COUNT(*) AS n FROM eventos');
+  return Number(filasRes[0].n);
 }
 
 async function hayUsuarios() {
@@ -561,22 +715,37 @@ async function crearUsuario({ username, passwordHash, nombre = '', rol = 'operad
 }
 
 async function buscarUsuario(username) {
-  return queryOne('SELECT id, username, password_hash, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion FROM usuarios WHERE username = ?', [username]);
+  try {
+    return await queryOne('SELECT id, username, password_hash, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion, perm_certificados FROM usuarios WHERE username = ?', [username]);
+  } catch (e) {
+    if (e.code === '42703') {
+      return queryOne('SELECT id, username, password_hash, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion FROM usuarios WHERE username = ?', [username]);
+    }
+    throw e;
+  }
 }
 
 async function listarUsuarios() {
-  const filasRes = await query('SELECT id, username, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion, creado_en FROM usuarios ORDER BY id');
-  return filasRes.map((u) => ({ ...u, id: Number(u.id), activo: Boolean(u.activo) }));
+  try {
+    const filasRes = await query('SELECT id, username, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion, perm_certificados, creado_en FROM usuarios ORDER BY id');
+    return filasRes.map((u) => ({ ...u, id: Number(u.id), activo: Boolean(u.activo) }));
+  } catch (e) {
+    if (e.code === '42703') {
+      const filasRes = await query('SELECT id, username, nombre, rol, activo, perm_inscripciones, perm_talleres, perm_encuentro, perm_acreditacion, creado_en FROM usuarios ORDER BY id');
+      return filasRes.map((u) => ({ ...u, id: Number(u.id), activo: Boolean(u.activo), perm_certificados: true }));
+    }
+    throw e;
+  }
 }
 
-async function actualizarUsuario(id, { nombre, rol, activo, passwordHash = null, permInscripciones = true, permTalleres = true, permEncuentro = true, permAcreditacion = true }) {
+async function actualizarUsuario(id, { nombre, rol, activo, passwordHash = null, permInscripciones = true, permTalleres = true, permEncuentro = true, permAcreditacion = true, permCertificados = true }) {
   if (passwordHash) {
-    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, password_hash = ?, perm_inscripciones = ?, perm_talleres = ?, perm_encuentro = ?, perm_acreditacion = ? WHERE id = ?', [
-      nombre, rol, activo, passwordHash, permInscripciones, permTalleres, permEncuentro, permAcreditacion, id,
+    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, password_hash = ?, perm_inscripciones = ?, perm_talleres = ?, perm_encuentro = ?, perm_acreditacion = ?, perm_certificados = ? WHERE id = ?', [
+      nombre, rol, activo, passwordHash, permInscripciones, permTalleres, permEncuentro, permAcreditacion, permCertificados, id,
     ]);
   } else {
-    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, perm_inscripciones = ?, perm_talleres = ?, perm_encuentro = ?, perm_acreditacion = ? WHERE id = ?', [
-      nombre, rol, activo, permInscripciones, permTalleres, permEncuentro, permAcreditacion, id,
+    await mutation('UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, perm_inscripciones = ?, perm_talleres = ?, perm_encuentro = ?, perm_acreditacion = ?, perm_certificados = ? WHERE id = ?', [
+      nombre, rol, activo, permInscripciones, permTalleres, permEncuentro, permAcreditacion, permCertificados, id,
     ]);
   }
 }
@@ -713,7 +882,31 @@ async function reemplazarTalleresInscripcion(dni, ids) {
 // ── Programa ──────────────────────────────────────────────────────────
 
 async function listarPrograma() {
-  return query('SELECT * FROM programa_bloques ORDER BY dia, orden, hora_inicio');
+  const bloques = await query('SELECT * FROM programa_bloques ORDER BY dia, orden, hora_inicio');
+  try {
+    const ids = bloques.map(b => Number(b.id));
+    if (ids.length) {
+      const filas = await query(
+        `SELECT bp.bloque_id, p.id, p.nombre, p.foto, p.tipo, p.titulo FROM bloque_ponentes bp JOIN ponentes p ON p.id = bp.ponente_id WHERE bp.bloque_id IN (${ids.map(()=> '?').join(',')}) ORDER BY bp.orden, p.nombre`,
+        ids
+      );
+      const porBloque = new Map();
+      for (const r of filas) {
+        const bid = Number(r.bloque_id);
+        if (!porBloque.has(bid)) porBloque.set(bid, []);
+        porBloque.get(bid).push({ id: Number(r.id), nombre: r.nombre, foto: r.foto, tipo: r.tipo, titulo: r.titulo });
+      }
+      for (const b of bloques) {
+        b.ponentes = porBloque.get(Number(b.id)) || [];
+        b.ponentes_ids = b.ponentes.map(p=> p.id);
+      }
+    } else {
+      for (const b of bloques) { b.ponentes = []; b.ponentes_ids = []; }
+    }
+  } catch (_) {
+    for (const b of bloques) { b.ponentes = []; b.ponentes_ids = []; }
+  }
+  return bloques;
 }
 
 async function listarDiasPrograma() {
@@ -721,23 +914,46 @@ async function listarDiasPrograma() {
 }
 
 async function obtenerBloque(id) {
-  return queryOne('SELECT * FROM programa_bloques WHERE id = ?', [id]);
+  const b = await queryOne('SELECT * FROM programa_bloques WHERE id = ?', [id]);
+  if (!b) return null;
+  try {
+    const pon = await query(`SELECT p.id, p.nombre, p.foto, p.tipo, p.titulo FROM bloque_ponentes bp JOIN ponentes p ON p.id = bp.ponente_id WHERE bp.bloque_id = ? ORDER BY bp.orden, p.nombre`, [id]);
+    b.ponentes = pon.map(r=> ({ id: Number(r.id), nombre: r.nombre, foto: r.foto, tipo: r.tipo, titulo: r.titulo }));
+    b.ponentes_ids = b.ponentes.map(p=> p.id);
+  } catch (_) { b.ponentes = []; b.ponentes_ids = []; }
+  return b;
 }
 
-async function crearBloque({ dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null }) {
+async function setBloquePonentes(bloqueId, ponenteIds = []) {
+  const ids = [...new Set((ponenteIds||[]).map(n=> Number(n)).filter(n=> Number.isInteger(n) && n>0))];
+  await query('DELETE FROM bloque_ponentes WHERE bloque_id = ?', [bloqueId]);
+  for (let i=0;i<ids.length;i++) {
+    await query('INSERT INTO bloque_ponentes (bloque_id, ponente_id, orden) VALUES (?, ?, ?) ON CONFLICT (bloque_id, ponente_id) DO UPDATE SET orden = EXCLUDED.orden', [bloqueId, ids[i], i]);
+  }
+}
+
+async function crearBloque({ dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null, ponentes = [], ponenteIds = [] }) {
   const filasRes = await query(
     'INSERT INTO programa_bloques (dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
     [dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos]
   );
-  return Number(filasRes[0].id);
+  const id = Number(filasRes[0].id);
+  const ponIds = [...new Set([...(ponentes||[]), ...(ponenteIds||[])].map(v=> Number(v)).filter(v=> Number.isInteger(v) && v>0))];
+  if (ponIds.length) await setBloquePonentes(id, ponIds);
+  return id;
 }
 
-async function actualizarBloque(id, { dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null }) {
+async function actualizarBloque(id, { dia, hora_inicio, hora_fin, tipo, titulo, descripcion = '', icono = '', orden = 0, datos = null, ponentes = [], ponenteIds = [] }) {
   const res = await mutation(
     'UPDATE programa_bloques SET dia = ?, hora_inicio = ?, hora_fin = ?, tipo = ?, titulo = ?, descripcion = ?, icono = ?, orden = ?, datos = ? WHERE id = ?',
     [dia, hora_inicio, hora_fin, tipo, titulo, descripcion, icono, orden, datos, id]
   );
   if (!res.filasAfectadas) throw new HttpError(404, 'Bloque no encontrado.');
+  const ponIds = [...new Set([...(ponentes||[]), ...(ponenteIds||[])].map(v=> Number(v)).filter(v=> Number.isInteger(v) && v>0))];
+  // Si se proveyó ponentes (aunque sea array vacío) actualizar vínculos; si no se proveyó, no tocar
+  if (ponentes !== undefined || ponenteIds !== undefined) {
+    await setBloquePonentes(id, ponIds);
+  }
   return true;
 }
 
@@ -745,6 +961,10 @@ async function eliminarBloque(id) {
   const res = await mutation('DELETE FROM programa_bloques WHERE id = ?', [id]);
   if (!res.filasAfectadas) throw new HttpError(404, 'Bloque no encontrado.');
   return true;
+}
+
+async function listarBloquePonentes(bloqueId) {
+  return query(`SELECT p.id, p.nombre, p.foto, p.tipo FROM bloque_ponentes bp JOIN ponentes p ON p.id=bp.ponente_id WHERE bp.bloque_id = ? ORDER BY bp.orden`, [bloqueId]);
 }
 
 // ── Ponentes (catálogo) ───────────────────────────────────────────────
@@ -829,6 +1049,12 @@ async function sincronizarTalleresDesdePonentes() {
 
   for (let i = 0; i < talleresPonente.length; i++) {
     const p = talleresPonente[i];
+    // Si este ponente ya es co-ponente de otro taller (segundo ponente), no crear taller propio
+    const yaEsCoPonente = await queryOne('SELECT tp.taller_id FROM taller_ponentes tp JOIN talleres t ON t.id = tp.taller_id WHERE tp.ponente_id = ? AND t.ponente_id != ?', [p.id, p.id]);
+    if (yaEsCoPonente) {
+      // Ya está vinculado como segundo ponente a otro taller, omitir creación/actualización propia
+      continue;
+    }
     const fecha = convertirFechaDia(p.fecha_dia);
     if (!fecha) continue;
     const nombre = (String(p.titulo || '').trim() || String(p.nombre || '')).slice(0, 120);
@@ -847,17 +1073,31 @@ async function sincronizarTalleresDesdePonentes() {
     let main = await queryOne('SELECT id FROM talleres WHERE ponente_id = ? AND pareja_id IS NULL', [p.id]);
     let mainId;
     if (main) {
+      // Si el taller ya tiene múltiples ponentes, preservar disertante combinado y ponente_id principal
+      const cntRow = await queryOne('SELECT COUNT(*) as n FROM taller_ponentes WHERE taller_id = ?', [main.id]);
+      let disertanteFinal = datos.disertante;
+      let ponenteIdFinal = datos.ponente_id;
+      if (cntRow && Number(cntRow.n) > 1) {
+        const agg = await queryOne('SELECT STRING_AGG(p.nombre, \' — \' ORDER BY tp.orden) as nombres FROM taller_ponentes tp JOIN ponentes p ON p.id=tp.ponente_id WHERE tp.taller_id = ?', [main.id]);
+        if (agg && agg.nombres) disertanteFinal = agg.nombres;
+        const first = await queryOne('SELECT ponente_id FROM taller_ponentes WHERE taller_id = ? ORDER BY orden LIMIT 1', [main.id]);
+        if (first) ponenteIdFinal = Number(first.ponente_id);
+        // No sobrescribir nombre si ya es combinado? mantener el de la actividad (puede ser igual)
+      }
       await mutation(
         `UPDATE talleres SET nombre = ?, descripcion = ?, cupo = ?, duracion_hs = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, ponente_id = ? WHERE id = ?`,
-        [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, datos.disertante, datos.ponente_id, main.id]
+        [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, disertanteFinal, ponenteIdFinal, main.id]
       );
       mainId = main.id;
+      // asegurar vínculo en taller_ponentes
+      await query('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, 0) ON CONFLICT (taller_id, ponente_id) DO NOTHING', [mainId, p.id]).catch(()=>{});
     } else {
       const ins = await query(
         `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, ponente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         [datos.nombre, datos.descripcion, datos.cupo, datos.duracion_hs, fecha, hora, datos.lugar, datos.disertante, datos.ponente_id]
       );
       mainId = Number(ins[0].id);
+      await query('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, 0) ON CONFLICT (taller_id, ponente_id) DO NOTHING', [mainId, p.id]).catch(()=>{});
     }
 
     const fecha2 = convertirFechaDia(p.fecha_dia2);
@@ -865,17 +1105,21 @@ async function sincronizarTalleresDesdePonentes() {
     if (fecha2 && hora2) {
       const parte = await queryOne('SELECT id, nombre FROM talleres WHERE pareja_id = ?', [mainId]);
       const nombreParte = `${datos.nombre} (2° parte)`.slice(0, 120);
+      let parteId;
       if (parte) {
         await mutation(
           `UPDATE talleres SET nombre = ?, fecha = ?, hora = ?, lugar = ?, disertante = ?, cupo = ?, ponente_id = ? WHERE id = ?`,
           [nombreParte, fecha2, hora2, '', datos.disertante, datos.cupo, datos.ponente_id, parte.id]
         );
+        parteId = parte.id;
       } else {
-        await query(
+        const ins2 = await query(
           `INSERT INTO talleres (nombre, descripcion, cupo, duracion_hs, fecha, hora, lugar, disertante, ponente_id, pareja_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           [nombreParte, datos.descripcion, datos.cupo, 3, fecha2, hora2, '', datos.disertante, datos.ponente_id, mainId]
         );
+        parteId = Number(ins2[0].id);
       }
+      await query('INSERT INTO taller_ponentes (taller_id, ponente_id, orden) VALUES (?, ?, 0) ON CONFLICT (taller_id, ponente_id) DO NOTHING', [parteId, p.id]).catch(()=>{});
     }
   }
 
@@ -1573,6 +1817,53 @@ async function eliminarNotificacion(id) {
   return true;
 }
 
+// ── Certificados ────────────────────────────────────────────────────────
+async function listarCertificados() {
+  try {
+    return await query('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados ORDER BY creado_en DESC, id DESC');
+  } catch (e) {
+    if (e.code === '42P01') return [];
+    throw e;
+  }
+}
+async function buscarCertificadoPorCodigo(codigo) {
+  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados WHERE codigo = ?', [codigo]);
+}
+async function buscarCertificadoPorId(id) {
+  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados WHERE id = ?', [id]);
+}
+async function crearCertificado({ codigo, tipo, dni = null, ponenteId = null, nombre, apellido, email = '', detalle = {}, talleresIds = '', qrData = '', hashFirma = '', emitidoPor = '' }) {
+  const filas = await query(
+    'INSERT INTO certificados (codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    [codigo, tipo, dni, ponenteId, nombre, apellido, email, JSON.stringify(detalle), talleresIds, qrData, hashFirma, emitidoPor]
+  );
+  return Number(filas[0].id);
+}
+async function eliminarCertificado(id) {
+  const res = await mutation('DELETE FROM certificados WHERE id = ?', [id]);
+  if (!res.filasAfectadas) throw new HttpError(404, 'Certificado no encontrado.');
+  return true;
+}
+async function verificarElegibilidadAsistente(dni) {
+  const inscripciones = await query(
+    `SELECT i.taller_id, t.nombre, t.fecha, t.hora FROM inscripciones i JOIN talleres t ON t.id=i.taller_id WHERE i.dni=? ORDER BY t.fecha, t.hora`,
+    [dni]
+  );
+  if (inscripciones.length === 0) return { elegible: false, motivo: 'Sin inscripciones a talleres', inscripciones: [], asistencias: [] };
+  const asistencias = [];
+  let todasOk = true;
+  for (const ins of inscripciones) {
+    let rows = [];
+    try { rows = await query('SELECT tipo FROM taller_asistencias WHERE dni=? AND taller_id=?', [dni, ins.taller_id]); } catch (e) { if (e.code !== '42P01') throw e; }
+    const tieneIngreso = rows.some(r=> r.tipo==='ingreso');
+    const tieneEgreso = rows.some(r=> r.tipo==='egreso');
+    const ok = tieneIngreso && tieneEgreso;
+    if (!ok) todasOk = false;
+    asistencias.push({ taller_id: Number(ins.taller_id), taller: ins.nombre, fecha: ins.fecha||'', hora: ins.hora||'', tieneIngreso, tieneEgreso, completo: ok });
+  }
+  return { elegible: todasOk && asistencias.length>0, inscripciones, asistencias };
+}
+
 module.exports = {
   HttpError,
   query,
@@ -1581,6 +1872,8 @@ module.exports = {
   mutation,
   initPool,
   listarTalleres,
+  obtenerTaller,
+  setTallerPonentes,
   crearTaller,
   actualizarTaller,
   eliminarTaller,
@@ -1593,6 +1886,7 @@ module.exports = {
   eliminarInscripcionesPorDni,
   registrarEvento,
   listarEventos,
+  contarEventos,
   cambiarTallerInscripcion,
   reemplazarTalleresInscripcion,
   hayUsuarios,
@@ -1618,6 +1912,8 @@ module.exports = {
   crearBloque,
   actualizarBloque,
   eliminarBloque,
+  setBloquePonentes,
+  listarBloquePonentes,
   listarPonentes,
   listarPonentesConFecha,
   obtenerPonente,
@@ -1666,4 +1962,10 @@ module.exports = {
   crearNotificacion,
   actualizarNotificacion,
   eliminarNotificacion,
+  listarCertificados,
+  buscarCertificadoPorCodigo,
+  buscarCertificadoPorId,
+  crearCertificado,
+  eliminarCertificado,
+  verificarElegibilidadAsistente,
 };

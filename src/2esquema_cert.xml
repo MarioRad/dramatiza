@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Esquema certificado Dramatiza - QR verificable por el momento en http://192.168.100.20/verificar.html?c=CODIGO -->
+<!-- BASE_URL local: http://192.168.100.20 - prod luego https://dramatiza.vercel.app - ver src/certificados.js:construirQrPayload -->
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    width="1024"
+    height="731"
+    viewBox="0 0 1024 731">
+
+    <!-- ================================================= -->
+    <!-- TEXTO PRINCIPAL                                   -->
+    <!-- ================================================= -->
+
+    <g id="textos">
+
+        <!-- Título bajado 0,5cm (≈14pt): y 62→76 -->
+        <text id="titulo"
+              x="512" y="76"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="28"
+              font-weight="bold"
+              fill="#111111">
+            26° Encuentro Nacional de Profesores de Teatro Dramatiza Salta 2026
+        </text>
+
+        <text id="subtitulo"
+              x="512" y="95"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="20"
+              fill="#111111">
+            El Nodo Salta, perteneciente a la Red de Profesores de Teatro hace constar que
+        </text>
+
+        <text id="dni"
+              x="512" y="185"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="22"
+              font-weight="bold"
+              fill="#111111">
+            D.N.I:
+        </text>
+
+        <text id="participacion"
+              x="512" y="235"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="24"
+              font-weight="bold"
+              fill="#111111">
+            PARTICIPÓ en calidad de x
+        </text>
+
+        <text id="evento"
+              x="512" y="270"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="23"
+              font-weight="bold"
+              fill="#111111">
+            presentando el proyecto x  
+        </text>
+
+     
+        <text id="realizado"
+              x="512" y="358"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="20"
+              fill="#111111">
+            Realizado en la ciudad de Salta, los días 9,10 y 11 de
+        </text>
+
+        <text id="duracion"
+              x="512" y="391"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="20"
+              fill="#111111">
+            octubre, con X horas reloj de duración.
+        </text>
+
+    </g>
+
+
+    <!-- ================================================= -->
+    <!-- LOGO RED DE PROFESORES                            -->
+    <!-- ================================================= -->
+
+    <!-- Logo centrado y bajado 4cm (≈113pt): y 310→423, centrado horizontal 512-110, mantiene proporciones -->
+    <image id="logoRed"
+           x="402"
+           y="423"
+           width="220"
+           height="110"
+           preserveAspectRatio="xMidYMid meet"
+           href="/public/logo_borde_black.png" />
+
+
+    <!-- ================================================= -->
+    <!-- CODIGO QR                                         -->
+    <!-- ================================================= -->
+
+    <image id="codigoQR"
+           x="668"
+           y="432"
+           width="86"
+           height="86"
+           preserveAspectRatio="xMidYMid meet"
+           href="assets/qr.png" />
+
+
+    <!-- ================================================= -->
+    <!-- RECUADRO DE AVALES                                -->
+    <!-- ================================================= -->
+
+    <g id="avales">
+
+        <rect id="avalesBox"
+              x="63"
+              y="432"
+              width="273"
+              height="72"
+              rx="10"
+              ry="10"
+              fill="white"
+              fill-opacity="0.95"
+              stroke="#111111"
+              stroke-width="2"/>
+
+        <text id="avalesTexto"
+              x="199"
+              y="449"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="11"
+              fill="#111111">
+
+            <tspan x="199" dy="0">
+                
+            </tspan>
+
+            <tspan x="199" dy="13">
+                
+            </tspan>
+
+            <tspan x="199" dy="13">
+                
+            </tspan>
+
+            <tspan x="199" dy="13">
+                
+            </tspan>
+
+        </text>
+
+    </g>
+
+
+    <!-- ================================================= -->
+    <!-- PIE IZQUIERDO                                     -->
+    <!-- ================================================= -->
+
+    <g id="pieIzquierdo">
+
+        <text id="referenteNacional"
+              x="220"
+              y="630"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="12"
+              fill="#111111">
+
+            <tspan x="220" dy="0">
+                Referente Nacional Nodo Salta
+            </tspan>
+
+            <tspan x="220" dy="15">
+                Red Dramatiza Salta
+            </tspan>
+
+        </text>
+
+    </g>
+
+
+    <!-- ================================================= -->
+    <!-- PIE DERECHO                                       -->
+    <!-- ================================================= -->
+
+    <g id="pieDerecho">
+
+        <text id="referenteProvincial"
+              x="800"
+              y="630"
+              text-anchor="middle"
+              font-family="Arial, sans-serif"
+              font-size="12"
+              fill="#111111">
+
+            <tspan x="800" dy="0">
+                Referente Provincial Nodo Salta
+            </tspan>
+
+            <tspan x="800" dy="15">
+                Red Dramatiza Salta
+            </tspan>
+
+        </text>
+
+    </g>
+
+</svg>

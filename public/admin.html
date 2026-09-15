@@ -35,6 +35,7 @@
         <button type="button" class="tab sidebar-link" data-vista="asignaciones"><span class="sidebar-icon">🔗</span><span>Asignaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="acreditaciones" hidden><span class="sidebar-icon">✅</span><span>Acreditaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="comidas" hidden><span class="sidebar-icon">🍽️</span><span>Gestión de Menús</span></button>
+        <button type="button" class="tab sidebar-link" data-vista="certificados"><span class="sidebar-icon">🎓</span><span>Certificados</span></button>
         <div class="sidebar-section-title">Sistema</div>
         <button type="button" class="tab sidebar-link tab-admin" data-vista="eventos" hidden><span class="sidebar-icon">📋</span><span>Eventos</span></button>
         <button type="button" class="tab sidebar-link tab-admin" data-vista="usuarios" hidden><span class="sidebar-icon">👥</span><span>Usuarios</span></button>
@@ -186,19 +187,21 @@
                 </div>
               </div>
               <div class="tabla-envoltura">
-                <table id="tablaInscripciones">
+                <table id="tablaInscripciones" class="tabla-inscripciones-dosfilas">
                   <thead>
-                    <tr>
+                    <tr class="header-fila1">
                       <th>DNI</th>
                       <th>Nombre y apellido</th>
                       <th>Correo</th>
-                      <th>Teléfono</th>
+                      <th colspan="3">Teléfono</th>
+                    </tr>
+                    <tr class="header-fila2">
                       <th>Alimentación</th>
                       <th>Taller</th>
                       <th>Encuentro</th>
                       <th>Pago</th>
                       <th>Fecha</th>
-                      <th></th>
+                      <th>Acciones</th>
                     </tr>
                   </thead>
                   <tbody></tbody>
@@ -603,6 +606,97 @@
             </div>
           </div>
 
+          <div id="vistaCertificados" class="tab-contenido" hidden>
+            <h3>Certificados 🎓</h3>
+            <p class="ayuda">Generá certificados con el fondo <code>public/Certificado.png</code>, código QR de verificación y dos firmas (gráfica y electrónica). Para <strong>asistentes</strong> se exige control de ingreso+egreso por taller; para <strong>ponentes/talleristas</strong> por selección.</p>
+            <div id="mensajeCertificados" class="mensaje" role="alert"></div>
+
+            <div class="certificados-config" style="border:1px solid var(--color-borde);border-radius:10px;padding:1rem;margin-bottom:1rem;background:var(--color-fondo-card);">
+              <h4 style="margin:0 0 0.6rem 0;">Firmas del certificado</h4>
+              <p class="ayuda" style="margin-bottom:0.8rem;">Configurá los nombres/cargos que aparecen bajo las dos firmas y opcionalmente subí imágenes de firma manuscrita (PNG/JPG, fondo transparente recomendado).</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="campo"><label for="certFirma1Nombre">Firma 1 – Nombre</label><input type="text" id="certFirma1Nombre" placeholder="Ej: Dra. Ana Pérez"></div>
+                <div class="campo"><label for="certFirma1Cargo">Firma 1 – Cargo</label><input type="text" id="certFirma1Cargo" placeholder="Ej: Referente Nacional Nodo Salta"></div>
+                <div class="campo"><label for="certFirma1Imagen">Firma 1 – Imagen (opcional)</label><input type="file" id="certFirma1Imagen" accept="image/*"></div>
+                <div class="campo"><label for="certFirma2Nombre">Firma 2 – Nombre</label><input type="text" id="certFirma2Nombre" placeholder="Ej: Lic. Juan Gómez"></div>
+                <div class="campo"><label for="certFirma2Cargo">Firma 2 – Cargo</label><input type="text" id="certFirma2Cargo" placeholder="Ej: Referente Provincial Nodo Salta"></div>
+                <div class="campo"><label for="certFirma2Imagen">Firma 2 – Imagen (opcional)</label><input type="file" id="certFirma2Imagen" accept="image/*"></div>
+              </div>
+              <h4 style="margin:1rem 0 0.6rem 0;">Avales / Resoluciones</h4>
+              <p class="ayuda" style="margin-bottom:0.8rem;">Texto del recuadro inferior izquierdo del certificado (4 líneas). Ej: Avales institucionales y números de resolución.</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="campo"><label for="certAval1">Aval línea 1</label><input type="text" id="certAval1" placeholder="Ej: Avales: Ministerio de Educación"></div>
+                <div class="campo"><label for="certAval2">Aval línea 2</label><input type="text" id="certAval2" placeholder="Ej: Resolución Nº 1643/25"></div>
+                <div class="campo"><label for="certAval3">Aval línea 3</label><input type="text" id="certAval3" placeholder="Ej: Universidad Nacional del Nordeste"></div>
+                <div class="campo"><label for="certAval4">Aval línea 4</label><input type="text" id="certAval4" placeholder="Ej: Resolución: PRES-2025-2-CD-ART#UNNE"></div>
+              </div>
+              <div style="margin-top:1rem;display:flex;gap:8px;align-items:center;">
+                <button id="botonGuardarCertConfig" class="boton boton-secundario boton-chico" type="button">Guardar firmas</button>
+                <span class="ayuda" id="certConfigEstado"></span>
+                <span style="flex:1"></span>
+                <span class="ayuda">Fondo: <code>Certificado.png</code> (1491×1055) · QR verifica en <code>/verificar.html?c=CODIGO</code></span>
+              </div>
+            </div>
+
+            <div class="sub-tabs" id="subTabsCertificados">
+              <button type="button" class="sub-tab activo" data-sub="asistentes">Asistentes (con control asistencia)</button>
+              <button type="button" class="sub-tab" data-sub="ponentes">Ponentes / Talleristas</button>
+              <button type="button" class="sub-tab" data-sub="emitidos">Emitidos</button>
+            </div>
+
+            <div id="subCertAsistentes">
+              <div class="cabecera-panel" style="margin-top:0.8rem;">
+                <p class="ayuda" id="resumenCertAsistentes">Cargando asistentes…</p>
+                <button id="botonActualizarCertAsistentes" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+              </div>
+              <div class="filtros-barra">
+                <div class="campo"><label for="buscarCertAsistente">Buscar DNI / nombre</label><input type="text" id="buscarCertAsistente" placeholder="30123456 o apellido…"></div>
+                <div class="campo"><label for="filtroCertElegible">Filtro</label><select id="filtroCertElegible"><option value="">Todos</option><option value="elegible">Solo elegibles (ingreso+egreso)</option><option value="no_elegible">No elegibles</option></select></div>
+              </div>
+              <div class="tabla-envoltura">
+                <table id="tablaCertAsistentes">
+                  <thead><tr><th>DNI</th><th>Nombre</th><th>Talleres</th><th>Asistencia (ingreso/egreso por taller)</th><th>Estado</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="subCertPonentes" hidden>
+              <div class="cabecera-panel" style="margin-top:0.8rem;">
+                <p class="ayuda" id="resumenCertPonentes">Cargando ponentes…</p>
+                <button id="botonActualizarCertPonentes" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+              </div>
+              <div class="filtros-barra">
+                <div class="campo"><label for="buscarCertPonente">Buscar ponente</label><input type="text" id="buscarCertPonente" placeholder="Nombre o título…"></div>
+                <div class="campo"><label for="filtroCertPonenteTipo">Filtrar por tipo</label><select id="filtroCertPonenteTipo"><option value="">Todos</option><option value="ponencia">Ponencia</option><option value="taller">Taller</option><option value="conversatorio">Conversatorio</option></select></div>
+              </div>
+              <div class="tabla-envoltura">
+                <table id="tablaCertPonentes">
+                  <thead><tr><th>Nombre</th><th>Tipo</th><th>Título</th><th>Día / Horario</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div style="margin-top:1.5rem;border-top:1px solid var(--color-borde);padding-top:1rem;">
+                <h4>Talleristas (asistentes con flag 50%)</h4>
+                <p class="ayuda">Asistentes marcados como tallerista (pagan 50%) también pueden recibir certificado de tallerista por DNI.</p>
+                <div class="campo" style="max-width:320px;"><label for="certTalleristaDni">DNI tallerista</label><input type="text" id="certTalleristaDni" inputmode="numeric" maxlength="8" placeholder="DNI 7/8 dígitos"><button id="botonCertTalleristaDni" class="boton boton-chico" type="button" style="margin-top:8px;">Generar certificado tallerista por DNI</button></div>
+              </div>
+            </div>
+
+            <div id="subCertEmitidos" hidden>
+              <div class="cabecera-panel" style="margin-top:0.8rem;">
+                <p class="ayuda" id="resumenCertEmitidos">—</p>
+                <button id="botonActualizarCertEmitidos" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+              </div>
+              <div class="tabla-envoltura">
+                <table id="tablaCertEmitidos">
+                  <thead><tr><th>Código</th><th>Tipo</th><th>Nombre</th><th>DNI / Ponente</th><th>Detalle</th><th>QR</th><th>Firma electrónica</th><th>Emitido</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
           <div id="vistaEventos" class="tab-contenido" hidden>
             <h3>Registro de eventos</h3>
             <p class="ayuda">Auditoría: acciones registradas por los usuarios del sistema.</p>
@@ -620,6 +714,7 @@
                 <tbody></tbody>
               </table>
             </div>
+            <div id="paginacionEventos" class="paginacion" hidden></div>
           </div>
 
           <div id="vistaUsuarios" class="tab-contenido" hidden>
@@ -684,6 +779,7 @@
                       <th style="text-align:center;">Talleres</th>
                       <th style="text-align:center;">Encuentro</th>
                       <th style="text-align:center;">Acreditación</th>
+                      <th style="text-align:center;">Certificados</th>
                     </tr>
                   </thead>
                   <tbody></tbody>
@@ -746,6 +842,11 @@
           <div class="campo">
             <label for="bloqueOrden">Orden</label>
             <input type="number" id="bloqueOrden" min="0" step="1" value="0">
+          </div>
+          <div class="campo" id="campoBloquePonentes" style="grid-column:1/-1;">
+            <label for="bloquePonentes">Ponentes (múltiple — para ponencias, conversatorios y talleres)</label>
+            <select id="bloquePonentes" multiple size="6" style="min-height:120px;"></select>
+            <p class="ayuda-campo">Mantené Ctrl/Cmd para seleccionar varios. Los ponentes deben existir previamente en la pestaña “Ponentes”.</p>
           </div>
         </div>
         <div class="modal-acciones">
@@ -916,6 +1017,7 @@
             <label><input type="checkbox" id="permUsuarioTalleres" checked> Talleres</label>
             <label><input type="checkbox" id="permUsuarioEncuentro" checked> Encuentro</label>
             <label><input type="checkbox" id="permUsuarioAcreditacion" checked> Acreditación</label>
+            <label><input type="checkbox" id="permUsuarioCertificados" checked> Certificados</label>
           </div>
         </div>
       </div>
@@ -1005,6 +1107,13 @@
             <label for="ponenteHorario2">Horario 2</label>
             <input type="text" id="ponenteHorario2" placeholder="Ej: 09:00 hs">
           </div>
+          <div class="campo" style="grid-column:1/-1;" id="campoSegundoPonente">
+            <label for="ponenteSegundoNombre">Segundo ponente (opcional)</label>
+            <input type="text" id="ponenteSegundoNombre" list="datalistPonentes" placeholder="Escribí el nombre o elegí existente — Ej: Juan Pérez" autocomplete="off">
+            <datalist id="datalistPonentes"></datalist>
+            <input type="hidden" id="ponenteSegundo">
+            <p class="ayuda-campo">Escribí el nombre del segundo ponente o elegilo de la lista. Si no existe, se creará automáticamente y luego podrás generar su certificado en la pestaña Certificados.</p>
+          </div>
           <div class="campo" style="grid-column:1/-1;">
             <label for="ponenteTitulo">Título de la actividad</label>
             <input type="text" id="ponenteTitulo" placeholder="Ej: Teatro y Trastornos del Espectro Autista">
@@ -1040,7 +1149,7 @@
   </div>
 
   <script src="/js/darkmode.js"></script>
-  <script src="/js/programa.js?v=3"></script>
-  <script src="/js/admin.js?v=29"></script>
+  <script src="/js/programa.js?v=4"></script>
+  <script src="/js/admin.js?v=31"></script>
 </body>
 </html>

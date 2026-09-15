@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const db = require('./db');
 const notificaciones = require('./notificaciones');
 const acreditacion = require('./acreditacion');
+const certificados = require('./certificados');
 const whatsapp = require('./whatsapp');
 let supabaseAdmin = null;
 try {
@@ -449,7 +450,7 @@ app.get('/api/talleres', async (req, res, next) => {
   try {
     const talleres = await db.listarTalleres();
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null })));
+    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null, ponentes: t.ponentes || [], ponentes_ids: (t.ponentes||[]).map(p=>p.id) })));
   } catch (e) {
     next(e);
   }
@@ -762,6 +763,7 @@ app.post('/api/admin/login', async (req, res, next) => {
       nombre: usuario.nombre,
       rol: usuario.rol,
       perm_acreditacion: Boolean(usuario.perm_acreditacion),
+      perm_certificados: Boolean(usuario.perm_certificados ?? true),
     });
   } catch (e) {
     next(e);
@@ -781,6 +783,7 @@ app.get('/api/admin/perfil', requireAuth, async (req, res) => {
     nombre: req.sesion.nombre,
     rol: req.sesion.rol,
     perm_acreditacion: esAdmin || Boolean(usuario && usuario.perm_acreditacion),
+    perm_certificados: esAdmin || Boolean(usuario && (usuario.perm_certificados ?? true)),
   });
 });
 
@@ -858,6 +861,7 @@ app.put('/api/admin/usuarios/:id', requireAdmin, async (req, res, next) => {
       permTalleres: body.perm_talleres !== false && body.perm_talleres !== 0,
       permEncuentro: body.perm_encuentro !== false && body.perm_encuentro !== 0,
       permAcreditacion: body.perm_acreditacion !== false && body.perm_acreditacion !== 0,
+      permCertificados: body.perm_certificados !== false && body.perm_certificados !== 0,
     });
     await db.registrarEvento('usuario_modificado', `Usuario actualizado: ${objetivo.username} (rol ${rol})`, req.sesion.usuario);
     res.json({ ok: true });
@@ -958,10 +962,51 @@ app.get('/api/admin/talleres', requireAuth, requirePermiso('perm_talleres'), asy
   try {
     const talleres = await db.listarTalleres();
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null })));
+    res.json(talleres.map((t) => ({ ...t, inscriptos: Number(t.inscriptos), cupo: Number(t.cupo), duracion_hs: Number(t.duracion_hs), pareja_id: t.pareja_id ? Number(t.pareja_id) : null, ponentes: t.ponentes || [], ponentes_ids: (t.ponentes||[]).map(p=>p.id) })));
   } catch (e) {
     next(e);
   }
+});
+
+// ── Taller ↔ Ponentes (múltiples ponentes por taller) ────────────────────
+app.get('/api/admin/talleres/:id/ponentes', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
+    const t = await db.obtenerTaller(id);
+    if (!t) throw new db.HttpError(404, 'Taller no encontrado.');
+    res.json({ taller_id: Number(id), ponentes: t.ponentes || [], ponentes_ids: (t.ponentes||[]).map(p=>p.id) });
+  } catch (e) { next(e); }
+});
+
+app.put('/api/admin/talleres/:id/ponentes', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
+    const t = await db.obtenerTaller(id);
+    if (!t) throw new db.HttpError(404, 'Taller no encontrado.');
+    const body = req.body || {};
+    let ponenteIds = [];
+    if (Array.isArray(body.ponenteIds)) ponenteIds = body.ponenteIds;
+    else if (Array.isArray(body.ponentes)) ponenteIds = body.ponentes;
+    else if (Array.isArray(body.ponentes_ids)) ponenteIds = body.ponentes_ids;
+    else if (body.ponente_ids) ponenteIds = String(body.ponente_ids).split(',').map(s=> s.trim()).filter(Boolean);
+    ponenteIds = ponenteIds.map(n=> Number(n)).filter(n=> Number.isInteger(n) && n>0);
+    // validar que todos existen
+    for (const pid of ponenteIds) {
+      const p = await db.obtenerPonente(pid);
+      if (!p) throw new db.HttpError(400, `Ponente ${pid} no existe.`);
+    }
+    await db.setTallerPonentes(Number(id), ponenteIds);
+    // también actualizar pareja si existe
+    const pareja = await db.query('SELECT id FROM talleres WHERE pareja_id = ?', [id]);
+    for (const r of pareja) {
+      await db.setTallerPonentes(Number(r.id), ponenteIds);
+    }
+    await db.registrarEvento('taller_ponentes_actualizado', `Taller #${id} ponentes: ${ponenteIds.join(',')||'ninguno'}`, req.sesion.usuario);
+    const actualizado = await db.obtenerTaller(id);
+    res.json({ ok: true, ponentes: actualizado.ponentes || [] });
+  } catch (e) { next(e); }
 });
 
 app.get('/api/admin/inscripciones', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
@@ -1145,6 +1190,27 @@ app.delete('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscr
 
 app.get('/api/admin/eventos', requireAdmin, async (req, res, next) => {
   try {
+    const pageRaw = req.query.page;
+    const limitRaw = req.query.limit;
+    const hasPagination = pageRaw !== undefined || limitRaw !== undefined;
+    if (hasPagination) {
+      const limit = Math.min(100, Math.max(1, Number(limitRaw) || 5));
+      const page = Math.max(1, Number(pageRaw) || 1);
+      const offset = (page - 1) * limit;
+      const [eventos, total] = await Promise.all([
+        db.listarEventos({ limit, offset }),
+        db.contarEventos(),
+      ]);
+      const totalPaginas = Math.max(1, Math.ceil(total / limit));
+      res.json({
+        eventos: eventos.map((ev) => ({ ...ev, id: Number(ev.id) })),
+        total,
+        page,
+        limit,
+        totalPaginas,
+      });
+      return;
+    }
     const eventos = await db.listarEventos();
     res.json(eventos.map((ev) => ({ ...ev, id: Number(ev.id) })));
   } catch (e) {
@@ -1870,7 +1936,9 @@ app.post('/api/admin/ponentes', requireAuth, uploadPonente.single('foto'), async
       fotoPos: String(body.foto_pos || '').trim(),
       cupo,
     });
-    await db.sincronizarTalleresDesdePonentes();
+    const skipSync = String(body.skipSync || body.esSegundo || body.segundo || '').trim().toLowerCase();
+    const debeSincronizar = !(skipSync === '1' || skipSync === 'true' || skipSync === 'si');
+    if (debeSincronizar) await db.sincronizarTalleresDesdePonentes();
     await db.registrarEvento('ponente_creado', `Ponente creado: "${nombre}"`, req.sesion.usuario);
     res.status(201).json({ ok: true, id });
   } catch (e) {
@@ -1911,7 +1979,9 @@ app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), as
       cupo: Math.max(0, Number.parseInt(body.cupo, 10) || existente.cupo || 20),
       orden: existente.orden ?? 0,
     });
-    await db.sincronizarTalleresDesdePonentes();
+    const skipSyncPut = String(body.skipSync || body.esSegundo || body.segundo || '').trim().toLowerCase();
+    const debeSincronizarPut = !(skipSyncPut === '1' || skipSyncPut === 'true' || skipSyncPut === 'si');
+    if (debeSincronizarPut) await db.sincronizarTalleresDesdePonentes();
     await db.registrarEvento('ponente_modificado', `Ponente actualizado: "${nombre}"`, req.sesion.usuario);
     res.json({ ok: true });
   } catch (e) {
@@ -1969,21 +2039,40 @@ app.get('/api/admin/programa', requireAuth, async (req, res, next) => {
   }
 });
 
-const parseBloquePayload = (body, existente = {}) => ({
-  dia: parseDiaFecha(body.dia, existente.dia || ''),
-  hora_inicio: String(body.hora_inicio ?? existente.hora_inicio ?? '').trim(),
-  hora_fin: String(body.hora_fin ?? existente.hora_fin ?? '').trim(),
-  tipo: String(body.tipo ?? existente.tipo ?? 'general').trim(),
-  titulo: String(body.titulo ?? existente.titulo ?? '').trim(),
-  descripcion: String(body.descripcion ?? existente.descripcion ?? '').trim(),
-  icono: String(body.icono ?? existente.icono ?? '').trim(),
-  orden: Number(body.orden) || existente.orden || 0,
-});
+const parseBloquePayload = (body, existente = {}) => {
+  const base = {
+    dia: parseDiaFecha(body.dia, existente.dia || ''),
+    hora_inicio: String(body.hora_inicio ?? existente.hora_inicio ?? '').trim(),
+    hora_fin: String(body.hora_fin ?? existente.hora_fin ?? '').trim(),
+    tipo: String(body.tipo ?? existente.tipo ?? 'general').trim(),
+    titulo: String(body.titulo ?? existente.titulo ?? '').trim(),
+    descripcion: String(body.descripcion ?? existente.descripcion ?? '').trim(),
+    icono: String(body.icono ?? existente.icono ?? '').trim(),
+    orden: Number(body.orden) || existente.orden || 0,
+  };
+  // ponentes múltiples (para ponencia/conversatorio/talleres)
+  let ponentes = undefined;
+  if (body.ponentes !== undefined || body.ponenteIds !== undefined || body.ponentes_ids !== undefined) {
+    const raw = body.ponentes ?? body.ponenteIds ?? body.ponentes_ids ?? [];
+    if (Array.isArray(raw)) ponentes = raw.map(n=> Number(n)).filter(n=> Number.isInteger(n) && n>0);
+    else if (typeof raw === 'string') ponentes = raw.split(',').map(s=> Number(s.trim())).filter(n=> Number.isInteger(n) && n>0);
+    else ponentes = [];
+  }
+  if (ponentes !== undefined) base.ponentes = ponentes;
+  return base;
+};
 
 app.post('/api/admin/programa/bloques', requireAuth, async (req, res, next) => {
   try {
     const body = parseBloquePayload(req.body || {});
     if (!body.titulo) throw new db.HttpError(400, 'El título es obligatorio.');
+    // validar ponentes si se enviaron
+    if (body.ponentes) {
+      for (const pid of body.ponentes) {
+        const p = await db.obtenerPonente(pid);
+        if (!p) throw new db.HttpError(400, `Ponente ${pid} no existe.`);
+      }
+    }
     const id = await db.crearBloque(body);
     await db.registrarEvento('config_modificada', `Bloque de programa creado: "${body.titulo}"`, req.sesion.usuario);
     res.status(201).json({ ok: true, id });
@@ -2000,12 +2089,53 @@ app.put('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) =
     if (!existente) throw new db.HttpError(404, 'Bloque no encontrado.');
     const body = parseBloquePayload(req.body || {}, existente);
     if (!body.titulo) throw new db.HttpError(400, 'El título es obligatorio.');
-    await db.actualizarBloque(id, { ...body, datos: existente.datos });
+    if (body.ponentes) {
+      for (const pid of body.ponentes) {
+        const p = await db.obtenerPonente(pid);
+        if (!p) throw new db.HttpError(400, `Ponente ${pid} no existe.`);
+      }
+    }
+    await db.actualizarBloque(id, { ...body, datos: existente.datos, ponentes: body.ponentes, ponenteIds: body.ponentes });
     await db.registrarEvento('config_modificada', `Bloque de programa actualizado: "${body.titulo}"`, req.sesion.usuario);
     res.json({ ok: true });
   } catch (e) {
     next(e);
   }
+});
+
+// ── Bloque ↔ Ponentes (múltiples ponentes por ponencia/conversatorio/taller) ───────────
+app.get('/api/admin/programa/bloques/:id/ponentes', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
+    const bloque = await db.obtenerBloque(id);
+    if (!bloque) throw new db.HttpError(404, 'Bloque no encontrado.');
+    res.json({ bloque_id: Number(id), ponentes: bloque.ponentes || [], ponentes_ids: bloque.ponentes_ids || [] });
+  } catch (e) { next(e); }
+});
+
+app.put('/api/admin/programa/bloques/:id/ponentes', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de bloque inválido.');
+    const bloque = await db.obtenerBloque(id);
+    if (!bloque) throw new db.HttpError(404, 'Bloque no encontrado.');
+    const body = req.body || {};
+    let ponenteIds = [];
+    if (Array.isArray(body.ponenteIds)) ponenteIds = body.ponenteIds;
+    else if (Array.isArray(body.ponentes)) ponenteIds = body.ponentes;
+    else if (Array.isArray(body.ponentes_ids)) ponenteIds = body.ponentes_ids;
+    else if (body.ponente_ids) ponenteIds = String(body.ponente_ids).split(',').map(s=> s.trim()).filter(Boolean);
+    ponenteIds = ponenteIds.map(n=> Number(n)).filter(n=> Number.isInteger(n) && n>0);
+    for (const pid of ponenteIds) {
+      const p = await db.obtenerPonente(pid);
+      if (!p) throw new db.HttpError(400, `Ponente ${pid} no existe.`);
+    }
+    await db.setBloquePonentes(Number(id), ponenteIds);
+    await db.registrarEvento('bloque_ponentes_actualizado', `Bloque #${id} ponentes: ${ponenteIds.join(',')||'ninguno'}`, req.sesion.usuario);
+    const actualizado = await db.obtenerBloque(id);
+    res.json({ ok: true, ponentes: actualizado.ponentes || [] });
+  } catch (e) { next(e); }
 });
 
 app.delete('/api/admin/programa/bloques/:id', requireAuth, async (req, res, next) => {
@@ -2511,8 +2641,324 @@ app.delete('/api/mobile/asignaciones/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── Admin Asignaciones (web) ────────────────────────────────────────
+// ── Certificados ────────────────────────────────────────────────────────
 function esAdminOSuperior(req) { const r=req.sesion?.rol; return r==='admin'|| r==='superior'; }
+
+// Helper conf firmas + avales/resoluciones
+async function obtenerFirmasConfig() {
+  try {
+    const cfg = await db.obtenerTodaConfig();
+    return {
+      firma1_nombre: cfg.certificado_firma1_nombre || 'Referente Nacional Nodo Salta',
+      firma1_cargo: cfg.certificado_firma1_cargo || 'Red Dramatiza Salta',
+      firma1_imagen: cfg.certificado_firma1_imagen || '',
+      firma2_nombre: cfg.certificado_firma2_nombre || 'Referente Provincial Nodo Salta',
+      firma2_cargo: cfg.certificado_firma2_cargo || 'Red Dramatiza Salta',
+      firma2_imagen: cfg.certificado_firma2_imagen || '',
+      aval1: cfg.certificado_aval1 || '',
+      aval2: cfg.certificado_aval2 || '',
+      aval3: cfg.certificado_aval3 || '',
+      aval4: cfg.certificado_aval4 || '',
+      titulo: cfg.certificado_titulo || 'Encuentro Dramatiza – Salta 2026',
+      lugar: cfg.certificado_lugar || 'Salta, Argentina',
+      horas: cfg.certificado_horas_por_taller || '3',
+    };
+  } catch (_) {
+    return { firma1_nombre: 'Referente Nacional Nodo Salta', firma1_cargo: 'Red Dramatiza Salta', firma1_imagen:'', firma2_nombre:'Referente Provincial Nodo Salta', firma2_cargo:'Red Dramatiza Salta', firma2_imagen:'', aval1:'', aval2:'', aval3:'', aval4:'', titulo:'Encuentro Dramatiza – Salta 2026', lugar:'Salta', horas:'3' };
+  }
+}
+
+app.get('/api/admin/certificados', requireAuth, async (req, res, next) => {
+  try {
+    const lista = await db.listarCertificados();
+    res.set('Cache-Control','no-store');
+    res.json(lista.map(c=> ({ ...c, id:Number(c.id), detalle: typeof c.detalle==='string'? JSON.parse(c.detalle||'{}') : c.detalle })));
+  } catch(e){ next(e); }
+});
+
+app.get('/api/admin/certificados/elegibles', requireAuth, async (req, res, next) => {
+  try {
+    const asistentes = await db.listarAsistentes();
+    const out = [];
+    for (const a of asistentes) {
+      try {
+        const ver = await db.verificarElegibilidadAsistente(a.dni);
+        out.push({
+          dni: a.dni,
+          nombre: a.nombre,
+          apellido: a.apellido,
+          email: a.email,
+          talleres_nombres: a.talleres_nombres,
+          talleres_ids: a.talleres_ids,
+          cantidad_talleres: Number(a.cantidad_talleres),
+          elegible: ver.elegible,
+          asistencias: ver.asistencias,
+          motivo: ver.motivo || '',
+        });
+      } catch(e){
+        out.push({ dni:a.dni, nombre:a.nombre, apellido:a.apellido, email:a.email, elegible:false, motivo:e.message, asistencias:[] });
+      }
+    }
+    res.json(out);
+  } catch(e){ next(e); }
+});
+
+app.get('/api/admin/certificados/config', requireAuth, async (req, res, next) => {
+  try {
+    // solo admin/superior config
+    if (!esAdminOSuperior(req) && req.sesion.rol!=='admin') return res.status(403).json({error:'Solo admin/superior'});
+    res.json(await obtenerFirmasConfig());
+  } catch(e){ next(e); }
+});
+app.put('/api/admin/certificados/config', requireAuth, async (req, res, next) => {
+  try {
+    if (!esAdminOSuperior(req) && req.sesion.rol!=='admin') return res.status(403).json({error:'Solo admin/superior'});
+    const b = req.body||{};
+    const claves = ['certificado_firma1_nombre','certificado_firma1_cargo','certificado_firma2_nombre','certificado_firma2_cargo','certificado_titulo','certificado_lugar','certificado_horas_por_taller','certificado_aval1','certificado_aval2','certificado_aval3','certificado_aval4'];
+    for (const k of claves) if (b[k]!==undefined) await db.guardarConfig(k, String(b[k]));
+    // compat: permitir avales enviados como certificado_avalN o avalN
+    for (let i=1;i<=4;i++) if (b[`aval${i}`]!==undefined) await db.guardarConfig(`certificado_aval${i}`, String(b[`aval${i}`]));
+    // imagenes base64 opcional -> guardar como archivos public/firmaX.png
+    if (b.firma1_imagen_base64) {
+      try {
+        const buf = Buffer.from(String(b.firma1_imagen_base64).replace(/^data:image\/\w+;base64,/,''), 'base64');
+        const p = path.join(__dirname,'..','public','firma1.png');
+        fs.writeFileSync(p, buf);
+        await db.guardarConfig('certificado_firma1_imagen','/firma1.png');
+      } catch(_){}
+    }
+    if (b.firma2_imagen_base64) {
+      try {
+        const buf = Buffer.from(String(b.firma2_imagen_base64).replace(/^data:image\/\w+;base64,/,''), 'base64');
+        const p = path.join(__dirname,'..','public','firma2.png');
+        fs.writeFileSync(p, buf);
+        await db.guardarConfig('certificado_firma2_imagen','/firma2.png');
+      } catch(_){}
+    }
+    await db.registrarEvento('config_modificada','Configuración de certificados actualizada', req.sesion.usuario).catch(()=>{});
+    res.json({ ok:true, config: await obtenerFirmasConfig() });
+  } catch(e){ next(e); }
+});
+
+app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) => {
+  try {
+    const sesion = req.sesion;
+    // permiso certificados
+    if (sesion.rol!=='admin') {
+      const u = await db.buscarUsuario(sesion.usuario);
+      if (!u || !u.perm_certificados) return res.status(403).json({error:'Sin permiso de certificados'});
+    }
+    const { tipo, dni, ponenteId, ponente_id, forzar } = req.body||{};
+    const tipoNorm = String(tipo||'').trim().toLowerCase();
+    if (!['asistente','ponente','tallerista'].includes(tipoNorm)) return res.status(400).json({error:'tipo debe ser asistente, ponente o tallerista'});
+    let nombre='', apellido='', email='', detalle={}, talleresIds='', dniNorm='', ponId=null;
+
+    const firmasCfg = await obtenerFirmasConfig();
+
+    // Diferenciar ponente/tallerista por ID (asociado a la persona) vs asistente por DNI
+    const tienePonenteId = Number(ponenteId || ponente_id) > 0;
+    if (tienePonenteId && (tipoNorm==='ponente' || tipoNorm==='tallerista')) {
+      const pid = Number(ponenteId || ponente_id);
+      if (!pid) return res.status(400).json({error:'ponenteId requerido'});
+      const pon = await db.obtenerPonente(pid);
+      if (!pon) return res.status(404).json({error:'Ponente no encontrado'});
+      nombre = String(pon.nombre||'').split(' ')[0] || pon.nombre;
+      const partes = String(pon.nombre||'').trim().split(/\s+/);
+      if (partes.length>=2) { nombre = partes.slice(0,-1).join(' '); apellido = partes.slice(-1).join(' '); } else { nombre = pon.nombre; apellido=''; }
+      email='';
+      ponId = pid;
+      // Diferenciación automática taller/ponencia según tipo asociado a la persona
+      const tipoReal = String(pon.tipo||'').toLowerCase();
+      const esTaller = tipoReal==='taller';
+      // Si el tipo solicitado es tallerista pero la persona es ponencia, o viceversa, se corrige automáticamente
+      const tipoEfectivo = esTaller ? 'tallerista' : 'ponente';
+      // Guardar tipo efectivo en detalle para el PDF
+      detalle = { titulo: pon.titulo||'', descripcion: pon.descripcion||'', tipoPonencia: pon.tipo, dia: pon.dia, horario: pon.horario, esTaller, horas: String(firmasCfg.horas), tipoEfectivo };
+      // Sobrescribir tipoNorm al efectivo para que el PDF diga "presentando el taller/ponencia" correctamente
+      // Mantener tipoNorm original para registro, pero detalle.tipoEfectivo manda
+      if (tipoNorm !== tipoEfectivo) {
+        // No error, solo info: se corrige
+      }
+      // Para la firma/hash y almacenamiento, usar el tipo efectivo
+      // Actualizamos tipoNorm localmente para generación posterior (no muta const, usamos variable)
+      // Usaremos tipoEfectivo en detalle y en nombre del evento
+      // Guardaremos el tipoNorm original pero el PDF usará esTaller
+      // Para no complicar, asignamos detalle.tipo = tipoEfectivo
+      detalle.tipo = tipoEfectivo;
+      // Si es tallerista, el PDF dirá "presentando el taller", si ponente "presentando la ponencia"
+      // No necesitamos más
+    } else if (tipoNorm==='asistente' || tipoNorm==='tallerista') {
+      dniNorm = String(dni||'').replace(/\D/g,'');
+      if (!/^\d{7,8}$/.test(dniNorm)) return res.status(400).json({error:'DNI inválido'});
+      const ver = await db.verificarElegibilidadAsistente(dniNorm);
+      const inscripciones = await db.listarInscripcionesPorDni(dniNorm);
+      if (inscripciones.length===0) return res.status(404).json({error:'No se encontraron inscripciones para ese DNI'});
+      nombre = inscripciones[0].nombre; apellido = inscripciones[0].apellido; email = inscripciones[0].email;
+      if (tipoNorm==='asistente' && !ver.elegible && !forzar) {
+        const falt = ver.asistencias.filter(a=>!a.completo).map(a=>a.taller).join(', ');
+        return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
+      }
+      if (tipoNorm==='tallerista') {
+        try {
+          const ap = await db.queryOne('SELECT es_tallerista FROM asistente_planes WHERE dni=? AND es_tallerista=TRUE LIMIT 1', [dniNorm]);
+          detalle.esTalleristaFlag = Boolean(ap);
+        } catch(_){}
+      }
+      const talleresCompletos = ver.asistencias.filter(a=>a.completo);
+      const talleresParaCert = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
+      detalle = { talleres: talleresParaCert, tipo: tipoNorm, horas: String(firmasCfg.horas) };
+      talleresIds = talleresParaCert.map(t=>String(t.taller_id||'')).filter(Boolean).join(',');
+    } else {
+      return res.status(400).json({error:'Tipo inválido o datos faltantes (requiere DNI para asistente/tallerista o ponenteId para ponente/taller)'});
+    }
+
+    // verificar si ya existe certificado mismo tipo+dni/ponente (evitar duplicado? permitir regenerar)
+    // generar nuevo codigo siempre
+    const codigo = certificados.generarCodigoCertificado();
+    const datosFirma = { dni: dniNorm||'', nombre, apellido, tipo: tipoNorm };
+    const hash = certificados.generarHashFirma(codigo, datosFirma);
+    let qrPayload = certificados.construirQrPayload(codigo);
+    // si no hay BASE_URL, construir URL absoluta con host de la petición
+    // Si no hay BASE_URL/APP_URL explícitos, usar host de la request para que en local sea localhost y en prod sea dramatiza.vercel.app
+    if (!process.env.BASE_URL && !process.env.APP_URL) {
+      try {
+        const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.get('host') || '';
+        if (host) qrPayload = `${proto}://${host}/verificar.html?c=${codigo}`;
+      } catch(_){}
+    }
+
+    const nuevoId = await db.crearCertificado({
+      codigo,
+      tipo: tipoNorm,
+      dni: dniNorm||null,
+      ponenteId: ponId,
+      nombre, apellido, email,
+      detalle, talleresIds, qrData: qrPayload, hashFirma: hash, emitidoPor: sesion.usuario
+    });
+    await db.registrarEvento('certificado_generado', `Certificado ${codigo} (${tipoNorm}) para ${nombre} ${apellido} ${dniNorm?`(DNI ${dniNorm})`:''} por ${sesion.usuario}`, sesion.usuario).catch(()=>{});
+    res.status(201).json({ ok:true, id: nuevoId, codigo, tipo: tipoNorm, dni: dniNorm, ponente_id: ponId, hash, qrData: qrPayload });
+  } catch(e){ next(e); }
+});
+
+app.get('/api/admin/certificados/:codigo/pdf', requireAuth, async (req, res, next) => {
+  try {
+    const codigo = String(req.params.codigo||'').trim().toUpperCase();
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).json({error:'Certificado no encontrado'});
+    const detalle = typeof cert.detalle==='string' ? JSON.parse(cert.detalle||'{}') : (cert.detalle||{});
+    const firmasCfg = await obtenerFirmasConfig();
+    // resolver imagen firmas si existe archivo
+    const firma1Path = path.join(__dirname,'..','public','firma1.png');
+    const firma2Path = path.join(__dirname,'..','public','firma2.png');
+    const pdf = await certificados.generarPdfCertificado({
+      codigo: cert.codigo,
+      tipo: cert.tipo,
+      nombre: cert.nombre,
+      apellido: cert.apellido,
+      dni: cert.dni||'',
+      detalle,
+      emitidoEn: cert.creado_en,
+      hashFirma: cert.hash_firma,
+      avales: [firmasCfg.aval1, firmasCfg.aval2, firmasCfg.aval3, firmasCfg.aval4],
+      firma1: { nombre: firmasCfg.firma1_nombre, cargo: firmasCfg.firma1_cargo, imagenPath: fs.existsSync(firma1Path)?firma1Path:null },
+      firma2: { nombre: firmasCfg.firma2_nombre, cargo: firmasCfg.firma2_cargo, imagenPath: fs.existsSync(firma2Path)?firma2Path:null },
+    });
+    res.set('Content-Type','application/pdf');
+    res.set('Content-Disposition', `inline; filename="${codigo}.pdf"`);
+    res.set('Cache-Control','no-store');
+    res.send(pdf);
+  } catch(e){ next(e); }
+});
+
+app.get('/api/admin/certificados/:codigo/qr.png', requireAuth, async (req, res, next) => {
+  try {
+    const codigo = String(req.params.codigo||'').trim().toUpperCase();
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).json({error:'No encontrado'});
+    const payload = cert.qr_data || certificados.construirQrPayload(codigo);
+    const buf = await certificados.generarQrPng(payload, 300);
+    res.set('Content-Type','image/png');
+    res.set('Cache-Control','no-store');
+    res.send(buf);
+  } catch(e){ next(e); }
+});
+
+app.delete('/api/admin/certificados/:id', requireAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({error:'ID inválido'});
+    await db.eliminarCertificado(id);
+    await db.registrarEvento('certificado_eliminado', `Certificado #${id} eliminado por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{});
+    res.json({ ok:true });
+  } catch(e){ next(e); }
+});
+
+// Verificación pública (sin auth)
+app.get('/api/certificados/verificar/:codigo', async (req, res, next) => {
+  try {
+    const codigo = String(req.params.codigo||'').trim().toUpperCase();
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).json({ valido:false, error:'Certificado no encontrado' });
+    const detalle = typeof cert.detalle==='string'? JSON.parse(cert.detalle||'{}'): (cert.detalle||{});
+    // recalcular hash para verificar firma electrónica
+    const hashCalc = certificados.generarHashFirma(codigo, { dni: cert.dni||'', nombre: cert.nombre, apellido: cert.apellido, tipo: cert.tipo });
+    const firmaValida = hashCalc === cert.hash_firma;
+    res.json({
+      valido: true,
+      firmaValida,
+      codigo: cert.codigo,
+      tipo: cert.tipo,
+      nombre: cert.nombre,
+      apellido: cert.apellido,
+      dni: cert.dni||'',
+      ponente_id: cert.ponente_id,
+      detalle,
+      emitido_por: cert.emitido_por,
+      creado_en: cert.creado_en,
+      hash_firma: cert.hash_firma,
+      qr_data: cert.qr_data,
+    });
+  } catch(e){ next(e); }
+});
+app.post('/api/certificados/verificar', async (req, res, next) => {
+  try {
+    const codigo = String((req.body||{}).codigo||'').trim().toUpperCase();
+    if (!codigo) return res.status(400).json({error:'Código requerido'});
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).json({ valido:false, error:'No encontrado' });
+    const detalle = typeof cert.detalle==='string'? JSON.parse(cert.detalle||'{}'): (cert.detalle||{});
+    const hashCalc = certificados.generarHashFirma(codigo, { dni: cert.dni||'', nombre: cert.nombre, apellido: cert.apellido, tipo: cert.tipo });
+    res.json({ valido:true, firmaValida: hashCalc===cert.hash_firma, codigo: cert.codigo, tipo: cert.tipo, nombre: cert.nombre, apellido: cert.apellido, dni: cert.dni, detalle, creado_en: cert.creado_en });
+  } catch(e){ next(e); }
+});
+app.get('/api/certificados/verificar/:codigo/xml', async (req, res, next) => {
+  try {
+    const codigo = String(req.params.codigo||'').trim().toUpperCase();
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).type('application/xml').send('<error>Certificado no encontrado</error>');
+    const detalle = typeof cert.detalle==='string'? JSON.parse(cert.detalle||'{}'): (cert.detalle||{});
+    const cfg = await obtenerFirmasConfig().catch(()=>({}));
+    const rolMap = { asistente:'Asistente', ponente:'Ponente', tallerista:'Tallerista' };
+    const tipoAct = detalle.esTaller || String(detalle.tipoPonencia||'').toLowerCase()==='taller' ? 'Taller' : (cert.tipo==='ponente' ? 'Ponencia' : (detalle.titulo ? 'Taller' : 'Taller'));
+    // Para asistente, el tipo actividad es Taller (lista), para ponente/tallerista según esTaller
+    const tipoActividad = cert.tipo==='asistente' ? 'Taller' : tipoAct;
+    const tituloActividad = detalle.titulo || (detalle.talleres && detalle.talleres[0] ? (detalle.talleres[0].taller||detalle.talleres[0].nombre) : '');
+    const xml = certificados.generarXmlCertificado({
+      codigo: cert.codigo,
+      nombre: cert.nombre, apellido: cert.apellido, dni: cert.dni||'',
+      rol: rolMap[cert.tipo]||cert.tipo,
+      tipoActividad, tituloActividad,
+      cargaHoraria: String(detalle.horas||cfg.horas||'3'),
+      fechaEmision: cert.creado_en,
+      firmantes: [{nombre: cfg.firma1_nombre, cargo: cfg.firma1_cargo},{nombre: cfg.firma2_nombre, cargo: cfg.firma2_cargo}],
+      firmaElectronica: cert.hash_firma
+    });
+    res.type('application/xml').send(xml);
+  } catch(e){ next(e); }
+});
+
+// ── Admin Asignaciones (web) ────────────────────────────────────────
 app.get('/api/admin/asignaciones', requireAuth, async (req, res, next) => {
   try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const filas=await db.query(`SELECT a.*, t.nombre as taller_nombre, b.titulo as bloque_titulo FROM operador_taller_asignaciones a LEFT JOIN talleres t ON t.id=a.taller_id LEFT JOIN programa_bloques b ON b.id=a.bloque_id ORDER BY a.dia DESC, a.id DESC LIMIT 200`); res.json(filas); } catch(e){ next(e); }
 });
