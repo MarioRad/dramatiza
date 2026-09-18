@@ -153,4 +153,3 @@ vite.config.ts.timestamp-*
 ideas/
 
 # Archivos subidos por los usuarios (no se deben subir al repositorio)
-public/uploads
