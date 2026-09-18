@@ -17,11 +17,17 @@ try {
   ({ supabaseAdmin } = require('./supabase'));
 } catch (_) { /* supabase opcional */ }
 
-const STORAGE_BUCKET = 'ponentes-fotos';
+const STORAGE_BUCKET = process.env.STORAGE_BUCKET || 'ponentes-fotos';
 // Fotos locales: public/uploads (servido por express.static)
 // El bucket de Supabase usa prefijo "ponentes/", pero local es /uploads/<file>
-const UPLOADS_DIR = path.join(__dirname, '..', 'public', 'uploads');
-const UPLOADS_DIR_LEGACY = path.join(UPLOADS_DIR, 'ponentes');
+// En Vercel el FS es efímero: la persistencia real es Supabase Storage.
+// UPLOADS_DIR es configurable solo para dev local / VPS con volumen persistente.
+const UPLOADS_DIR = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(__dirname, '..', 'public', 'uploads');
+const UPLOADS_DIR_LEGACY = process.env.UPLOADS_DIR_LEGACY
+  ? path.resolve(process.env.UPLOADS_DIR_LEGACY)
+  : path.join(UPLOADS_DIR, 'ponentes');
 function ensureUploadsDir() {
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
