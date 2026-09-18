@@ -156,7 +156,7 @@ const ProgramaUI = (() => {
     const horario = String(p.horario || '').trim();
     const iniciales = `<span class="programa-sd-iniciales">${escapeHtml(getInitials(p.nombre))}</span>`;
     const foto = p.foto
-      ? `<img class="programa-sd-foto" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre || '')}" loading="lazy" onerror="this.remove()">`
+      ? `<img class="programa-sd-foto" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre || '')}" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen no cargó:',this.src)">`
       : '';
     const sello = p.dia2
       ? '<span class="programa-sd-badge"><span class="n">2</span><span class="t">días</span></span>'
@@ -164,7 +164,7 @@ const ProgramaUI = (() => {
     const desc = String(p.descripcion || '').trim();
     const co = coPonentesDe(p);
     const coHtml = co.length ? `<div class="programa-sd-con">Con: ${co.map(c=> escapeHtml(c.nombre)).join(' • ')}</div>` : '';
-    const coFotos = co.filter(c=> c.foto).map(c=> `<img class="programa-sd-foto programa-sd-foto-co" src="${escapeHtml(c.foto)}" alt="${escapeHtml(c.nombre)}">`).join('');
+    const coFotos = co.filter(c=> c.foto).map(c=> `<img class="programa-sd-foto programa-sd-foto-co" src="${escapeHtml(c.foto)}" alt="${escapeHtml(c.nombre)}" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen co-ponente no cargó:',this.src)">`).join('');
     return `
       <div class="programa-sd-card type-${cls}">
         <div class="programa-sd-card-foto">${iniciales}${foto}${coFotos}${sello}</div>
@@ -541,7 +541,7 @@ const ProgramaUI = (() => {
         ? `<button type="button" class="ws-inscribir-btn" data-taller-id="${t.id}" onclick="ProgramaUI.seleccionarTaller(${t.id})">Inscribirme</button>`
         : '';
       const foto = fotoDisertante(t.disertante, t);
-      const fotoHtml = foto ? `<img class="ws-foto" src="${escapeHtml(foto)}" alt="${escapeHtml(t.disertante || '')}">` : '';
+      const fotoHtml = foto ? `<img class="ws-foto" src="${escapeHtml(foto)}" alt="${escapeHtml(t.disertante || '')}" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen taller no cargó:',this.src)">` : '';
       // Si el taller tiene múltiples ponentes, mostrar nombres separados
       let speakerHtml = '';
       if (Array.isArray(t.ponentes) && t.ponentes.length > 1) {
@@ -549,7 +549,7 @@ const ProgramaUI = (() => {
         // fotos múltiples si hay más de una
         const fotosConFoto = t.ponentes.filter(p=> p.foto);
         if (fotosConFoto.length > 1) {
-          const avatars = fotosConFoto.slice(0,3).map(p=> `<img class="ws-foto ws-foto-multi" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre)}">`).join('');
+          const avatars = fotosConFoto.slice(0,3).map(p=> `<img class="ws-foto ws-foto-multi" src="${escapeHtml(p.foto)}" alt="${escapeHtml(p.nombre)}" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen taller multi no cargó:',this.src)">`).join('');
           // reemplazar fotoHtml por mosaico si hay varias
           // ya tenemos foto principal, añadir resto como mini
         }
@@ -606,7 +606,7 @@ const ProgramaUI = (() => {
     let html = '';
     grupos.forEach((g, i) => {
       if (i > 0) html += '<hr class="programa-ponencia-divider">';
-      const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '').join('');
+      const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen ponencia no cargó:',this.src)">` : '').join('');
       const nombres = g.ponentes.map(p=> escapeHtml(p.nombre||'')).join(' • ');
       html += `<div class="programa-ponencia-item">
         <div class="programa-ponencia-linea">
@@ -629,7 +629,7 @@ const ProgramaUI = (() => {
       const grupos = agruparPorTitulo(lista);
       grupos.forEach((g, i) => {
         if (i > 0) html += '<hr class="programa-ponencia-divider">';
-        const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="">` : '').join('');
+        const fotos = g.ponentes.map(p=> p.foto ? `<img class="programa-ponente-foto" src="${escapeHtml(p.foto)}" alt="" loading="lazy" onerror="this.style.display='none';console.warn('[Programa] Imagen conversatorio no cargó:',this.src)">` : '').join('');
         const nombres = g.ponentes.map(p=> escapeHtml(p.nombre||'')).join(' • ');
         const titulo = g.ponentes[0]?.titulo || '';
         const horario = g.horario || g.ponentes[0]?.horario || '';

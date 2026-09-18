@@ -18,8 +18,10 @@ try {
 } catch (_) { /* supabase opcional */ }
 
 const STORAGE_BUCKET = 'ponentes-fotos';
-// Fotos locales: public/uploads/ponentes (servido por express.static)
-const UPLOADS_DIR = path.join(__dirname, '..', 'public', 'uploads', 'ponentes');
+// Fotos locales: public/uploads (servido por express.static)
+// El bucket de Supabase usa prefijo "ponentes/", pero local es /uploads/<file>
+const UPLOADS_DIR = path.join(__dirname, '..', 'public', 'uploads');
+const UPLOADS_DIR_LEGACY = path.join(UPLOADS_DIR, 'ponentes');
 function ensureUploadsDir() {
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -1866,10 +1868,12 @@ async function deleteFotoPonente(foto) {
       await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
     } catch (_) { /* noop */ }
   }
-  // Siempre intentar borrar local
+  // Siempre intentar borrar local (tanto en uploads/ como en uploads/ponentes legacy)
   try {
-    const localPath = path.join(UPLOADS_DIR, path.basename(foto));
-    if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
+    for (const dir of [UPLOADS_DIR, UPLOADS_DIR_LEGACY]) {
+      const localPath = path.join(dir, path.basename(foto));
+      if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
+    }
   } catch (_) { /* noop */ }
 }
 
@@ -1884,8 +1888,13 @@ function getFotoUrl(foto) {
       if (data?.publicUrl && !data.publicUrl.includes('supabase.co/undefined')) return data.publicUrl;
     } catch (_) { /* fallback local */ }
   }
-  // Archivo local servido por express.static -> /uploads/ponentes/<file>
-  return `/uploads/ponentes/${path.basename(foto)}`;
+  // Archivo local servido por express.static -> /uploads/<file>
+  // Compatibilidad: si existe en legacy /uploads/ponentes, usar esa ruta
+  const base = path.basename(foto);
+  try {
+    if (fs.existsSync(path.join(UPLOADS_DIR_LEGACY, base))) return `/uploads/ponentes/${base}`;
+  } catch (_) {}
+  return `/uploads/${base}`;
 }
 
 const parseDiaValido = (v, def) => {
