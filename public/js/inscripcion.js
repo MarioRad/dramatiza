@@ -102,8 +102,6 @@ const inputDni = document.getElementById('dni');
 const pasoDni = document.getElementById('pasoDni');
 const pasoDatos = document.getElementById('pasoDatos');
 const modalEncuentro = document.getElementById('modalEncuentro');
-const botonInscribirse = document.getElementById('botonInscribirse');
-const botonCancelar = document.getElementById('botonCancelar');
 const modalYaInscripto = document.getElementById('modalYaInscripto');
 const yaInscriptoContenido = document.getElementById('yaInscriptoContenido');
 const botonYaInscripto = document.getElementById('botonYaInscripto');
@@ -132,7 +130,6 @@ const botonSolapamiento = document.getElementById('botonSolapamiento');
 const botonAnularInscripcion = document.getElementById('botonAnularInscripcion');
 const botonReenviarConstancia = document.getElementById('botonReenviarConstancia');
 
-let urlEncuentro = '';
 let inscripcionPrevia = null;
 let talleresData = [];
 let programaSeleccion = false;
@@ -197,12 +194,179 @@ botonCancelarTaller.addEventListener('click', () => {
   dpNombre.focus();
 });
 botonConfirmarInscripcion.addEventListener('click', confirmarInscripcion);
-botonCancelar.addEventListener('click', () => { window.location.href = '/index.html'; });
-
 botonSolapamiento.addEventListener('click', () => {
   modalSolapamiento.hidden = true;
   modalSolapamiento.setAttribute('aria-hidden', 'true');
 });
+
+// ── Encuentro nativo (reemplaza Google Forms) — estilo Google Forms + alias + comprobante ──
+const formEncuentro = document.getElementById('formEncuentro');
+const encuentroMensaje = document.getElementById('encuentroMensaje');
+const encDni = document.getElementById('encDni');
+const encNombre = document.getElementById('encNombre');
+const encApellido = document.getElementById('encApellido');
+const encEmail = document.getElementById('encEmail');
+const encTelefono = document.getElementById('encTelefono');
+const encFechaNacimiento = document.getElementById('encFechaNacimiento');
+const encProvincia = document.getElementById('encProvincia');
+const encCiudad = document.getElementById('encCiudad');
+const encOcupacion = document.getElementById('encOcupacion');
+const encOpcionPago = document.getElementById('encOpcionPago');
+const encComprobante = document.getElementById('encComprobante');
+const encComprobanteInfo = document.getElementById('encComprobanteInfo');
+const encOpcionesPagoLista = document.getElementById('encOpcionesPagoLista');
+const encAliasValor = document.getElementById('encAliasValor');
+const encAliasLeyenda = document.getElementById('encAliasLeyenda');
+const encTransferenciaTitulo = document.getElementById('encTransferenciaTitulo');
+const encTransferenciaDesc = document.getElementById('encTransferenciaDesc');
+const btnCopiarAlias = document.getElementById('btnCopiarAlias');
+const botonCancelarEncuentro = document.getElementById('botonCancelarEncuentro');
+const botonEnviarEncuentro = document.getElementById('botonEnviarEncuentro');
+const encuentroDniInfo = document.getElementById('encuentroDniInfo');
+
+let encuentroConfig = null;
+async function cargarEncuentroConfig() {
+  if (encuentroConfig) return encuentroConfig;
+  try {
+    const res = await fetch('/api/encuentro/config');
+    if (!res.ok) throw new Error();
+    encuentroConfig = await res.json();
+    if (encAliasValor) encAliasValor.textContent = encuentroConfig.alias || '—';
+    if (encAliasLeyenda) encAliasLeyenda.textContent = encuentroConfig.leyenda || '';
+    if (encTransferenciaTitulo) encTransferenciaTitulo.textContent = encuentroConfig.titulo || 'Datos para la transferencia';
+    if (encTransferenciaDesc) encTransferenciaDesc.textContent = encuentroConfig.descripcion || '';
+    // opciones pago como radios estilo Google Forms
+    if (encOpcionesPagoLista) {
+      encOpcionesPagoLista.innerHTML = '';
+      const opts = Array.isArray(encuentroConfig.opcionesPago) ? encuentroConfig.opcionesPago : [];
+      opts.forEach((opt, i) => {
+        const label = document.createElement('label');
+        label.className = 'gforms-radio';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'encOpcionPagoRadio';
+        radio.value = opt;
+        radio.required = true;
+        radio.addEventListener('change', () => { encOpcionPago.value = radio.value; });
+        const span = document.createElement('span');
+        span.textContent = opt;
+        label.append(radio, span);
+        encOpcionesPagoLista.appendChild(label);
+      });
+      // opción "Otro" ya incluida si viene en env; si no, agregar
+      if (!opts.some(o => /otro/i.test(o))) {
+        const label = document.createElement('label');
+        label.className = 'gforms-radio';
+        const radio = document.createElement('input');
+        radio.type = 'radio'; radio.name = 'encOpcionPagoRadio'; radio.value = 'Otro';
+        radio.addEventListener('change', () => { encOpcionPago.value = radio.value; });
+        const span = document.createElement('span'); span.textContent = 'Otro';
+        label.append(radio, span);
+        encOpcionesPagoLista.appendChild(label);
+      }
+    }
+  } catch (_) {
+    if (encOpcionesPagoLista && !encOpcionesPagoLista.querySelector('input')) {
+      encOpcionesPagoLista.innerHTML = '<p class="ayuda-campo">No se pudieron cargar las opciones de pago.</p>';
+    }
+  }
+  return encuentroConfig;
+}
+cargarEncuentroConfig();
+
+if (btnCopiarAlias) btnCopiarAlias.addEventListener('click', async () => {
+  const alias = encAliasValor ? encAliasValor.textContent.trim() : '';
+  if (!alias || alias === '—') return;
+  try { await navigator.clipboard.writeText(alias); btnCopiarAlias.textContent = '¡Copiado!'; setTimeout(() => btnCopiarAlias.textContent = 'Copiar', 1500); } catch (_) { /* noop */ }
+});
+if (encComprobante) encComprobante.addEventListener('change', () => {
+  const f = encComprobante.files && encComprobante.files[0];
+  if (!f) { encComprobanteInfo.textContent = ''; return; }
+  if (f.size > 8*1024*1024) { encComprobanteInfo.textContent = 'Archivo demasiado grande (máx 8 MB).'; encComprobante.value = ''; return; }
+  encComprobanteInfo.textContent = `${f.name} — ${(f.size/1024).toFixed(0)} KB`;
+});
+
+function mostrarEncuentroMensaje(texto, tipo) {
+  if (!texto) { encuentroMensaje.style.display = 'none'; encuentroMensaje.textContent = ''; encuentroMensaje.className = 'mensaje'; return; }
+  encuentroMensaje.textContent = texto;
+  encuentroMensaje.className = `mensaje visible ${tipo || ''}`;
+  encuentroMensaje.style.display = 'block';
+}
+
+async function abrirModalEncuentro(dni) {
+  encDni.value = dni;
+  encuentroDniInfo.textContent = `DNI: ${dni}`;
+  mostrarEncuentroMensaje('', '');
+  botonEnviarEncuentro.disabled = false;
+  botonEnviarEncuentro.textContent = 'Enviar inscripción';
+  await cargarEncuentroConfig();
+  abrirModal(modalEncuentro);
+  setTimeout(() => encApellido.focus(), 120);
+}
+
+botonCancelarEncuentro.addEventListener('click', () => {
+  modalEncuentro.hidden = true;
+  modalEncuentro.setAttribute('aria-hidden', 'true');
+  mostrarMensaje('Inscripción al encuentro cancelada. Podés intentar con otro DNI.', 'error');
+});
+
+botonEnviarEncuentro.addEventListener('click', async () => {
+  const dni = encDni.value.trim();
+  const nombre = encNombre.value.trim();
+  const apellido = encApellido.value.trim();
+  const email = encEmail.value.trim();
+  const telefono = encTelefono.value.trim();
+  const telefonoLimpio = telefono.replace(/\D/g,'');
+  const ocupacion = encOcupacion.value.trim();
+  const opcionPago = encOpcionPago.value.trim();
+  if (apellido.length < 2) { mostrarEncuentroMensaje('Ingresá un apellido válido.', 'error'); encApellido.focus(); return; }
+  if (nombre.length < 2) { mostrarEncuentroMensaje('Ingresá un nombre válido.', 'error'); encNombre.focus(); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { mostrarEncuentroMensaje('Ingresá un correo electrónico válido.', 'error'); encEmail.focus(); return; }
+  if (!telefonoLimpio || telefonoLimpio.length < 8) { mostrarEncuentroMensaje('Ingresá un teléfono/celular válido (obligatorio).', 'error'); encTelefono.focus(); return; }
+  if (!ocupacion || !['Docente','Estudiante'].includes(ocupacion)) { mostrarEncuentroMensaje('Seleccioná una ocupación (Docente o Estudiante).', 'error'); encOcupacion.focus(); return; }
+  if (!opcionPago) { mostrarEncuentroMensaje('Seleccioná una opción de pago.', 'error'); encOpcionesPagoLista.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  mostrarEncuentroMensaje('', '');
+  botonEnviarEncuentro.disabled = true;
+  botonEnviarEncuentro.textContent = 'Enviando…';
+  try {
+    const fd = new FormData();
+    fd.append('dni', dni);
+    fd.append('nombre', nombre);
+    fd.append('apellido', apellido);
+    fd.append('email', email);
+    fd.append('telefono', telefono);
+    fd.append('fecha_nacimiento', encFechaNacimiento.value.trim());
+    fd.append('provincia', encProvincia.value.trim());
+    fd.append('ciudad', encCiudad.value.trim());
+    fd.append('ocupacion', encOcupacion.value.trim());
+    fd.append('opcion_pago', opcionPago);
+    if (encComprobante.files && encComprobante.files[0]) fd.append('comprobante', encComprobante.files[0]);
+    const res = await fetch('/api/encuentro', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      mostrarEncuentroMensaje(data.error || 'No se pudo inscribir al encuentro.', 'error');
+      botonEnviarEncuentro.disabled = false;
+      botonEnviarEncuentro.textContent = 'Enviar inscripción';
+      return;
+    }
+    modalEncuentro.hidden = true;
+    modalEncuentro.setAttribute('aria-hidden', 'true');
+    formEncuentro.reset();
+    if (encOpcionesPagoLista) encOpcionesPagoLista.querySelectorAll('input[type=radio]').forEach(r => r.checked = false);
+    encOpcionPago.value = '';
+    if (encComprobanteInfo) encComprobanteInfo.textContent = '';
+    mostrarMensaje('¡Inscripción al encuentro registrada! Ahora completá tus datos para los talleres.', 'ok');
+    const datos = data.persona || { dni, nombre, apellido, email, telefono };
+    mostrarDatosParticipante(datos);
+    mostrarPasoDatos();
+  } catch (e) {
+    mostrarEncuentroMensaje('No se pudo conectar con el servidor. Intentá de nuevo.', 'error');
+    botonEnviarEncuentro.disabled = false;
+    botonEnviarEncuentro.textContent = 'Enviar inscripción';
+  }
+});
+
+formEncuentro.addEventListener('submit', (e) => { e.preventDefault(); botonEnviarEncuentro.click(); });
 
 function abrirModal(modal) {
   modal.hidden = false;
@@ -328,15 +492,7 @@ function deshabilitarSinCupo(container) {
   });
 }
 
-botonCancelar.addEventListener('click', () => {
-  window.location.href = '/index.html';
-});
 
-botonInscribirse.addEventListener('click', () => {
-  if (urlEncuentro) {
-    window.location.href = urlEncuentro;
-  }
-});
 
 botonYaInscripto.addEventListener('click', () => {
   pendingDniYaInscripto = '';
@@ -558,8 +714,7 @@ async function verificarDni() {
       return;
     }
     if (!data.encontrado) {
-      urlEncuentro = data.urlEncuentro || '';
-      abrirModal(modalEncuentro);
+      abrirModalEncuentro(dni);
       return;
     }
     mostrarDatosParticipante(data);

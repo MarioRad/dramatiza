@@ -760,7 +760,7 @@ function renderEncuentroPersonas(lista) {
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 12;
+    td.colSpan = 13;
     const hayFiltro = Boolean(q || filtroEstado);
     td.textContent = hayFiltro ? 'Sin resultados para el filtro.' : 'No hay personas importadas del encuentro.';
     td.style.color = 'var(--color-texto-suave)';
@@ -842,6 +842,24 @@ function renderEncuentroPersonas(lista) {
     tdOpcionPago.style.textOverflow = 'ellipsis';
     tdOpcionPago.style.whiteSpace = 'nowrap';
 
+    const tdComprobante = document.createElement('td');
+    tdComprobante.style.fontSize = '0.78rem';
+    tdComprobante.style.textAlign = 'center';
+    if (p.comprobante) {
+      const a = document.createElement('a');
+      a.href = `/api/admin/encuentro/${p.id}/comprobante`;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = p.comprobante_nombre ? p.comprobante_nombre.slice(0,18) : 'Ver';
+      a.title = p.comprobante_nombre || p.comprobante;
+      a.className = 'badge badge-encuentro-si';
+      a.style.textDecoration = 'none';
+      tdComprobante.appendChild(a);
+    } else {
+      tdComprobante.textContent = '—';
+      tdComprobante.style.color = 'var(--color-texto-suave)';
+    }
+
     const tdAccion = document.createElement('td');
     const contenedorAcciones = document.createElement('div');
     contenedorAcciones.className = 'acciones-fila';
@@ -886,6 +904,7 @@ function renderEncuentroPersonas(lista) {
       tdCiudad,
       tdOcupacion,
       tdOpcionPago,
+      tdComprobante,
       tdAccion
     );
     cuerpo.appendChild(tr);
@@ -906,6 +925,22 @@ function abrirModalEncuentro(persona) {
   modalEncuentroCiudad.value = persona.ciudad || '';
   modalEncuentroOcupacion.value = persona.ocupacion || '';
   modalEncuentroOpcionPago.value = persona.opcion_pago || '';
+  const box = document.getElementById('encuentroComprobanteBox');
+  if (box) {
+    box.innerHTML = '';
+    if (persona.comprobante) {
+      const a = document.createElement('a');
+      a.href = `/api/admin/encuentro/${persona.id}/comprobante`;
+      a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = persona.comprobante_nombre ? `Ver ${persona.comprobante_nombre}` : 'Ver comprobante';
+      a.className = 'badge badge-encuentro-si'; a.style.textDecoration = 'none';
+      box.appendChild(a);
+      const t = document.createElement('span'); t.textContent = ` (${persona.comprobante_tipo || ''})`; t.style.marginLeft = '0.4rem'; box.appendChild(t);
+    } else {
+      box.textContent = 'Sin comprobante subido.';
+      box.style.color = 'var(--color-texto-suave)';
+    }
+  }
   modalEncuentro.hidden = false;
   modalEncuentro.setAttribute('aria-hidden', 'false');
 }

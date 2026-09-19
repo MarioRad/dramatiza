@@ -70,6 +70,10 @@ async function initPool() {
       await pool.query(`CREATE TABLE IF NOT EXISTS bloque_ponentes (id SERIAL PRIMARY KEY, bloque_id INTEGER NOT NULL REFERENCES programa_bloques(id) ON DELETE CASCADE, ponente_id INTEGER NOT NULL REFERENCES ponentes(id) ON DELETE CASCADE, orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (bloque_id, ponente_id))`).catch(()=>{});
       await pool.query('CREATE INDEX IF NOT EXISTS idx_bloque_ponentes_bloque ON bloque_ponentes(bloque_id)').catch(()=>{});
       await pool.query('CREATE INDEX IF NOT EXISTS idx_bloque_ponentes_ponente ON bloque_ponentes(ponente_id)').catch(()=>{});
+      // Comprobante encuentro (form nativo)
+      await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -428,11 +432,57 @@ async function importarEncuentro(personas) {
   return resultado;
 }
 
+async function crearEncuentroInscripcion({ dni, nombre, apellido, email, telefono = '', fechaNacimiento = '', provincia = '', ciudad = '', ocupacion = '', opcionPago = '', comprobante = '', comprobanteNombre = '', comprobanteTipo = '' }) {
+  const dniLimpio = String(dni || '').replace(/\D/g, '');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+  if (!String(nombre || '').trim() || String(nombre).trim().length < 2) throw new HttpError(400, 'Nombre inválido.');
+  if (!String(apellido || '').trim() || String(apellido).trim().length < 2) throw new HttpError(400, 'Apellido inválido.');
+  const emailLimpio = String(email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpio)) throw new HttpError(400, 'Email inválido.');
+  const telLimpio = String(telefono || '').replace(/\D/g, '');
+  if (!telLimpio || telLimpio.length < 8) throw new HttpError(400, 'Teléfono/celular obligatorio.');
+  if (!['Docente','Estudiante'].includes(String(ocupacion||'').trim())) throw new HttpError(400, 'Ocupación debe ser Docente o Estudiante.');
+  const existente = await queryOne('SELECT id, dni FROM encuentro_inscripciones WHERE dni = ?', [dniLimpio]);
+  if (existente) throw new HttpError(409, 'Ese DNI ya está inscripto al encuentro.');
+  const marcaTemporal = new Date().toISOString();
+  await mutation(
+    `INSERT INTO encuentro_inscripciones
+       (dni, nombre, apellido, email, telefono, pago, marca_temporal, fecha_nacimiento, provincia, ciudad, ocupacion, opcion_pago, comprobante, comprobante_nombre, comprobante_tipo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      dniLimpio,
+      String(nombre).trim(),
+      String(apellido).trim(),
+      emailLimpio,
+      String(telefono || '').replace(/\D/g, ''),
+      '',
+      marcaTemporal,
+      String(fechaNacimiento || '').trim(),
+      String(provincia || '').trim(),
+      String(ciudad || '').trim(),
+      String(ocupacion || '').trim(),
+      String(opcionPago || '').trim(),
+      String(comprobante || ''),
+      String(comprobanteNombre || ''),
+      String(comprobanteTipo || ''),
+    ]
+  );
+  await asignarPlanAutomaticoAsistente(dniLimpio, marcaTemporal).catch(() => {});
+  return { dni: dniLimpio };
+}
+
+function getComprobanteUrl(valor) {
+  if (!valor) return '';
+  if (/^https?:\/\//.test(valor)) return valor;
+  // valor es nombre de archivo en storage o local
+  return `/uploads/comprobantes/${valor}`;
+}
+
 async function listarEncuentro() {
   return query(
     `SELECT e.id, e.dni, e.nombre, e.apellido, e.email, e.telefono, e.pago,
             e.marca_temporal, e.fecha_nacimiento, e.provincia, e.ciudad, e.ocupacion,
-            e.opcion_pago, e.creado_en, e.oculto,
+            e.opcion_pago, e.comprobante, e.comprobante_nombre, e.comprobante_tipo, e.creado_en, e.oculto,
        EXISTS (SELECT 1 FROM inscripciones i WHERE i.dni = e.dni) AS tiene_talleres
      FROM encuentro_inscripciones e
      WHERE e.oculto = FALSE
@@ -1901,6 +1951,7 @@ module.exports = {
   buscarEncuentroPorDni,
   listarInscripcionesPorDni,
   importarEncuentro,
+  crearEncuentroInscripcion,
   listarEncuentro,
   actualizarEncuentroPersona,
   ocultarEncuentroPersona,
@@ -1953,6 +2004,7 @@ module.exports = {
   asegurarPlanAutomatico,
   asignarPlanAutomaticoAsistente,
   asignarPlanesAutomaticos,
+  getComprobanteUrl,
   listarNotificaciones,
   listarNotificacionesActivas,
   contarNotificacionesSinLeer,

@@ -115,15 +115,104 @@
   <div id="vistaDisertantes" class="programa-container" hidden></div>
 
   <div id="modalEncuentro" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-aviso" role="dialog" aria-modal="true" aria-labelledby="modalEncuentroTitulo">
+    <div class="modal-contenido modal-contenido-amplio modal-contenido-asistente modal-gforms" role="dialog" aria-modal="true" aria-labelledby="modalEncuentroTitulo">
       <div class="modal-cuerpo">
-        <div class="modal-aviso-icono">&#x1F3AD;</div>
-        <h3 id="modalEncuentroTitulo">Atención!</h3>
-        <p>Detectamos que no estás inscripto al encuentro. El DNI ingresado no figura en el listado de inscriptos.</p>
+        <!-- Header estilo Google Forms -->
+        <div class="gforms-header">
+          <div class="gforms-header-bar"></div>
+          <div class="gforms-header-body">
+            <h3 id="modalEncuentroTitulo">Inscripción al Encuentro Nacional Dramatiza Salta 2026</h3>
+            <p class="gforms-header-desc">Completá este formulario para inscribirte al encuentro. Una vez registrado podrás elegir tus talleres. Los campos marcados con <span class="gforms-req">*</span> son obligatorios.</p>
+            <p id="encuentroDniInfo" class="ayuda" style="font-weight:600;margin-top:0.5rem"></p>
+          </div>
+        </div>
+
+        <form id="formEncuentro" novalidate>
+          <div id="encuentroMensaje" class="mensaje" role="alert" style="display:none"></div>
+
+          <!-- Sección 1: Datos personales (como Google Forms) -->
+          <div class="gforms-card">
+            <div class="gforms-card-titulo">Datos personales</div>
+            <div class="gforms-grid">
+              <div class="campo">
+                <label for="encDni">DNI <span class="gforms-req">*</span></label>
+                <input type="text" id="encDni" readonly class="campo-readonly" inputmode="numeric" maxlength="8">
+                <p class="ayuda-campo">Sin puntos, 7 u 8 dígitos.</p>
+              </div>
+              <div class="campo">
+                <label for="encFechaNacimiento">Fecha de nacimiento</label>
+                <input type="text" id="encFechaNacimiento" placeholder="DD/MM/AAAA" maxlength="10">
+              </div>
+              <div class="campo">
+                <label for="encApellido">Apellido <span class="gforms-req">*</span></label>
+                <input type="text" id="encApellido" required minlength="2" maxlength="100" autocomplete="family-name" placeholder="Tu apellido">
+              </div>
+              <div class="campo">
+                <label for="encNombre">Nombre <span class="gforms-req">*</span></label>
+                <input type="text" id="encNombre" required minlength="2" maxlength="100" autocomplete="given-name" placeholder="Tu nombre">
+              </div>
+              <div class="campo">
+                <label for="encEmail">Correo electrónico <span class="gforms-req">*</span></label>
+                <input type="email" id="encEmail" required maxlength="255" autocomplete="email" placeholder="ejemplo@correo.com">
+              </div>
+              <div class="campo">
+                <label for="encTelefono">Teléfono / Celular <span class="gforms-req">*</span></label>
+                <input type="tel" id="encTelefono" required inputmode="tel" maxlength="20" autocomplete="tel" placeholder="351 1234567">
+              </div>
+              <div class="campo">
+                <label for="encProvincia">Provincia</label>
+                <input type="text" id="encProvincia" maxlength="100" placeholder="Salta">
+              </div>
+              <div class="campo">
+                <label for="encCiudad">Ciudad / Localidad</label>
+                <input type="text" id="encCiudad" maxlength="100" placeholder="Salta Capital">
+              </div>
+              <div class="campo" style="grid-column:1/-1">
+                <label for="encOcupacion">Ocupación <span class="gforms-req">*</span></label>
+                <select id="encOcupacion" required>
+                  <option value="">Seleccionar...</option>
+                  <option value="Docente">Docente</option>
+                  <option value="Estudiante">Estudiante</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sección 2: Pago (alias + opciones) -->
+          <div class="gforms-card gforms-card--accent">
+            <div class="gforms-card-titulo" id="encTransferenciaTitulo">Datos para la transferencia</div>
+            <p class="ayuda" id="encTransferenciaDesc" style="margin-top:0">Realizá la transferencia al alias indicado y subí el comprobante.</p>
+            <div class="gforms-alias-box" id="encAliasBox">
+              <div class="gforms-alias-label">Alias</div>
+              <div class="gforms-alias-valor" id="encAliasValor">—</div>
+              <button type="button" class="boton boton-chico boton-secundario" id="btnCopiarAlias" title="Copiar alias">Copiar</button>
+            </div>
+            <p class="ayuda-campo" id="encAliasLeyenda" style="margin-top:0.4rem"></p>
+
+            <div class="campo" style="margin-top:1rem">
+              <label>Opción de pago en cuotas <span class="gforms-req">*</span></label>
+              <div id="encOpcionesPagoLista" class="gforms-radio-group">
+                <!-- se rellena por JS desde /api/encuentro/config -->
+                <p class="cargando">Cargando opciones...</p>
+              </div>
+              <input type="hidden" id="encOpcionPago" value="">
+            </div>
+          </div>
+
+          <!-- Sección 3: Comprobante -->
+          <div class="gforms-card">
+            <div class="gforms-card-titulo">Comprobante de transferencia <span class="campo-opcional">(opcional pero recomendado)</span></div>
+            <p class="ayuda" style="margin-top:0">Subí una imagen (JPG/PNG) o PDF del comprobante. Máx 8 MB.</p>
+            <div class="campo">
+              <input type="file" id="encComprobante" accept="image/*,application/pdf" style="padding:0.4rem">
+              <p class="ayuda-campo" id="encComprobanteInfo"></p>
+            </div>
+          </div>
+        </form>
       </div>
-      <div class="modal-acciones">
-        <button type="button" class="boton boton-modal" id="botonInscribirse">Inscribirse</button>
-        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelar">Cancelar</button>
+      <div class="modal-acciones gforms-acciones">
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEncuentro">Cancelar</button>
+        <button type="button" class="boton boton-modal" id="botonEnviarEncuentro">Enviar inscripción</button>
       </div>
     </div>
   </div>

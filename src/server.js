@@ -488,6 +488,27 @@ app.get('/api/ponentes', async (req, res, next) => {
   }
 });
 
+// ── Config pública para el form de encuentro (alias + opciones de pago) ──
+// IMPORTANTE: debe ir ANTES de /:dni para que "config" no sea interpretado como DNI
+app.get('/api/encuentro/config', async (req, res) => {
+  const alias = String(process.env.ENCUENTRO_ALIAS || '').trim();
+  const leyenda = String(process.env.ENCUENTRO_ALIAS_LEYENDA || '').trim();
+  const titulo = String(process.env.ENCUENTRO_TRANSFERENCIA_TITULO || 'Datos para la transferencia').trim();
+  const descripcion = String(process.env.ENCUENTRO_TRANSFERENCIA_DESCRIPCION || 'Realizá la transferencia al alias indicado y subí el comprobante (imagen o PDF, máx 8 MB).').trim();
+  let opcionesPago = [];
+  const raw = String(process.env.ENCUENTRO_OPCIONES_PAGO || '').trim();
+  if (raw) {
+    opcionesPago = raw.split('|').map(s => s.trim()).filter(Boolean);
+  } else {
+    // Solo Septiembre-Octubre + Otro (requerimiento actual)
+    opcionesPago = [
+      '2 cuotas de $65.000 - Total $130.000 (Septiembre-Octubre)',
+      'Otro',
+    ];
+  }
+  res.json({ alias, leyenda, titulo, descripcion, opcionesPago });
+});
+
 app.get('/api/encuentro/:dni', async (req, res, next) => {
   try {
     const dni = String(req.params.dni || '').replace(/\D/g, '');
@@ -498,7 +519,8 @@ app.get('/api/encuentro/:dni', async (req, res, next) => {
     const inscripciones = await db.listarInscripcionesPorDni(dni);
     const respuesta = {
       encontrado: !!persona,
-      urlEncuentro: persona ? '' : process.env.ENCUENTRO_FORM_URL || '',
+      // urlEncuentro se mantiene por compatibilidad pero ya no se usa (form nativo)
+      urlEncuentro: '',
       inscripto: inscripciones.length > 0,
       puedeInscribirse: inscripciones.length < 2,
       inscripciones: inscripciones.map((i) => ({
@@ -517,6 +539,99 @@ app.get('/api/encuentro/:dni', async (req, res, next) => {
       respuesta.telefono = persona.telefono;
     }
     res.json(respuesta);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── Upload comprobante (encuentro) ──────────────────────────────────
+const COMPROBANTES_DIR = path.join(UPLOADS_DIR, 'comprobantes');
+function ensureComprobantesDir() { if (!fs.existsSync(COMPROBANTES_DIR)) fs.mkdirSync(COMPROBANTES_DIR, { recursive: true }); }
+const uploadComprobante = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^(image\/|application\/pdf)/.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Solo se permiten imágenes o PDF para el comprobante'));
+  },
+});
+function supabaseComprobantePath(filename) { return `comprobantes/${filename}`; }
+async function uploadComprobanteToStorage(file) {
+  const ext = (path.extname(file.originalname) || (file.mimetype === 'application/pdf' ? '.pdf' : '.jpg')).toLowerCase();
+  const name = `${Date.now()}-${Math.round(Math.random()*1e9)}${ext}`;
+  const useSupabase = process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage;
+  if (useSupabase) {
+    try {
+      const storagePath = supabaseComprobantePath(name);
+      const { error } = await supabaseAdmin.storage.from(STORAGE_BUCKET).upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+      if (!error) return name;
+      console.warn('[Storage comprobante] Supabase falló, usando filesystem local:', error.message);
+    } catch (e) { console.warn('[Storage comprobante] Supabase error:', e.message); }
+  }
+  ensureComprobantesDir();
+  const dest = path.join(COMPROBANTES_DIR, name);
+  await fs.promises.writeFile(dest, file.buffer);
+  return name;
+}
+function getComprobanteUrl(filename) {
+  if (!filename) return '';
+  if (process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage) {
+    try {
+      const { data } = supabaseAdmin.storage.from(STORAGE_BUCKET).getPublicUrl(supabaseComprobantePath(filename));
+      if (data?.publicUrl && !data.publicUrl.includes('supabase.co/undefined')) return data.publicUrl;
+    } catch (_) {}
+  }
+  return `/uploads/comprobantes/${filename}`;
+}
+
+// Inscripción nativa al encuentro (reemplaza Google Forms/Sheets) — soporta JSON y multipart con comprobante
+app.post('/api/encuentro', uploadComprobante.single('comprobante'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const dni = String(body.dni || '').replace(/\D/g, '');
+    const nombre = String(body.nombre || '').trim();
+    const apellido = String(body.apellido || '').trim();
+    const email = String(body.email || '').trim();
+    const telefono = String(body.telefono || '').trim();
+    const fechaNacimiento = String(body.fecha_nacimiento || body.fechaNacimiento || '').trim();
+    const provincia = String(body.provincia || '').trim();
+    const ciudad = String(body.ciudad || '').trim();
+    const ocupacion = String(body.ocupacion || '').trim();
+    const opcionPago = String(body.opcion_pago || body.opcionPago || body.opcionPagoSelect || '').trim();
+
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+    if (nombre.length < 2 || nombre.length > 100) throw new db.HttpError(400, 'Ingresá un nombre válido (entre 2 y 100 caracteres).');
+    if (apellido.length < 2 || apellido.length > 100) throw new db.HttpError(400, 'Ingresá un apellido válido (entre 2 y 100 caracteres).');
+    if (!validarEmail(email)) throw new db.HttpError(400, 'Ingresá un correo electrónico válido.');
+    const telLimpio = String(telefono || '').replace(/\D/g, '');
+    if (!telLimpio || telLimpio.length < 8) throw new db.HttpError(400, 'Ingresá un teléfono/celular válido (obligatorio).');
+    const ocupacionesValidas = ['Docente', 'Estudiante'];
+    if (!ocupacionesValidas.includes(ocupacion)) throw new db.HttpError(400, 'Seleccioná una ocupación válida (Docente o Estudiante).');
+    const opcionesValidas = [
+      '2 cuotas de $65.000 - Total $130.000 (Septiembre-Octubre)',
+      'Otro',
+    ];
+    // permitir también si viene de ENCUENTRO_OPCIONES_PAGO custom
+    const rawOpt = String(process.env.ENCUENTRO_OPCIONES_PAGO || '').trim();
+    const opcionesPermitidas = rawOpt ? rawOpt.split('|').map(s=>s.trim()).filter(Boolean) : opcionesValidas;
+    if (!opcionesPermitidas.includes(opcionPago)) throw new db.HttpError(400, 'Seleccioná una opción de pago válida (Septiembre-Octubre u Otro).');
+
+    let comprobante = '';
+    let comprobanteNombre = '';
+    let comprobanteTipo = '';
+    if (req.file) {
+      comprobante = await uploadComprobanteToStorage(req.file);
+      comprobanteNombre = req.file.originalname || comprobante;
+      comprobanteTipo = req.file.mimetype || '';
+    }
+
+    await db.crearEncuentroInscripcion({
+      dni, nombre, apellido, email, telefono, fechaNacimiento, provincia, ciudad, ocupacion, opcionPago,
+      comprobante, comprobanteNombre, comprobanteTipo,
+    });
+    await db.registrarEvento('encuentro_inscripto_web', `Inscripción al encuentro: ${nombre} ${apellido} (DNI ${dni})${comprobante ? ' con comprobante' : ''}`, 'web');
+    const persona = await db.buscarEncuentroPorDni(dni);
+    res.status(201).json({ ok: true, dni, persona, comprobante: comprobante ? getComprobanteUrl(comprobante) : '' });
   } catch (e) {
     next(e);
   }
@@ -574,13 +689,12 @@ app.post('/api/inscripciones', async (req, res, next) => {
 
     const inscripcionesPost = await db.listarInscripcionesPorDni(dni);
 
-    const urlEncuentro = process.env.ENCUENTRO_FORM_URL || '';
     const respuesta = { ok: true, mensaje: 'Inscripción registrada con éxito. ¡Nos vemos en el taller!' };
     if (!enEncuentro) {
       respuesta.aviso = {
-        texto: 'Tu DNI no figura en el listado del encuentro.',
-        url: urlEncuentro,
-        accion: urlEncuentro ? 'Completá tu inscripción al encuentro' : '',
+        texto: 'Tu inscripción al encuentro fue registrada. Ya podés continuar.',
+        url: '',
+        accion: '',
       };
     }
     respuesta.inscripcion = {
@@ -1717,7 +1831,7 @@ app.post('/api/admin/encuentro/import', requireAuth, requirePermiso('perm_encuen
   }
 });
 
-// Ruta que recibe los datos desde Google Sheets
+// Ruta legacy que recibe los datos desde Google Sheets (compatibilidad, ya no necesaria con form nativo POST /api/encuentro)
 app.post('/api/admin/insertar-datos', requireApiKey, async (req, res, next) => {
   try {
     const { datos } = req.body || {};
@@ -1805,6 +1919,25 @@ app.delete('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro')
   } catch (e) {
     next(e);
   }
+});
+
+// Servir comprobante con auth (local o Supabase public url)
+app.get('/api/admin/encuentro/:id/comprobante', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const fila = await db.queryOne('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM encuentro_inscripciones WHERE id = ?', [id]);
+    if (!fila || !fila.comprobante) throw new db.HttpError(404, 'Sin comprobante.');
+    const url = getComprobanteUrl(fila.comprobante);
+    // Si es Supabase, redirigir
+    if (/^https?:\/\//.test(url)) return res.redirect(url);
+    // Local: servir archivo
+    const localPath = path.join(COMPROBANTES_DIR, path.basename(fila.comprobante));
+    if (!fs.existsSync(localPath)) throw new db.HttpError(404, 'Archivo no encontrado.');
+    res.set('Content-Disposition', `inline; filename="${(fila.comprobante_nombre || fila.comprobante).replace(/"/g,'')}"`);
+    if (fila.comprobante_tipo) res.set('Content-Type', fila.comprobante_tipo);
+    res.sendFile(localPath);
+  } catch (e) { next(e); }
 });
 
 // ── Programa (público) ────────────────────────────────────────────────

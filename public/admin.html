@@ -286,17 +286,18 @@
               <div class="tabla-envoltura">
                 <table id="tablaEncuentroPersonas">
                   <colgroup>
-                    <col style="width:8%">
+                    <col style="width:7%">
+                    <col style="width:10%">
                     <col style="width:11%">
-                    <col style="width:11%">
-                    <col style="width:14%">
-                    <col style="width:8%">
+                    <col style="width:13%">
                     <col style="width:7%">
                     <col style="width:7%">
-                    <col style="width:8%">
-                    <col style="width:8%">
                     <col style="width:7%">
                     <col style="width:7%">
+                    <col style="width:7%">
+                    <col style="width:7%">
+                    <col style="width:7%">
+                    <col style="width:6%">
                     <col style="width:4%">
                   </colgroup>
                   <thead>
@@ -312,6 +313,7 @@
                       <th>Ciudad / Localidad</th>
                       <th>Ocupación</th>
                       <th>Opción en pago cuotas</th>
+                      <th>Comprobante</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -922,6 +924,10 @@
         <div class="campo">
           <label for="encuentroOpcionPago">Opción en pago cuotas</label>
           <input type="text" id="encuentroOpcionPago">
+        </div>
+        <div class="campo" style="grid-column:1/-1">
+          <label>Comprobante</label>
+          <div id="encuentroComprobanteBox" class="ayuda"></div>
         </div>
       </div>
       <div class="modal-acciones">
