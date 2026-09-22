@@ -1862,17 +1862,25 @@ async function eliminarAsistentePlan(id) {
 }
 
 async function actualizarComprobanteCuota(asistentePlanId, numeroCuota, comprobante, comprobanteNombre, comprobanteTipo) {
-  const plan = await queryOne('SELECT id, dni, cantidad_cuotas FROM asistente_planes WHERE id = ?', [asistentePlanId]);
-  if (!plan) throw new HttpError(404, 'Plan de asistente no encontrado.');
+  const ap = await queryOne('SELECT id, dni, cantidad_cuotas, monto_total, cuotas FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  if (!ap) throw new HttpError(404, 'Plan de asistente no encontrado.');
   const num = Number(numeroCuota);
-  if (!Number.isInteger(num) || num < 1 || num > Number(plan.cantidad_cuotas)) throw new HttpError(400, `La cuota debe estar entre 1 y ${plan.cantidad_cuotas}.`);
-  // Upsert: si existe fila de pago, actualizar comprobante; si no, crear fila con monto 0 y luego poner comprobante
-  const existente = await queryOne('SELECT id FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, num]);
+  if (!Number.isInteger(num) || num < 1 || num > Number(ap.cantidad_cuotas)) throw new HttpError(400, `La cuota debe estar entre 1 y ${ap.cantidad_cuotas}.`);
+  const detalle = normalizarDetalleCuotas(ap.cuotas, ap.cantidad_cuotas, ap.monto_total);
+  const esperado = detalle.find(c => Number(c.numero) === num);
+  const montoEsperado = esperado ? Number(esperado.monto) : (Number(ap.monto_total) || 0) / (Number(ap.cantidad_cuotas) || 1);
+  const existente = await queryOne('SELECT id, monto, fecha_pago FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, num]);
+  const hoy = new Date().toISOString().slice(0,10);
   if (existente) {
-    await mutation('UPDATE pagos_cuotas SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ? WHERE asistente_plan_id = ? AND numero_cuota = ?', [String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||''), asistentePlanId, num]);
+    const montoActual = Number(existente.monto) || 0;
+    const fechaActual = existente.fecha_pago;
+    const montoFinal = montoActual > 0 ? montoActual : formatearMonto(montoEsperado);
+    const fechaFinal = fechaActual || hoy;
+    await mutation('UPDATE pagos_cuotas SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ?, monto = ?, fecha_pago = ? WHERE asistente_plan_id = ? AND numero_cuota = ?', [String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||''), montoFinal, fechaFinal, asistentePlanId, num]);
   } else {
-    await mutation('INSERT INTO pagos_cuotas (asistente_plan_id, numero_cuota, monto, fecha_pago, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?)', [asistentePlanId, num, 0, null, String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||'')]);
+    await mutation('INSERT INTO pagos_cuotas (asistente_plan_id, numero_cuota, monto, fecha_pago, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?)', [asistentePlanId, num, formatearMonto(montoEsperado), hoy, String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||'')]);
   }
+  await sincronizarEstadoPagoPorDni(String(ap.dni)).catch(()=>{});
   return { asistentePlanId: Number(asistentePlanId), numeroCuota: num, comprobante: String(comprobante||'') };
 }
 
