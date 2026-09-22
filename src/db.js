@@ -63,6 +63,10 @@ async function initPool() {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_certificados_dni ON certificados(dni)');
       await pool.query('CREATE TABLE IF NOT EXISTS taller_asistencias (id SERIAL PRIMARY KEY, dni TEXT NOT NULL, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, bloque_id INTEGER REFERENCES programa_bloques(id) ON DELETE SET NULL, tipo TEXT NOT NULL CHECK (tipo IN (\'ingreso\',\'egreso\')), usuario TEXT, registrado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())').catch(()=>{});
       await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_taller_asist ON taller_asistencias (dni, taller_id, COALESCE(bloque_id, -1), tipo)').catch(()=>{});
+      // 007_roles_superior_menu_taller_asistencia: operador_taller_asignaciones
+      await pool.query(`CREATE TABLE IF NOT EXISTS operador_taller_asignaciones (id SERIAL PRIMARY KEY, operador_username TEXT NOT NULL REFERENCES usuarios(username) ON DELETE CASCADE, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, dia DATE NOT NULL, bloque_id INTEGER REFERENCES programa_bloques(id) ON DELETE SET NULL, creado_por TEXT, creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())`).catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_op_taller_asig_operador ON operador_taller_asignaciones(operador_username)').catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_op_taller_asig_dia ON operador_taller_asignaciones(dia)').catch(()=>{});
       // 009_múltiple ponentes: talleres ↔ ponentes y bloques ↔ ponentes
       await pool.query(`CREATE TABLE IF NOT EXISTS taller_ponentes (id SERIAL PRIMARY KEY, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, ponente_id INTEGER NOT NULL REFERENCES ponentes(id) ON DELETE CASCADE, orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (taller_id, ponente_id))`).catch(()=>{});
       await pool.query('CREATE INDEX IF NOT EXISTS idx_taller_ponentes_taller ON taller_ponentes(taller_id)').catch(()=>{});
@@ -1670,7 +1674,11 @@ async function listarPagos() {
   const asistentes = query(
     `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas, a.es_tallerista,
             COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
-            COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
+            COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono,
+            COALESCE(e.id, 0) AS encuentro_id,
+            COALESCE(e.comprobante, '') AS comprobante,
+            COALESCE(e.comprobante_nombre, '') AS comprobante_nombre,
+            COALESCE(e.comprobante_tipo, '') AS comprobante_tipo
      FROM asistente_planes a
      LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
      ORDER BY e.apellido, e.nombre, a.dni`
@@ -1679,7 +1687,11 @@ async function listarPagos() {
       return query(
         `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas,
                 COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
-                COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono
+                COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono,
+                COALESCE(e.id, 0) AS encuentro_id,
+                COALESCE(e.comprobante, '') AS comprobante,
+                COALESCE(e.comprobante_nombre, '') AS comprobante_nombre,
+                COALESCE(e.comprobante_tipo, '') AS comprobante_tipo
          FROM asistente_planes a
          LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
          ORDER BY e.apellido, e.nombre, a.dni`
@@ -1708,6 +1720,11 @@ async function listarPagos() {
     apellido: a.apellido,
     email: a.email,
     telefono: a.telefono,
+    encuentroId: a.encuentro_id ? Number(a.encuentro_id) : null,
+    comprobante: a.comprobante || '',
+    comprobanteNombre: a.comprobante_nombre || '',
+    comprobanteTipo: a.comprobante_tipo || '',
+    tieneComprobante: Boolean(a.comprobante),
     planId: Number(a.plan_id),
     planNombre: planPorId.get(Number(a.plan_id))?.nombre || '',
     montoTotal: formatearMonto(a.monto_total),
@@ -1756,6 +1773,37 @@ async function sincronizarEstadoPagoPorDni(dni) {
   const estado = total === 0 ? 'no_pagado' : pagadas >= total ? 'pago_completo' : pagadas > 0 ? 'pago_parcial' : 'no_pagado';
   await mutation('UPDATE inscripciones SET estado_pago = ? WHERE dni = ?', [estado, dni]);
   return estado;
+}
+
+async function actualizarComprobantePorId(id, comprobante, comprobanteNombre, comprobanteTipo) {
+  const fila = await queryOne('SELECT id, comprobante FROM encuentro_inscripciones WHERE id = ?', [id]);
+  if (!fila) throw new HttpError(404, 'Registro del encuentro no encontrado.');
+  await mutation('UPDATE encuentro_inscripciones SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ? WHERE id = ?', [String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||''), id]);
+  return { id: Number(id), comprobante: String(comprobante||'') };
+}
+
+async function actualizarComprobantePorDni(dni, comprobante, comprobanteNombre, comprobanteTipo) {
+  const dniLimpio = String(dni||'').replace(/\D/g,'');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+  const existente = await queryOne('SELECT id FROM encuentro_inscripciones WHERE dni = ?', [dniLimpio]);
+  if (existente) {
+    await mutation('UPDATE encuentro_inscripciones SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ? WHERE dni = ?', [String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||''), dniLimpio]);
+    return { id: Number(existente.id), dni: dniLimpio, creado: false };
+  }
+  // Si no existe en encuentro, crear registro mínimo tomando datos de inscripciones si existe
+  const insc = await queryOne('SELECT nombre, apellido, email, telefono FROM inscripciones WHERE dni = ? LIMIT 1', [dniLimpio]);
+  const nombre = insc ? insc.nombre : '';
+  const apellido = insc ? insc.apellido : '';
+  const email = insc ? insc.email : '';
+  const telefono = insc ? insc.telefono : '';
+  // Si no hay inscripción tampoco, crear con datos mínimos (el admin luego puede completar)
+  const filas = await query(
+    `INSERT INTO encuentro_inscripciones (dni, nombre, apellido, email, telefono, comprobante, comprobante_nombre, comprobante_tipo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [dniLimpio, nombre, apellido, email, telefono, String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||'')]
+  );
+  const nuevoId = filas[0] ? Number(filas[0].id) : null;
+  return { id: nuevoId, dni: dniLimpio, creado: true };
 }
 
 // ── Notificaciones ──────────────────────────────────────────────────
@@ -2005,6 +2053,8 @@ module.exports = {
   asignarPlanAutomaticoAsistente,
   asignarPlanesAutomaticos,
   getComprobanteUrl,
+  actualizarComprobantePorId,
+  actualizarComprobantePorDni,
   listarNotificaciones,
   listarNotificacionesActivas,
   contarNotificacionesSinLeer,

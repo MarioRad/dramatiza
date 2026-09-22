@@ -855,9 +855,33 @@ function renderEncuentroPersonas(lista) {
       a.className = 'badge badge-encuentro-si';
       a.style.textDecoration = 'none';
       tdComprobante.appendChild(a);
+      const btnCambiar = document.createElement('button');
+      btnCambiar.type = 'button';
+      btnCambiar.className = 'boton boton-chico boton-secundario';
+      btnCambiar.textContent = 'Reemplazar';
+      btnCambiar.style.fontSize = '0.68rem';
+      btnCambiar.style.padding = '0.1rem 0.3rem';
+      btnCambiar.style.marginLeft = '0.3rem';
+      btnCambiar.title = 'Reemplazar comprobante';
+      btnCambiar.addEventListener('click', () => triggerSubirComprobanteEncuentro(p));
+      tdComprobante.appendChild(btnCambiar);
     } else {
-      tdComprobante.textContent = '—';
-      tdComprobante.style.color = 'var(--color-texto-suave)';
+      const badge = document.createElement('span');
+      badge.textContent = '○ Sin comprobante';
+      badge.className = 'badge badge-encuentro-no';
+      badge.style.fontSize = '0.72rem';
+      tdComprobante.appendChild(badge);
+      tdComprobante.appendChild(document.createElement('br'));
+      const btnSubir = document.createElement('button');
+      btnSubir.type = 'button';
+      btnSubir.className = 'boton boton-chico';
+      btnSubir.textContent = 'Subir';
+      btnSubir.style.fontSize = '0.68rem';
+      btnSubir.style.padding = '0.1rem 0.35rem';
+      btnSubir.style.marginTop = '0.2rem';
+      btnSubir.title = 'Agregar comprobante a la ficha del asistente';
+      btnSubir.addEventListener('click', () => triggerSubirComprobanteEncuentro(p));
+      tdComprobante.appendChild(btnSubir);
     }
 
     const tdAccion = document.createElement('td');
@@ -936,9 +960,21 @@ function abrirModalEncuentro(persona) {
       a.className = 'badge badge-encuentro-si'; a.style.textDecoration = 'none';
       box.appendChild(a);
       const t = document.createElement('span'); t.textContent = ` (${persona.comprobante_tipo || ''})`; t.style.marginLeft = '0.4rem'; box.appendChild(t);
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'boton boton-chico boton-secundario'; btn.textContent = 'Reemplazar';
+      btn.style.marginLeft = '0.6rem'; btn.style.fontSize = '0.75rem'; btn.style.padding = '0.15rem 0.4rem';
+      btn.addEventListener('click', () => triggerSubirComprobanteEncuentroDesdeModal(persona));
+      box.appendChild(btn);
     } else {
-      box.textContent = 'Sin comprobante subido.';
-      box.style.color = 'var(--color-texto-suave)';
+      const span = document.createElement('span');
+      span.textContent = 'Sin comprobante subido. ';
+      span.style.color = 'var(--color-texto-suave)';
+      box.appendChild(span);
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'boton boton-chico'; btn.textContent = 'Subir comprobante';
+      btn.style.fontSize = '0.75rem'; btn.style.padding = '0.15rem 0.4rem';
+      btn.addEventListener('click', () => triggerSubirComprobanteEncuentroDesdeModal(persona));
+      box.appendChild(btn);
     }
   }
   modalEncuentro.hidden = false;
@@ -3129,11 +3165,13 @@ function renderPagos() {
   const dniFiltro = filtroPagoDni.value.trim().replace(/\D/g, '');
   const visibles = pagosAsistentes.filter((a) => !dniFiltro || String(a.dni).includes(dniFiltro));
   const talleristasCount = pagosAsistentes.filter((x) => x.esTallerista || x.es_tallerista).length;
-  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length} · Talleristas 50%: ${talleristasCount} · Estándar: ${pagosAsistentes.length - talleristasCount}.`;
+  const conComp = pagosAsistentes.filter((x) => x.tieneComprobante || x.comprobante).length;
+  const sinComp = pagosAsistentes.length - conComp;
+  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length} · Talleristas 50%: ${talleristasCount} · Estándar: ${pagosAsistentes.length - talleristasCount} · Comprobantes: ${conComp} con / ${sinComp} sin.`;
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 7;
+    td.colSpan = 8;
     td.textContent = dniFiltro ? 'Sin resultados.' : 'No hay asistentes con plan asignado.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -3218,9 +3256,211 @@ function renderPagos() {
     spanEstado.textContent = ETIQUETAS_PAGO[estado] || '—';
     tdEstado.appendChild(spanEstado);
 
-    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado);
+    const tdComp = document.createElement('td');
+    tdComp.style.textAlign = 'center';
+    tdComp.style.whiteSpace = 'nowrap';
+    const tieneComp = Boolean(a.comprobante || a.tieneComprobante);
+    if (tieneComp) {
+      const badge = document.createElement('span');
+      badge.className = 'badge badge-encuentro-si';
+      badge.textContent = '✓ Con comprobante';
+      badge.title = a.comprobanteNombre || a.comprobante || 'Comprobante subido';
+      tdComp.appendChild(badge);
+      tdComp.appendChild(document.createElement('br'));
+      const btnVer = document.createElement('a');
+      // Usar encuentroId si existe, si no fallback a dni via nueva ruta no disponible -> usar id si hay
+      if (a.encuentroId) {
+        btnVer.href = `/api/admin/encuentro/${a.encuentroId}/comprobante`;
+      } else {
+        // fallback: no hay id, no mostrar ver
+        btnVer.href = '#';
+        btnVer.style.pointerEvents = 'none';
+        btnVer.style.opacity = '0.5';
+      }
+      btnVer.target = '_blank';
+      btnVer.rel = 'noopener';
+      btnVer.className = 'boton boton-chico boton-secundario';
+      btnVer.style.fontSize = '0.72rem';
+      btnVer.style.padding = '0.15rem 0.4rem';
+      btnVer.style.marginTop = '0.25rem';
+      btnVer.textContent = 'Ver';
+      btnVer.title = a.comprobanteNombre ? `Ver ${a.comprobanteNombre}` : 'Ver comprobante';
+      tdComp.appendChild(btnVer);
+      // Botón reemplazar
+      const btnReemplazar = document.createElement('button');
+      btnReemplazar.type = 'button';
+      btnReemplazar.className = 'boton boton-chico boton-secundario';
+      btnReemplazar.style.fontSize = '0.72rem';
+      btnReemplazar.style.padding = '0.15rem 0.4rem';
+      btnReemplazar.style.marginTop = '0.25rem';
+      btnReemplazar.style.marginLeft = '0.25rem';
+      btnReemplazar.textContent = 'Reemplazar';
+      btnReemplazar.title = 'Subir nuevo comprobante (reemplaza el actual)';
+      btnReemplazar.addEventListener('click', () => triggerSubirComprobante(a));
+      tdComp.appendChild(btnReemplazar);
+    } else {
+      const badge = document.createElement('span');
+      badge.className = 'badge badge-encuentro-no';
+      badge.textContent = '○ Sin comprobante';
+      tdComp.appendChild(badge);
+      tdComp.appendChild(document.createElement('br'));
+      const btnSubir = document.createElement('button');
+      btnSubir.type = 'button';
+      btnSubir.className = 'boton boton-chico';
+      btnSubir.style.fontSize = '0.72rem';
+      btnSubir.style.padding = '0.15rem 0.4rem';
+      btnSubir.style.marginTop = '0.25rem';
+      btnSubir.textContent = 'Subir';
+      btnSubir.title = 'Agregar comprobante a la ficha del asistente';
+      btnSubir.addEventListener('click', () => triggerSubirComprobante(a));
+      tdComp.appendChild(btnSubir);
+    }
+
+    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado, tdComp);
     tbody.appendChild(tr);
   }
+}
+
+function triggerSubirComprobante(asistente) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    document.body.removeChild(input);
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      mostrarMensaje(mensajePagos, 'El archivo supera 8 MB.', 'error');
+      return;
+    }
+    if (!/^(image\/|application\/pdf)/.test(file.type)) {
+      mostrarMensaje(mensajePagos, 'Solo se permiten imágenes o PDF.', 'error');
+      return;
+    }
+    mostrarMensaje(mensajePagos, `Subiendo comprobante para DNI ${asistente.dni}…`, 'info');
+    const fd = new FormData();
+    fd.append('dni', asistente.dni);
+    fd.append('comprobante', file);
+    try {
+      const res = await fetch('/api/admin/pagos/comprobante', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        mostrarMensaje(mensajePagos, data.error || 'No se pudo subir el comprobante.', 'error');
+        return;
+      }
+      mostrarMensaje(mensajePagos, `Comprobante subido para DNI ${asistente.dni}.`, 'ok');
+      await cargarPagos();
+    } catch (e) {
+      mostrarMensaje(mensajePagos, 'Error de red al subir comprobante.', 'error');
+    }
+  });
+  input.click();
+}
+
+function triggerSubirComprobanteEncuentro(persona) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    document.body.removeChild(input);
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      mostrarMensaje(mensajePanel, 'El archivo supera 8 MB.', 'error');
+      return;
+    }
+    if (!/^(image\/|application\/pdf)/.test(file.type)) {
+      mostrarMensaje(mensajePanel, 'Solo se permiten imágenes o PDF.', 'error');
+      return;
+    }
+    mostrarMensaje(mensajePanel, `Subiendo comprobante para ${persona.nombre} ${persona.apellido} (DNI ${persona.dni})…`, 'info');
+    const fd = new FormData();
+    fd.append('comprobante', file);
+    try {
+      const res = await fetch(`/api/admin/encuentro/${persona.id}/comprobante`, { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        mostrarMensaje(mensajePanel, data.error || 'No se pudo subir el comprobante.', 'error');
+        return;
+      }
+      mostrarMensaje(mensajePanel, `Comprobante subido para DNI ${persona.dni}.`, 'ok');
+      await cargarDatos();
+      if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
+      await cargarPagos();
+    } catch (e) {
+      mostrarMensaje(mensajePanel, 'Error de red al subir comprobante.', 'error');
+    }
+  });
+  input.click();
+}
+
+function triggerSubirComprobanteEncuentroDesdeModal(persona) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    document.body.removeChild(input);
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      mostrarMensaje(mensajeEncuentroModal, 'El archivo supera 8 MB.', 'error');
+      return;
+    }
+    if (!/^(image\/|application\/pdf)/.test(file.type)) {
+      mostrarMensaje(mensajeEncuentroModal, 'Solo se permiten imágenes o PDF.', 'error');
+      return;
+    }
+    mostrarMensaje(mensajeEncuentroModal, `Subiendo comprobante…`, 'info');
+    const fd = new FormData();
+    fd.append('comprobante', file);
+    try {
+      const res = await fetch(`/api/admin/encuentro/${persona.id}/comprobante`, { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        mostrarMensaje(mensajeEncuentroModal, data.error || 'No se pudo subir el comprobante.', 'error');
+        return;
+      }
+      mostrarMensaje(mensajeEncuentroModal, `Comprobante subido.`, 'ok');
+      // actualizar persona en memoria
+      persona.comprobante = data.comprobante || 'subido';
+      // recargar datos y refrescar modal box
+      await cargarDatos();
+      const actualizado = (encuentroPersonas || []).find(p => Number(p.id) === Number(persona.id));
+      if (actualizado) {
+        Object.assign(persona, actualizado);
+        // refrescar box del modal
+        const box = document.getElementById('encuentroComprobanteBox');
+        if (box) {
+          box.innerHTML = '';
+          if (persona.comprobante) {
+            const a = document.createElement('a');
+            a.href = `/api/admin/encuentro/${persona.id}/comprobante`;
+            a.target = '_blank'; a.rel = 'noopener';
+            a.textContent = persona.comprobante_nombre ? `Ver ${persona.comprobante_nombre}` : 'Ver comprobante';
+            a.className = 'badge badge-encuentro-si'; a.style.textDecoration = 'none';
+            box.appendChild(a);
+            const t = document.createElement('span'); t.textContent = ` (${persona.comprobante_tipo || file.type})`; t.style.marginLeft = '0.4rem'; box.appendChild(t);
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'boton boton-chico boton-secundario'; btn.textContent = 'Reemplazar';
+            btn.style.marginLeft = '0.6rem'; btn.style.fontSize = '0.75rem'; btn.style.padding = '0.15rem 0.4rem';
+            btn.addEventListener('click', () => triggerSubirComprobanteEncuentroDesdeModal(persona));
+            box.appendChild(btn);
+          }
+        }
+      }
+      if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
+      await cargarPagos();
+    } catch (e) {
+      mostrarMensaje(mensajeEncuentroModal, 'Error de red al subir comprobante.', 'error');
+    }
+  });
+  input.click();
 }
 
 function abrirModalCuota(a, numero, pagada) {

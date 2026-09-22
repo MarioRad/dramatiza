@@ -1940,6 +1940,36 @@ app.get('/api/admin/encuentro/:id/comprobante', requireAuth, requirePermiso('per
   } catch (e) { next(e); }
 });
 
+// Subir / reemplazar comprobante por ID de encuentro (admin agrega cuando falta)
+app.post('/api/admin/encuentro/:id/comprobante', requireAuth, requirePermiso('perm_encuentro'), uploadComprobante.single('comprobante'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    if (!req.file) throw new db.HttpError(400, 'Seleccioná un archivo de comprobante (imagen o PDF, máx 8 MB).');
+    const fila = await db.queryOne('SELECT id, dni, nombre, apellido FROM encuentro_inscripciones WHERE id = ?', [id]);
+    if (!fila) throw new db.HttpError(404, 'Registro del encuentro no encontrado.');
+    const nombreArchivo = await uploadComprobanteToStorage(req.file);
+    await db.actualizarComprobantePorId(id, nombreArchivo, req.file.originalname || nombreArchivo, req.file.mimetype || '');
+    await db.registrarEvento('comprobante_subido', `Comprobante subido para ${fila.nombre} ${fila.apellido} (DNI ${fila.dni}) - ${req.file.originalname}`, req.sesion.usuario);
+    res.json({ ok: true, comprobante: getComprobanteUrl(nombreArchivo) });
+  } catch (e) { next(e); }
+});
+
+// Subir comprobante por DNI (usado desde Gestión de pagos y cuotas)
+// Permite a admin agregar comprobante a asistentes que no lo subieron al inscribirse
+app.post('/api/admin/pagos/comprobante', requireAuth, requirePermiso('perm_inscripciones'), uploadComprobante.single('comprobante'), async (req, res, next) => {
+  try {
+    const dni = String(req.body.dni || req.body.DNI || '').replace(/\D/g,'');
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+    if (!req.file) throw new db.HttpError(400, 'Seleccioná un archivo de comprobante (imagen o PDF, máx 8 MB).');
+    const nombreArchivo = await uploadComprobanteToStorage(req.file);
+    const resultado = await db.actualizarComprobantePorDni(dni, nombreArchivo, req.file.originalname || nombreArchivo, req.file.mimetype || '');
+    const fila = await db.queryOne('SELECT nombre, apellido FROM encuentro_inscripciones WHERE dni = ?', [dni]);
+    await db.registrarEvento('comprobante_subido', `Comprobante subido por DNI ${dni}${fila ? ` (${fila.nombre} ${fila.apellido})` : ''} - ${req.file.originalname}`, req.sesion.usuario);
+    res.json({ ok: true, dni, encuentroId: resultado.id, comprobante: getComprobanteUrl(nombreArchivo) });
+  } catch (e) { next(e); }
+});
+
 // ── Programa (público) ────────────────────────────────────────────────
 
 app.get('/api/programa', async (req, res, next) => {
@@ -3108,16 +3138,25 @@ app.get('/api/certificados/verificar/:codigo/xml', async (req, res, next) => {
 
 // ── Admin Asignaciones (web) ────────────────────────────────────────
 app.get('/api/admin/asignaciones', requireAuth, async (req, res, next) => {
-  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const filas=await db.query(`SELECT a.*, t.nombre as taller_nombre, b.titulo as bloque_titulo FROM operador_taller_asignaciones a LEFT JOIN talleres t ON t.id=a.taller_id LEFT JOIN programa_bloques b ON b.id=a.bloque_id ORDER BY a.dia DESC, a.id DESC LIMIT 200`); res.json(filas); } catch(e){ next(e); }
+  try {
+    if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'});
+    try {
+      const filas=await db.query(`SELECT a.*, t.nombre as taller_nombre, b.titulo as bloque_titulo FROM operador_taller_asignaciones a LEFT JOIN talleres t ON t.id=a.taller_id LEFT JOIN programa_bloques b ON b.id=a.bloque_id ORDER BY a.dia DESC, a.id DESC LIMIT 200`);
+      return res.json(filas);
+    } catch(e) {
+      if (String(e.message).includes('no existe') || e.code==='42P01') return res.json([]);
+      throw e;
+    }
+  } catch(e){ next(e); }
 });
 app.post('/api/admin/asignaciones', requireAuth, async (req, res, next) => {
-  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia YYYY-MM-DD requeridos'}); await db.query('INSERT INTO operador_taller_asignaciones (operador_username, taller_id, dia, bloque_id, creado_por) VALUES (?,?,?,?,?)', [op,tid,d,bloqueId||null, req.sesion.usuario]); await db.registrarEvento('asignacion_creada', `Asignación ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.status(201).json({ok:true}); } catch(e){ next(e); }
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia YYYY-MM-DD requeridos'}); try { await db.query('INSERT INTO operador_taller_asignaciones (operador_username, taller_id, dia, bloque_id, creado_por) VALUES (?,?,?,?,?)', [op,tid,d,bloqueId||null, req.sesion.usuario]); } catch(e) { if (String(e.message).includes('no existe') || e.code==='42P01') return res.status(503).json({ error: 'Tabla operador_taller_asignaciones no existe. Ejecutá migración 007.' }); throw e; } await db.registrarEvento('asignacion_creada', `Asignación ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.status(201).json({ok:true}); } catch(e){ next(e); }
 });
 app.put('/api/admin/asignaciones/:id', requireAuth, async (req, res, next) => {
-  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia requeridos'}); const existe=await db.queryOne('SELECT id FROM operador_taller_asignaciones WHERE id=?',[id]); if(!existe) return res.status(404).json({error:'No encontrada'}); await db.query('UPDATE operador_taller_asignaciones SET operador_username=?, taller_id=?, dia=?, bloque_id=? WHERE id=?',[op,tid,d,bloqueId||null,id]); await db.registrarEvento('asignacion_reasignada', `Reasignación #${id}: ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); const { operador, tallerId, dia, bloqueId }=req.body||{}; const op=String(operador||'').trim().toLowerCase(); const tid=Number(tallerId); const d=String(dia||'').trim(); if(!op||!tid||!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({error:'operador, tallerId y dia requeridos'}); try { const existe=await db.queryOne('SELECT id FROM operador_taller_asignaciones WHERE id=?',[id]); if(!existe) return res.status(404).json({error:'No encontrada'}); await db.query('UPDATE operador_taller_asignaciones SET operador_username=?, taller_id=?, dia=?, bloque_id=? WHERE id=?',[op,tid,d,bloqueId||null,id]); } catch(e) { if (String(e.message).includes('no existe') || e.code==='42P01') return res.status(503).json({ error: 'Tabla operador_taller_asignaciones no existe. Ejecutá migración 007.' }); throw e; } await db.registrarEvento('asignacion_reasignada', `Reasignación #${id}: ${op} → taller ${tid} día ${d} por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
 });
 app.delete('/api/admin/asignaciones/:id', requireAuth, async (req, res, next) => {
-  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); await db.query('DELETE FROM operador_taller_asignaciones WHERE id=?',[id]); await db.registrarEvento('asignacion_eliminada', `Asignación #${id} eliminada por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
+  try { if(!esAdminOSuperior(req)) return res.status(403).json({error:'Solo admin/superior'}); const id=Number(req.params.id); if(!id) return res.status(400).json({error:'ID inválido'}); try { await db.query('DELETE FROM operador_taller_asignaciones WHERE id=?',[id]); } catch(e) { if (String(e.message).includes('no existe') || e.code==='42P01') return res.status(503).json({ error: 'Tabla operador_taller_asignaciones no existe. Ejecutá migración 007.' }); throw e; } await db.registrarEvento('asignacion_eliminada', `Asignación #${id} eliminada por ${req.sesion.usuario}`, req.sesion.usuario).catch(()=>{}); res.json({ok:true}); } catch(e){ next(e); }
 });
 
 // Job avisos 10/30min (poll cada 60s, usa notificaciones)
