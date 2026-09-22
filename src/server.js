@@ -1802,6 +1802,88 @@ app.delete('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripci
   }
 });
 
+// Edición y eliminación de registro en Pagos y Cuotas (corrige DNIs 7x etc)
+app.put('/api/admin/pagos/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const body = req.body || {};
+    const dni = String(body.dni || '').replace(/\D/g,'');
+    const planId = body.plan_id !== undefined ? Number(body.plan_id) : undefined;
+    const esTallerista = body.es_tallerista === true || body.es_tallerista === 1 || String(body.es_tallerista).toLowerCase() === 'true';
+    // permitir actualizar solo tallerista si no se manda dni/plan
+    const payload = {};
+    if (dni) payload.dni = dni;
+    if (planId !== undefined) payload.planId = planId;
+    payload.esTallerista = esTallerista;
+    // Si no se manda dni ni plan, igual actualizar tallerista
+    if (!dni && planId === undefined) {
+      await db.actualizarEsTalleristaAsistente(Number(id), esTallerista);
+      return res.json({ ok: true });
+    }
+    // Si falta alguno, tomar existente
+    const existente = await db.queryOne('SELECT dni, plan_id FROM asistente_planes WHERE id = ?', [id]);
+    if (!existente) throw new db.HttpError(404, 'Registro no encontrado.');
+    await db.actualizarAsistentePlan(Number(id), { dni: dni || existente.dni, planId: planId !== undefined ? planId : existente.plan_id, esTallerista });
+    await db.registrarEvento('pago_editado', `Registro de pago #${id} editado: DNI ${dni || existente.dni} plan ${planId || existente.plan_id}`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/admin/pagos/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    await db.eliminarAsistentePlan(Number(id));
+    await db.registrarEvento('pago_eliminado', `Registro de pago #${id} eliminado`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Comprobantes por cuota (hasta cantidadCuotas archivos: 2 o 3 según plan)
+app.get('/api/admin/pagos/:asistentePlanId/cuota/:numero/comprobante', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { asistentePlanId, numero } = req.params;
+    if (!esIdValido(asistentePlanId)) throw new db.HttpError(400, 'ID inválido.');
+    const num = Number(numero);
+    if (!Number.isInteger(num) || num < 1) throw new db.HttpError(400, 'Número de cuota inválido.');
+    const fila = await db.queryOne('SELECT comprobante, comprobante_nombre, comprobante_tipo FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, num]);
+    if (!fila || !fila.comprobante) throw new db.HttpError(404, 'Sin comprobante para esa cuota.');
+    const url = getComprobanteUrl(fila.comprobante);
+    if (/^https?:\/\//.test(url)) return res.redirect(url);
+    const localPath = path.join(COMPROBANTES_DIR, path.basename(fila.comprobante));
+    if (!fs.existsSync(localPath)) throw new db.HttpError(404, 'Archivo no encontrado.');
+    res.set('Content-Disposition', `inline; filename="${(fila.comprobante_nombre || fila.comprobante).replace(/"/g,'')}"`);
+    if (fila.comprobante_tipo) res.set('Content-Type', fila.comprobante_tipo);
+    res.sendFile(localPath);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/pagos/:asistentePlanId/cuota/:numero/comprobante', requireAuth, requirePermiso('perm_inscripciones'), uploadComprobante.single('comprobante'), async (req, res, next) => {
+  try {
+    const { asistentePlanId, numero } = req.params;
+    if (!esIdValido(asistentePlanId)) throw new db.HttpError(400, 'ID inválido.');
+    const num = Number(numero);
+    if (!Number.isInteger(num) || num < 1) throw new db.HttpError(400, 'Número de cuota inválido.');
+    if (!req.file) throw new db.HttpError(400, 'Seleccioná un archivo (imagen o PDF, máx 8 MB).');
+    const nombreArchivo = await uploadComprobanteToStorage(req.file);
+    await db.actualizarComprobanteCuota(Number(asistentePlanId), num, nombreArchivo, req.file.originalname || nombreArchivo, req.file.mimetype || '');
+    await db.registrarEvento('comprobante_cuota_subido', `Comprobante cuota ${num} subido para asistente_plan #${asistentePlanId} - ${req.file.originalname}`, req.sesion.usuario);
+    res.json({ ok: true, comprobante: getComprobanteUrl(nombreArchivo) });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/admin/pagos/:asistentePlanId/cuota/:numero/comprobante', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { asistentePlanId, numero } = req.params;
+    if (!esIdValido(asistentePlanId)) throw new db.HttpError(400, 'ID inválido.');
+    const num = Number(numero);
+    await db.eliminarComprobanteCuota(Number(asistentePlanId), num);
+    await db.registrarEvento('comprobante_cuota_eliminado', `Comprobante cuota ${num} eliminado para asistente_plan #${asistentePlanId}`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/admin/encuentro', requireAuth, requirePermiso('perm_encuentro'), async (req, res, next) => {
   try {
     const personas = await db.listarEncuentro();

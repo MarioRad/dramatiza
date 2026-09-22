@@ -399,7 +399,7 @@
               <div class="tabla-envoltura">
                 <table id="tablaPagos">
                   <thead>
-                    <tr><th>DNI</th><th>Nombre</th><th>Plan</th><th>Modo</th><th>Total / cuotas</th><th>Cuotas</th><th>Estado</th><th>Comprobante</th></tr>
+                    <tr><th>DNI</th><th>Nombre</th><th>Plan</th><th>Modo</th><th>Total / cuotas</th><th>Cuotas (pago + comprobante)</th><th>Estado</th><th>Comprobantes</th><th>Acciones</th></tr>
                   </thead>
                   <tbody></tbody>
                 </table>
@@ -1055,6 +1055,31 @@
       </div>
     </div>
   </div>
+  <div id="modalEditarPago" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-medio" role="dialog" aria-modal="true" aria-labelledby="modalEditarPagoTitulo">
+      <h3 id="modalEditarPagoTitulo">Editar registro de pago</h3>
+      <div id="mensajeEditarPago" class="mensaje" role="alert"></div>
+      <input type="hidden" id="editarPagoId">
+      <div class="campos">
+        <div class="campo">
+          <label for="editarPagoDni">DNI (7 u 8 dígitos) *</label>
+          <input type="text" id="editarPagoDni" inputmode="numeric" maxlength="8" required>
+          <p class="ayuda-campo">Corregí DNIs erróneos (ej: 77.xxx.xxx sin asistente).</p>
+        </div>
+        <div class="campo">
+          <label for="editarPagoPlan">Plan *</label>
+          <select id="editarPagoPlan"></select>
+        </div>
+        <div class="campo">
+          <label><input type="checkbox" id="editarPagoTallerista"> Tallerista (paga 50%)</label>
+        </div>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-modal" id="botonGuardarEditarPago">Guardar cambios</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEditarPago">Cancelar</button>
+      </div>
+    </div>
+  </div>
   <div id="modalQr" class="modal" hidden aria-hidden="true">
     <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalQrTitulo">
       <h3 id="modalQrTitulo">Acreditación</h3>
@@ -1156,6 +1181,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=32"></script>
+  <script src="/js/admin.js?v=33"></script>
 </body>
 </html>

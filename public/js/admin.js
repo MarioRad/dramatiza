@@ -3165,13 +3165,19 @@ function renderPagos() {
   const dniFiltro = filtroPagoDni.value.trim().replace(/\D/g, '');
   const visibles = pagosAsistentes.filter((a) => !dniFiltro || String(a.dni).includes(dniFiltro));
   const talleristasCount = pagosAsistentes.filter((x) => x.esTallerista || x.es_tallerista).length;
-  const conComp = pagosAsistentes.filter((x) => x.tieneComprobante || x.comprobante).length;
-  const sinComp = pagosAsistentes.length - conComp;
-  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length} · Talleristas 50%: ${talleristasCount} · Estándar: ${pagosAsistentes.length - talleristasCount} · Comprobantes: ${conComp} con / ${sinComp} sin.`;
+  // Contar comprobantes por cuota (multi-comprobante: hasta cantidadCuotas)
+  let totalSlots = 0, totalCompsCuota = 0;
+  for (const a of pagosAsistentes) {
+    totalSlots += Number(a.cantidadCuotas) || 1;
+    const comps = (a.cuotas || []).filter(c => c.comprobante || c.tieneComprobante).length;
+    totalCompsCuota += comps;
+  }
+  const conCompEncuentro = pagosAsistentes.filter((x) => x.tieneComprobante || x.comprobante).length;
+  resumenPagos.textContent = `Asistentes con plan: ${pagosAsistentes.length} · Talleristas: ${talleristasCount} · Comprobantes por cuota: ${totalCompsCuota}/${totalSlots}${conCompEncuentro ? ` · (encuentro único: ${conCompEncuentro} con)` : ''}.`;
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 8;
+    td.colSpan = 9;
     td.textContent = dniFiltro ? 'Sin resultados.' : 'No hay asistentes con plan asignado.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -3188,10 +3194,17 @@ function renderPagos() {
     const tdDni = document.createElement('td');
     tdDni.className = 'celda-dni';
     tdDni.textContent = a.dni;
+    // resaltar DNIs 7x sin nombre (huérfanos)
+    if (String(a.dni).startsWith('7') && (!a.nombre && !a.apellido)) {
+      tdDni.style.background = '#fff3cd';
+      tdDni.title = 'DNI 7x sin ficha de asistente - corregir o eliminar';
+    }
     const tdNombre = document.createElement('td');
     tdNombre.textContent = [a.apellido, a.nombre].filter(Boolean).join(', ') || '—';
+    if (!a.nombre && !a.apellido && String(a.dni).startsWith('7')) tdNombre.style.color = '#856404';
     const tdPlan = document.createElement('td');
     tdPlan.textContent = a.planNombre || '—';
+    tdPlan.title = `Plan ID ${a.planId} · ${n} cuota(s) · ${a.comprobante ? 'con comp. encuentro' : 'sin comp. encuentro'}`;
     const tdModo = document.createElement('td');
     tdModo.style.textAlign = 'center';
     const badgeModo = document.createElement('span');
@@ -3199,7 +3212,6 @@ function renderPagos() {
     badgeModo.textContent = esTallerista ? 'Tallerista 50%' : 'Estándar';
     badgeModo.title = esTallerista ? 'Paga el 50% del plan' : 'Paga el 100%';
     tdModo.appendChild(badgeModo);
-    // toggle button
     const btnToggle = document.createElement('button');
     btnToggle.type = 'button';
     btnToggle.className = 'boton boton-chico boton-secundario';
@@ -3233,18 +3245,61 @@ function renderPagos() {
     const tdCuotas = document.createElement('td');
     const caja = document.createElement('div');
     caja.className = 'pagos-cuotas';
+    caja.style.display = 'flex';
+    caja.style.flexWrap = 'wrap';
+    caja.style.gap = '6px';
     for (let i = 1; i <= n; i++) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '2px';
+      wrap.style.border = '1px solid var(--color-borde)';
+      wrap.style.borderRadius = '6px';
+      wrap.style.padding = '3px 4px';
+      wrap.style.minWidth = '58px';
+      const pago = (a.cuotas || []).find(c => Number(c.numero) === i);
       const pagada = pagadas.has(i);
+      const tieneCompCuota = Boolean(pago && (pago.comprobante || pago.tieneComprobante || pago.comprobanteNombre));
       const infoCuota = detalleCuotas.find((c) => Number(c.numero) === i);
       const montoEsperado = infoCuota ? Number(infoCuota.monto) : montoCuota(a, i);
       const tope = infoCuota && infoCuota.fecha_tope ? ` · vence ${formatearFechaTope(infoCuota.fecha_tope)}` : '';
+      const chip = document.createElement('button');
+      chip.type = 'button';
       chip.className = 'pagos-cuota' + (pagada ? ' pagos-cuota-pagada' : '');
       chip.textContent = pagada ? `✓ ${i}` : `${i}`;
-      chip.title = `Cuota ${i} · ${formatearMoneda(montoEsperado)}${tope}${esTallerista ? ' (50% tallerista)' : ''}`;
+      chip.title = `Cuota ${i} · ${formatearMoneda(montoEsperado)}${tope}${esTallerista ? ' (50% tallerista)' : ''} — clic para registrar pago`;
       chip.addEventListener('click', () => abrirModalCuota(a, i, pagada));
-      caja.appendChild(chip);
+      wrap.appendChild(chip);
+      // Botón comprobante por cuota (hasta n comprobantes)
+      if (tieneCompCuota) {
+        const btnVer = document.createElement('a');
+        btnVer.href = `/api/admin/pagos/${a.asistentePlanId}/cuota/${i}/comprobante`;
+        btnVer.target = '_blank'; btnVer.rel = 'noopener';
+        btnVer.textContent = '📄 Ver';
+        btnVer.className = 'boton boton-chico boton-secundario';
+        btnVer.style.fontSize = '0.65rem'; btnVer.style.padding = '0.1rem 0.25rem';
+        btnVer.title = pago.comprobanteNombre || 'Ver comprobante de cuota ' + i;
+        wrap.appendChild(btnVer);
+        const btnReemplazar = document.createElement('button');
+        btnReemplazar.type = 'button';
+        btnReemplazar.textContent = '↻';
+        btnReemplazar.title = 'Reemplazar comprobante cuota ' + i;
+        btnReemplazar.className = 'boton boton-chico boton-secundario';
+        btnReemplazar.style.fontSize = '0.65rem'; btnReemplazar.style.padding = '0.1rem 0.25rem';
+        btnReemplazar.addEventListener('click', () => triggerSubirComprobanteCuota(a.asistentePlanId, i));
+        wrap.appendChild(btnReemplazar);
+      } else {
+        const btnSubir = document.createElement('button');
+        btnSubir.type = 'button';
+        btnSubir.textContent = '📤 Subir';
+        btnSubir.title = `Subir comprobante cuota ${i} (hasta ${n})`;
+        btnSubir.className = 'boton boton-chico';
+        btnSubir.style.fontSize = '0.65rem'; btnSubir.style.padding = '0.1rem 0.25rem';
+        btnSubir.addEventListener('click', () => triggerSubirComprobanteCuota(a.asistentePlanId, i));
+        wrap.appendChild(btnSubir);
+      }
+      caja.appendChild(wrap);
     }
     tdCuotas.appendChild(caja);
 
@@ -3259,64 +3314,45 @@ function renderPagos() {
     const tdComp = document.createElement('td');
     tdComp.style.textAlign = 'center';
     tdComp.style.whiteSpace = 'nowrap';
-    const tieneComp = Boolean(a.comprobante || a.tieneComprobante);
-    if (tieneComp) {
-      const badge = document.createElement('span');
-      badge.className = 'badge badge-encuentro-si';
-      badge.textContent = '✓ Con comprobante';
-      badge.title = a.comprobanteNombre || a.comprobante || 'Comprobante subido';
-      tdComp.appendChild(badge);
-      tdComp.appendChild(document.createElement('br'));
-      const btnVer = document.createElement('a');
-      // Usar encuentroId si existe, si no fallback a dni via nueva ruta no disponible -> usar id si hay
-      if (a.encuentroId) {
-        btnVer.href = `/api/admin/encuentro/${a.encuentroId}/comprobante`;
-      } else {
-        // fallback: no hay id, no mostrar ver
-        btnVer.href = '#';
-        btnVer.style.pointerEvents = 'none';
-        btnVer.style.opacity = '0.5';
-      }
-      btnVer.target = '_blank';
-      btnVer.rel = 'noopener';
-      btnVer.className = 'boton boton-chico boton-secundario';
-      btnVer.style.fontSize = '0.72rem';
-      btnVer.style.padding = '0.15rem 0.4rem';
-      btnVer.style.marginTop = '0.25rem';
-      btnVer.textContent = 'Ver';
-      btnVer.title = a.comprobanteNombre ? `Ver ${a.comprobanteNombre}` : 'Ver comprobante';
-      tdComp.appendChild(btnVer);
-      // Botón reemplazar
-      const btnReemplazar = document.createElement('button');
-      btnReemplazar.type = 'button';
-      btnReemplazar.className = 'boton boton-chico boton-secundario';
-      btnReemplazar.style.fontSize = '0.72rem';
-      btnReemplazar.style.padding = '0.15rem 0.4rem';
-      btnReemplazar.style.marginTop = '0.25rem';
-      btnReemplazar.style.marginLeft = '0.25rem';
-      btnReemplazar.textContent = 'Reemplazar';
-      btnReemplazar.title = 'Subir nuevo comprobante (reemplaza el actual)';
-      btnReemplazar.addEventListener('click', () => triggerSubirComprobante(a));
-      tdComp.appendChild(btnReemplazar);
-    } else {
-      const badge = document.createElement('span');
-      badge.className = 'badge badge-encuentro-no';
-      badge.textContent = '○ Sin comprobante';
-      tdComp.appendChild(badge);
-      tdComp.appendChild(document.createElement('br'));
-      const btnSubir = document.createElement('button');
-      btnSubir.type = 'button';
-      btnSubir.className = 'boton boton-chico';
-      btnSubir.style.fontSize = '0.72rem';
-      btnSubir.style.padding = '0.15rem 0.4rem';
-      btnSubir.style.marginTop = '0.25rem';
-      btnSubir.textContent = 'Subir';
-      btnSubir.title = 'Agregar comprobante a la ficha del asistente';
-      btnSubir.addEventListener('click', () => triggerSubirComprobante(a));
-      tdComp.appendChild(btnSubir);
+    const compsCuotaCount = (a.cuotas || []).filter(c => c.comprobante || c.tieneComprobante).length;
+    const badge = document.createElement('span');
+    badge.className = compsCuotaCount === n ? 'badge badge-encuentro-si' : compsCuotaCount > 0 ? 'badge badge-pago pago_parcial' : 'badge badge-encuentro-no';
+    badge.textContent = `${compsCuotaCount}/${n}`;
+    badge.title = `${compsCuotaCount} de ${n} cuotas con comprobante` + (a.comprobante ? ' + 1 encuentro' : '');
+    tdComp.appendChild(badge);
+    if (a.comprobante) {
+      const extra = document.createElement('div');
+      extra.style.fontSize = '0.65rem'; extra.style.marginTop = '2px';
+      const aLink = document.createElement('a');
+      aLink.href = a.encuentroId ? `/api/admin/encuentro/${a.encuentroId}/comprobante` : '#';
+      aLink.target = '_blank'; aLink.rel = 'noopener';
+      aLink.textContent = 'encuentro 📄';
+      aLink.style.fontSize = '0.65rem';
+      extra.appendChild(aLink);
+      tdComp.appendChild(extra);
     }
 
-    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado, tdComp);
+    const tdAcc = document.createElement('td');
+    tdAcc.style.whiteSpace = 'nowrap';
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button'; btnEdit.className = 'boton boton-chico'; btnEdit.textContent = 'Editar';
+    btnEdit.title = 'Editar DNI / plan / tallerista';
+    btnEdit.addEventListener('click', () => abrirModalEditarPago(a));
+    const btnDel = document.createElement('button');
+    btnDel.type = 'button'; btnDel.className = 'boton boton-peligro boton-chico'; btnDel.textContent = 'Eliminar';
+    btnDel.style.marginLeft = '4px';
+    btnDel.title = 'Eliminar registro de pago';
+    btnDel.addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar registro de pago DNI ${a.dni} - ${a.planNombre}? Se borrarán también sus cuotas.`)) return;
+      btnDel.disabled = true;
+      const res = await api(`/api/admin/pagos/${a.asistentePlanId}`, { method: 'DELETE' });
+      if (!res.ok) mostrarMensaje(mensajePagos, res.data.error || 'No se pudo eliminar.', 'error');
+      else { mostrarMensaje(mensajePagos, 'Registro eliminado.', 'ok'); await cargarPagos(); }
+      btnDel.disabled = false;
+    });
+    tdAcc.appendChild(btnEdit); tdAcc.appendChild(btnDel);
+
+    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado, tdComp, tdAcc);
     tbody.appendChild(tr);
   }
 }
@@ -3462,6 +3498,92 @@ function triggerSubirComprobanteEncuentroDesdeModal(persona) {
   });
   input.click();
 }
+
+function triggerSubirComprobanteCuota(asistentePlanId, numero) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    document.body.removeChild(input);
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      mostrarMensaje(mensajePagos, 'El archivo supera 8 MB.', 'error');
+      return;
+    }
+    if (!/^(image\/|application\/pdf)/.test(file.type)) {
+      mostrarMensaje(mensajePagos, 'Solo se permiten imágenes o PDF.', 'error');
+      return;
+    }
+    if (numero > 3) {
+      mostrarMensaje(mensajePagos, 'Máximo 3 comprobantes (3 cuotas).', 'error');
+      return;
+    }
+    mostrarMensaje(mensajePagos, `Subiendo comprobante cuota ${numero}…`, 'info');
+    const fd = new FormData();
+    fd.append('comprobante', file);
+    try {
+      const res = await fetch(`/api/admin/pagos/${asistentePlanId}/cuota/${numero}/comprobante`, { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        mostrarMensaje(mensajePagos, data.error || 'No se pudo subir el comprobante.', 'error');
+        return;
+      }
+      mostrarMensaje(mensajePagos, `Comprobante cuota ${numero} subido.`, 'ok');
+      await cargarPagos();
+    } catch (e) {
+      mostrarMensaje(mensajePagos, 'Error de red al subir comprobante.', 'error');
+    }
+  });
+  input.click();
+}
+
+// ── Modal editar registro de pago (corrige DNI 7x, cambia plan) ──
+function abrirModalEditarPago(a) {
+  const modal = el('modalEditarPago');
+  const inputDni = el('editarPagoDni');
+  const selPlan = el('editarPagoPlan');
+  const chkTall = el('editarPagoTallerista');
+  const hidId = el('editarPagoId');
+  if (!modal || !inputDni || !selPlan) return;
+  hidId.value = a.asistentePlanId;
+  inputDni.value = a.dni;
+  // poblar planes
+  selPlan.innerHTML = '';
+  for (const p of planesPago) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    const marca = p.es_tallerista ? ' [Tallerista]' : '';
+    opt.textContent = `${p.nombre}${marca} — ${p.cantidad_cuotas} cuota(s)`;
+    if (Number(p.id) === Number(a.planId)) opt.selected = true;
+    selPlan.appendChild(opt);
+  }
+  if (chkTall) chkTall.checked = Boolean(a.esTallerista || a.es_tallerista);
+  mostrarMensaje(el('mensajeEditarPago'), '', '');
+  modal.hidden = false;
+  modal.setAttribute('aria-hidden', 'false');
+}
+function cerrarModalEditarPago() {
+  const modal = el('modalEditarPago');
+  if (modal) { modal.hidden = true; modal.setAttribute('aria-hidden', 'true'); }
+}
+if (el('botonCancelarEditarPago')) el('botonCancelarEditarPago').addEventListener('click', cerrarModalEditarPago);
+if (el('modalEditarPago')) el('modalEditarPago').addEventListener('click', (e) => { if (e.target === el('modalEditarPago')) cerrarModalEditarPago(); });
+if (el('botonGuardarEditarPago')) el('botonGuardarEditarPago').addEventListener('click', async () => {
+  const id = el('editarPagoId').value;
+  const dni = String(el('editarPagoDni').value || '').replace(/\D/g,'');
+  const planId = Number(el('editarPagoPlan').value);
+  const esTall = Boolean(el('editarPagoTallerista').checked);
+  if (!/^\d{7,8}$/.test(dni)) { mostrarMensaje(el('mensajeEditarPago'), 'DNI inválido (7 u 8 dígitos).', 'error'); return; }
+  if (!planId) { mostrarMensaje(el('mensajeEditarPago'), 'Seleccioná un plan.', 'error'); return; }
+  el('botonGuardarEditarPago').disabled = true;
+  const res = await api(`/api/admin/pagos/${id}`, { method: 'PUT', body: JSON.stringify({ dni, plan_id: planId, es_tallerista: esTall }) });
+  if (!res.ok) mostrarMensaje(el('mensajeEditarPago'), res.data.error || 'No se pudo guardar.', 'error');
+  else { mostrarMensaje(mensajePagos, 'Registro actualizado.', 'ok'); cerrarModalEditarPago(); await cargarPagos(); }
+  el('botonGuardarEditarPago').disabled = false;
+});
 
 function abrirModalCuota(a, numero, pagada) {
   cuotaContexto = { asistentePlanId: a.asistentePlanId, numero, pagada };

@@ -78,6 +78,10 @@ async function initPool() {
       await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       await pool.query(`ALTER TABLE encuentro_inscripciones ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      // Comprobantes por cuota (multi-comprobante según cantidad de cuotas)
+      await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -1700,15 +1704,29 @@ async function listarPagos() {
     throw e;
   });
   const pagos = query(
-    `SELECT asistente_plan_id, numero_cuota, monto, fecha_pago FROM pagos_cuotas ORDER BY numero_cuota`
-  );
+    `SELECT asistente_plan_id, numero_cuota, monto, fecha_pago, comprobante, comprobante_nombre, comprobante_tipo FROM pagos_cuotas ORDER BY numero_cuota`
+  ).catch(async (e) => {
+    if (e.code === '42703' && String(e.message).includes('comprobante')) {
+      const fallback = await query(`SELECT asistente_plan_id, numero_cuota, monto, fecha_pago FROM pagos_cuotas ORDER BY numero_cuota`);
+      return fallback.map(r => ({ ...r, comprobante: '', comprobante_nombre: '', comprobante_tipo: '' }));
+    }
+    throw e;
+  });
   const [planesRes, asistentesRes, pagosRes] = await Promise.all([planes, asistentes, pagos]);
 
   const pagosPorPlan = new Map();
   for (const p of pagosRes) {
     const clave = Number(p.asistente_plan_id);
     if (!pagosPorPlan.has(clave)) pagosPorPlan.set(clave, []);
-    pagosPorPlan.get(clave).push({ numero: Number(p.numero_cuota), monto: formatearMonto(p.monto), fecha: p.fecha_pago || '' });
+    pagosPorPlan.get(clave).push({
+      numero: Number(p.numero_cuota),
+      monto: formatearMonto(p.monto),
+      fecha: p.fecha_pago || '',
+      comprobante: p.comprobante || '',
+      comprobanteNombre: p.comprobante_nombre || '',
+      comprobanteTipo: p.comprobante_tipo || '',
+      tieneComprobante: Boolean(p.comprobante),
+    });
   }
 
   const planPorId = new Map(planesRes.map((pl) => [Number(pl.id), pl]));
@@ -1804,6 +1822,65 @@ async function actualizarComprobantePorDni(dni, comprobante, comprobanteNombre, 
   );
   const nuevoId = filas[0] ? Number(filas[0].id) : null;
   return { id: nuevoId, dni: dniLimpio, creado: true };
+}
+
+async function actualizarAsistentePlan(id, { dni, planId, esTallerista }) {
+  const existente = await queryOne('SELECT id, dni, plan_id FROM asistente_planes WHERE id = ?', [id]);
+  if (!existente) throw new HttpError(404, 'Registro de pago no encontrado.');
+  const dniLimpio = String(dni || existente.dni).replace(/\D/g,'');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+  // Validar unicidad: si cambia DNI o plan, verificar no duplique (dni, plan_id)
+  const planIdFinal = planId ? Number(planId) : Number(existente.plan_id);
+  if (!planIdFinal || !Number.isInteger(planIdFinal) || planIdFinal <= 0) throw new HttpError(400, 'Plan inválido.');
+  const plan = await queryOne('SELECT id, monto_total, cantidad_cuotas, cuotas FROM planes_pago WHERE id = ?', [planIdFinal]);
+  if (!plan) throw new HttpError(404, 'Plan no encontrado.');
+  // Si DNI cambió, verificar que no exista otro registro con mismo dni+plan
+  if (dniLimpio !== existente.dni || planIdFinal !== Number(existente.plan_id)) {
+    const dup = await queryOne('SELECT id FROM asistente_planes WHERE dni = ? AND plan_id = ? AND id <> ?', [dniLimpio, planIdFinal, id]);
+    if (dup) throw new HttpError(409, 'Ya existe ese DNI con ese plan.');
+  }
+  const factor = esTallerista ? 0.5 : 1;
+  const montoFinal = formatearMonto(Number(plan.monto_total) * factor);
+  const cuotasFinal = aplicarDescuentoTalleristaACuotas(plan.cuotas, factor);
+  await mutation('UPDATE asistente_planes SET dni = ?, plan_id = ?, monto_total = ?, cantidad_cuotas = ?, cuotas = ?, es_tallerista = ? WHERE id = ?', [dniLimpio, planIdFinal, montoFinal, Number(plan.cantidad_cuotas)||1, cuotasFinal, esTallerista ? true : false, id]);
+  if (dniLimpio !== existente.dni) {
+    // Ajustar sincronización de estado pago para ambos DNIs
+    await sincronizarEstadoPagoPorDni(dniLimpio).catch(()=>{});
+    await sincronizarEstadoPagoPorDni(String(existente.dni)).catch(()=>{});
+  } else {
+    await sincronizarEstadoPagoPorDni(dniLimpio).catch(()=>{});
+  }
+  return { id: Number(id), dni: dniLimpio, planId: planIdFinal };
+}
+
+async function eliminarAsistentePlan(id) {
+  const existente = await queryOne('SELECT id, dni FROM asistente_planes WHERE id = ?', [id]);
+  if (!existente) throw new HttpError(404, 'Registro de pago no encontrado.');
+  await mutation('DELETE FROM asistente_planes WHERE id = ?', [id]);
+  await sincronizarEstadoPagoPorDni(String(existente.dni)).catch(()=>{});
+  return true;
+}
+
+async function actualizarComprobanteCuota(asistentePlanId, numeroCuota, comprobante, comprobanteNombre, comprobanteTipo) {
+  const plan = await queryOne('SELECT id, dni, cantidad_cuotas FROM asistente_planes WHERE id = ?', [asistentePlanId]);
+  if (!plan) throw new HttpError(404, 'Plan de asistente no encontrado.');
+  const num = Number(numeroCuota);
+  if (!Number.isInteger(num) || num < 1 || num > Number(plan.cantidad_cuotas)) throw new HttpError(400, `La cuota debe estar entre 1 y ${plan.cantidad_cuotas}.`);
+  // Upsert: si existe fila de pago, actualizar comprobante; si no, crear fila con monto 0 y luego poner comprobante
+  const existente = await queryOne('SELECT id FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, num]);
+  if (existente) {
+    await mutation('UPDATE pagos_cuotas SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ? WHERE asistente_plan_id = ? AND numero_cuota = ?', [String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||''), asistentePlanId, num]);
+  } else {
+    await mutation('INSERT INTO pagos_cuotas (asistente_plan_id, numero_cuota, monto, fecha_pago, comprobante, comprobante_nombre, comprobante_tipo) VALUES (?, ?, ?, ?, ?, ?, ?)', [asistentePlanId, num, 0, null, String(comprobante||''), String(comprobanteNombre||''), String(comprobanteTipo||'')]);
+  }
+  return { asistentePlanId: Number(asistentePlanId), numeroCuota: num, comprobante: String(comprobante||'') };
+}
+
+async function eliminarComprobanteCuota(asistentePlanId, numeroCuota) {
+  const fila = await queryOne('SELECT id, comprobante FROM pagos_cuotas WHERE asistente_plan_id = ? AND numero_cuota = ?', [asistentePlanId, Number(numeroCuota)]);
+  if (!fila) throw new HttpError(404, 'Cuota no encontrada.');
+  await mutation('UPDATE pagos_cuotas SET comprobante = ?, comprobante_nombre = ?, comprobante_tipo = ? WHERE asistente_plan_id = ? AND numero_cuota = ?', ['', '', '', asistentePlanId, Number(numeroCuota)]);
+  return true;
 }
 
 // ── Notificaciones ──────────────────────────────────────────────────
@@ -2055,6 +2132,10 @@ module.exports = {
   getComprobanteUrl,
   actualizarComprobantePorId,
   actualizarComprobantePorDni,
+  actualizarAsistentePlan,
+  eliminarAsistentePlan,
+  actualizarComprobanteCuota,
+  eliminarComprobanteCuota,
   listarNotificaciones,
   listarNotificacionesActivas,
   contarNotificacionesSinLeer,
