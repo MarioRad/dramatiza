@@ -1775,20 +1775,28 @@ async function eliminarPagoCuota(asistentePlanId, numeroCuota) {
 }
 
 async function sincronizarEstadoPagoPorDni(dni) {
-  const planes = await query(
-    `SELECT ap.cantidad_cuotas,
-            (SELECT COUNT(*) FROM pagos_cuotas pc WHERE pc.asistente_plan_id = ap.id) AS cuotas_pagadas
-     FROM asistente_planes ap WHERE ap.dni = ?`,
-    [dni]
-  );
-  if (planes.length === 0) return;
-  let total = 0;
-  let pagadas = 0;
-  for (const p of planes) {
-    total += Number(p.cantidad_cuotas) || 1;
-    pagadas += Number(p.cuotas_pagadas) || 0;
+  const aps = await query('SELECT id, monto_total, cantidad_cuotas, cuotas FROM asistente_planes WHERE dni = ?', [dni]);
+  if (aps.length === 0) return;
+  let totalEsperado = 0;
+  let totalPagado = 0;
+  let todasCompletas = true;
+  for (const ap of aps) {
+    const detalle = normalizarDetalleCuotas(ap.cuotas, ap.cantidad_cuotas, ap.monto_total);
+    const esperadoPlan = detalle.reduce((s,c)=> s + (Number(c.monto)||0), 0);
+    totalEsperado += esperadoPlan;
+    const pagos = await query('SELECT numero_cuota, monto FROM pagos_cuotas WHERE asistente_plan_id = ?', [ap.id]);
+    const pagosMap = new Map(pagos.map(p=> [Number(p.numero_cuota), Number(p.monto)||0]));
+    totalPagado += pagos.reduce((s,p)=> s + (Number(p.monto)||0), 0);
+    for (const c of detalle) {
+      const montoPagado = pagosMap.get(Number(c.numero));
+      const esperado = Number(c.monto) || 0;
+      if (montoPagado === undefined || montoPagado + 0.01 < esperado) {
+        todasCompletas = false;
+      }
+    }
+    // si hay pagos de cuotas no esperadas (fuera de detalle) igual cuentan, pero ya se sumaron
   }
-  const estado = total === 0 ? 'no_pagado' : pagadas >= total ? 'pago_completo' : pagadas > 0 ? 'pago_parcial' : 'no_pagado';
+  const estado = totalEsperado === 0 ? 'no_pagado' : (todasCompletas && totalPagado + 0.01 >= totalEsperado) ? 'pago_completo' : totalPagado > 0 ? 'pago_parcial' : 'no_pagado';
   await mutation('UPDATE inscripciones SET estado_pago = ? WHERE dni = ?', [estado, dni]);
   return estado;
 }

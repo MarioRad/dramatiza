@@ -3304,11 +3304,29 @@ function renderPagos() {
     tdCuotas.appendChild(caja);
 
     const tdEstado = document.createElement('td');
-    const pagadasN = pagadas.size;
-    const estado = pagadasN >= n ? 'pago_completo' : pagadasN === 0 ? 'no_pagado' : 'pago_parcial';
+    // Estado considera monto parcial por cuota (si alguna cuota no completa total, no es completo)
+    let totalEsperado = detalleCuotas.reduce((s,c)=> s + (Number(c.monto)||0), 0);
+    if (totalEsperado === 0) totalEsperado = Number(a.montoTotal) || 0;
+    let totalPagado = (a.cuotas || []).reduce((s,c)=> s + (Number(c.monto)||0), 0);
+    let todasCompletas = true;
+    for (const c of detalleCuotas) {
+      const pago = (a.cuotas || []).find(p=> Number(p.numero) === Number(c.numero));
+      const esperado = Number(c.monto) || 0;
+      const pagado = pago ? Number(pago.monto) || 0 : 0;
+      if (!pago || pagado + 0.01 < esperado) todasCompletas = false;
+    }
+    // si no hay detalle, fallback a conteo
+    let estado;
+    if (detalleCuotas.length === 0) {
+      const pagadasN = pagadas.size;
+      estado = pagadasN >= n ? 'pago_completo' : pagadasN === 0 ? 'no_pagado' : 'pago_parcial';
+    } else {
+      estado = totalEsperado === 0 ? 'no_pagado' : (todasCompletas && totalPagado + 0.01 >= totalEsperado) ? 'pago_completo' : totalPagado > 0 ? 'pago_parcial' : 'no_pagado';
+    }
     const spanEstado = document.createElement('span');
     spanEstado.className = `estado-pago-texto ${estado}`;
     spanEstado.textContent = ETIQUETAS_PAGO[estado] || '—';
+    spanEstado.title = detalleCuotas.length ? `Esperado $${formatearMoneda(totalEsperado)} · Pagado $${formatearMoneda(totalPagado)}${!todasCompletas ? ' · cuota incompleta' : ''}` : '';
     tdEstado.appendChild(spanEstado);
 
     const tdComp = document.createElement('td');
