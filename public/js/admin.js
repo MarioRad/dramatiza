@@ -4625,28 +4625,21 @@ async function cargarDashboard() {
       : '';
   }
 
-  // --- KPI 3: Monto recaudado / faltante (2 líneas) ---
+  // --- KPI 3: Monto recaudado / faltante (según cuotas faltantes) ---
   let recaudado = 0;
-  let cuotasPagadas = 0;
   let totalEsperado = 0;
-  let totalPlanes = 0;
   if (pRes.ok && Array.isArray(pRes.data)) {
-    totalPlanes = pRes.data.length;
     for (const ap of pRes.data) {
       totalEsperado += Number(ap.montoTotal) || 0;
       const cuotas = Array.isArray(ap.cuotas) ? ap.cuotas : [];
       for (const c of cuotas) {
         recaudado += Number(c.monto) || 0;
-        cuotasPagadas += 1;
       }
     }
   }
   const faltante = Math.max(0, totalEsperado - recaudado);
   if (kpiRecaudadoValor) kpiRecaudadoValor.textContent = formatearMoneda(recaudado);
-  if (kpiRecaudadoSub) {
-    kpiRecaudadoSub.innerHTML = `Recaudado ${formatearMoneda(recaudado)} · Falta ${formatearMoneda(faltante)}<br>${cuotasPagadas} cuotas · ${totalPlanes} planes · total ${formatearMoneda(totalEsperado)}`;
-    kpiRecaudadoSub.title = `Total esperado ${formatearMoneda(totalEsperado)} − recaudado ${formatearMoneda(recaudado)} = faltante ${formatearMoneda(faltante)}`;
-  }
+  if (kpiRecaudadoSub) kpiRecaudadoSub.textContent = `Recaudado ${formatearMoneda(recaudado)} · Falta ${formatearMoneda(faltante)}`;
 
   if (resumen) {
     const pagTxt = pRes.ok ? 'pagos ok' : 'pagos no disponible';
