@@ -4547,8 +4547,17 @@ async function cargarDashboard() {
     totalGeneral = new Set(iRes.data.map((x) => String(x.dni))).size;
   }
   const totalInscripciones = iRes.ok && Array.isArray(iRes.data) ? iRes.data.length : 0;
+  // Del total (95 = 83 con taller + 12 solo-encuentro sin taller): cuántos tienen taller.
+  // Fuente: /api/admin/asistentes (cantidad_talleres); fallback a DISTINCT de inscripciones.
+  let conTallerTotal = 0;
+  if (aRes.ok && Array.isArray(aRes.data)) {
+    conTallerTotal = aRes.data.filter((a) => Number(a.cantidad_talleres || 0) > 0).length;
+  } else if (iRes.ok && Array.isArray(iRes.data)) {
+    conTallerTotal = new Set(iRes.data.map((x) => String(x.dni))).size;
+  }
+  const sinTallerTotal = Math.max(0, totalGeneral - conTallerTotal);
   if (kpiInscriptosValor) kpiInscriptosValor.textContent = String(totalGeneral);
-  if (kpiInscriptosSub) kpiInscriptosSub.textContent = `${totalGeneral} inscriptos en total`;
+  if (kpiInscriptosSub) kpiInscriptosSub.textContent = `${conTallerTotal} con taller · ${sinTallerTotal} sin taller (total ${totalGeneral})`;
 
   // --- KPI 2: Inscriptos a talleres / faltantes (sobre total general) - unifica 2-partes ---
   let cupoTotal = 0;
@@ -4573,10 +4582,10 @@ async function cargarDashboard() {
       totalSlots += t.inscriptos;
     }
   }
-  // asistentes = personas con al menos un taller asignado (total DISTINCT en inscripciones)
-  const asistentesConTaller = aRes.ok && Array.isArray(aRes.data) ? aRes.data.length : new Set(
-    (iRes.ok && Array.isArray(iRes.data) ? iRes.data : []).map((x) => String(x.dni))
-  ).size;
+  // conTallerTotal = personas con al menos un taller (83: DISTINCT en inscripciones).
+  // totalGeneral = universo completo (95: con taller + solo-encuentro sin taller).
+  const asistentesConTaller = conTallerTotal;
+  // KPI 2: base = listado del encuentro (79 = 67 con taller + 12 sin taller).
   // KPI 2: base = listado del encuentro (con y sin taller). No se mezcla con el
   // total de inscriptos (82) para no comparar dos universos distintos.
   let encuentroConTaller = 0;
@@ -4605,22 +4614,26 @@ async function cargarDashboard() {
     ? `${encuentroConTaller} de ${encuentroTotal} con taller · ${encuentroSin} sin taller · ${pctInscriptosTalleres}%`
     : `${encuentroConTaller} con taller`;
   if (kpiTalleresBar) kpiTalleresBar.style.width = `${Math.min(100, pctInscriptosTalleres)}%`;
-  // sub de KPI 1: cruce entre inscriptos (82) y el listado del encuentro
+  // sub de KPI 1: cruce entre universo total (95) y listado del encuentro (79)
   if (kpiInscriptosSub && totalGeneral > 0) {
     const extraNoEncuentro = Math.max(0, asistentesConTaller - encuentroConTaller);
-    let texto = `${totalGeneral} DNI únicos con taller · ${encuentroConTaller} también en el encuentro · ${extraNoEncuentro} solo inscriptos (carga manual)`;
-    if (encuentroSin > 0) texto += ` · ${encuentroSin} del encuentro sin talleres`;
+    let texto = `${totalGeneral} total · ${conTallerTotal} con taller · ${sinTallerTotal} sin taller`;
+    if (extraNoEncuentro > 0) texto += ` · ${extraNoEncuentro} solo inscriptos (fuera del encuentro)`;
     kpiInscriptosSub.textContent = texto;
     kpiInscriptosSub.title = extraNoEncuentro > 0
       ? `Hay ${extraNoEncuentro} DNIs inscriptos a talleres que no figuran en el listado del encuentro.`
       : '';
   }
 
-  // --- KPI 3: Monto recaudado ---
+  // --- KPI 3: Monto recaudado / faltante (2 líneas) ---
   let recaudado = 0;
   let cuotasPagadas = 0;
+  let totalEsperado = 0;
+  let totalPlanes = 0;
   if (pRes.ok && Array.isArray(pRes.data)) {
+    totalPlanes = pRes.data.length;
     for (const ap of pRes.data) {
+      totalEsperado += Number(ap.montoTotal) || 0;
       const cuotas = Array.isArray(ap.cuotas) ? ap.cuotas : [];
       for (const c of cuotas) {
         recaudado += Number(c.monto) || 0;
@@ -4628,8 +4641,12 @@ async function cargarDashboard() {
       }
     }
   }
+  const faltante = Math.max(0, totalEsperado - recaudado);
   if (kpiRecaudadoValor) kpiRecaudadoValor.textContent = formatearMoneda(recaudado);
-  if (kpiRecaudadoSub) kpiRecaudadoSub.textContent = `${cuotasPagadas} cuotas registradas · actualizado`;
+  if (kpiRecaudadoSub) {
+    kpiRecaudadoSub.innerHTML = `Recaudado ${formatearMoneda(recaudado)} · Falta ${formatearMoneda(faltante)}<br>${cuotasPagadas} cuotas · ${totalPlanes} planes · total ${formatearMoneda(totalEsperado)}`;
+    kpiRecaudadoSub.title = `Total esperado ${formatearMoneda(totalEsperado)} − recaudado ${formatearMoneda(recaudado)} = faltante ${formatearMoneda(faltante)}`;
+  }
 
   if (resumen) {
     const pagTxt = pRes.ok ? 'pagos ok' : 'pagos no disponible';
