@@ -545,6 +545,20 @@ const ProgramaUI = (() => {
     return best && best.foto ? best.foto : null;
   }
 
+  function grupoTaller(t) {
+    // Taller lógico de 1 o 2 días: agrupar main + partes por pareja_id.
+    // El cupo real es el mínimo del grupo y los inscriptos el máximo
+    // (la inscripción crea una fila en cada parte; sumar duplicaría).
+    // Así, si una parte se llena, todas las partes se muestran como llenas.
+    if (!t) return { inscriptos: 0, cupo: 20, lleno: false };
+    const mainId = t.pareja_id ? Number(t.pareja_id) : Number(t.id);
+    const grupo = talleres.filter(x => Number(x.id) === mainId || Number(x.pareja_id) === mainId);
+    const lista = grupo.length ? grupo : [t];
+    const inscriptos = Math.max(...lista.map(p => Number(p.inscriptos) || 0));
+    const cupo = Math.min(...lista.map(p => Number(p.cupo) || 20));
+    return { inscriptos, cupo, lleno: inscriptos >= cupo };
+  }
+
   function renderWorkshops(bloque) {
     const fecha = bloque.dia;
     const turnoBloque = turnoDesdeHora(bloque.hora_inicio);
@@ -552,9 +566,8 @@ const ProgramaUI = (() => {
     if (ws.length === 0) return '<p style="color:var(--pg-text-muted);font-size:0.85rem;">No hay talleres configurados para este bloque.</p>';
     let html = '<div class="programa-workshop-grid">';
     ws.forEach((t, i) => {
-      const inscriptos = Number(t.inscriptos) || 0;
-      const cupo = Number(t.cupo) || 20;
-      const lleno = inscriptos >= cupo;
+      const { inscriptos, cupo, lleno } = grupoTaller(t);
+      const disponibles = Math.max(0, cupo - inscriptos);
       const duracionHs = Number(t.duracion_hs) || 3;
       const duracionEtiqueta = duracionHs === 6 ? '6hs · 2 días' : '3hs · 1 día';
       const esDosDias = !!t.pareja_id || talleres.some(x => x.pareja_id === t.id);
@@ -588,7 +601,7 @@ const ProgramaUI = (() => {
           ${speakerHtml}
           ${t.descripcion ? `<div class="ws-descripcion">${escapeHtml(t.descripcion)}</div>` : ''}
           <div class="ws-footer">
-            <div class="ws-cupo${lleno ? ' lleno' : ''}">${lleno ? 'Lleno' : `${cupo - inscriptos} cupos`}</div>
+            <div class="ws-cupo${lleno ? ' lleno' : ''}">${lleno ? 'Lleno' : `${disponibles} cupos`}</div>
             ${botonInscribirse}
           </div>
         </div>`;
