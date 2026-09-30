@@ -246,8 +246,131 @@ async function notificarInscripcion(datos) {
   return { rutaPng, rutaPdf, rutaHtml, qrCode };
 }
 
+function formatearMonedaAR(n) {
+  return Number(n ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatearFechaCorta(valor) {
+  if (!valor) return '';
+  const m = String(valor).match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[3].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[1]}`;
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return String(valor).slice(0, 10);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+function construirTextoRecordatorioCuota(d) {
+  const lineas = [];
+  lineas.push(`Hola ${d.nombre}!`);
+  lineas.push('');
+  lineas.push(`Te recordamos que habías seleccionado la opción de pago en cuotas, actualmente tenés pendiente la cuota ${d.numeroCuota} de ${d.cantidadCuotas} del plan "${d.planNombre}" (${d.modo}) del Encuentro Nacional Dramatiza Salta 2026.`);
+  lineas.push(`Monto de la cuota: $${formatearMonedaAR(d.montoCuota)}${d.fechaTope ? ` · Vence: ${formatearFechaCorta(d.fechaTope)}` : ''}.`);
+  lineas.push('');
+  lineas.push(`Total del plan: $${formatearMonedaAR(d.totalEsperado)} · Pagado: $${formatearMonedaAR(d.totalPagado)} · Saldo: $${formatearMonedaAR(d.saldo)}.`);
+  if (Array.isArray(d.detalleCuotas) && d.detalleCuotas.length) {
+    lineas.push('');
+    lineas.push('Detalle de cuotas:');
+    for (const c of d.detalleCuotas) {
+      const marca = c.pagada ? '✓ pagada' : '○ pendiente';
+      lineas.push(`• Cuota ${c.numero}: $${formatearMonedaAR(c.monto)}${c.fechaTope ? ` (vence ${formatearFechaCorta(c.fechaTope)})` : ''} — ${marca}`);
+    }
+  }
+  lineas.push('');
+  lineas.push(`Si ya realizaste el pago, respondé este correo adjuntando el comprobante (DNI ${d.dni}).`);
+  lineas.push('Disculpa las molestias y gracias por tu comprensión. Al Dramatiza Salta 2026 lo hacemos entre todos, y tu aporte es fundamental para que el encuentro sea posible.');
+  lineas.push('¡Gracias por formar parte del Encuentro Nacional Dramatiza Salta 2026!');
+  return lineas.join('\n');
+}
+
+function construirHtmlRecordatorioCuota(d) {
+  const logoRuta = acreditacion.resolverImagen('ENCUENTRO_LOGO_IMG', 'public/logo.png');
+  const personajeRuta = acreditacion.resolverImagen('ENCUENTRO_PERSONAJE_IMG', 'public/personaje.png');
+  const logoSrc = logoRuta ? imagenDataUrl(logoRuta, acreditacion.tipoMime(logoRuta)) : null;
+  const personajeSrc = personajeRuta ? imagenDataUrl(personajeRuta, acreditacion.tipoMime(personajeRuta)) : null;
+  const filas = (Array.isArray(d.detalleCuotas) ? d.detalleCuotas : [])
+    .map((c) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Cuota ${escaparHtml(c.numero)}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">$${escaparHtml(formatearMonedaAR(c.monto))}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${c.fechaTope ? escaparHtml(formatearFechaCorta(c.fechaTope)) : '—'}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${c.pagada ? '✓ Pagada' : '○ Pendiente'}</td></tr>`)
+    .join('');
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:linear-gradient(135deg,#565657,#181716);padding:20px 24px;text-align:center;color:#fff;">
+          ${logoSrc ? `<img src="${logoSrc}" alt="Logo" style="max-height:56px;background:#33333200;border-radius:8px;padding:4px;">` : ''}
+          ${personajeSrc ? `<img src="${personajeSrc}" alt="Personaje" style="max-height:64px;margin-left:12px;">` : ''}
+          <h2 style="margin:12px 0 0;font-size:18px;">Recordatorio de pago — Cuota ${escaparHtml(d.numeroCuota)} de ${escaparHtml(d.cantidadCuotas)}</h2>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <p style="margin:0 0 8px;">Hola <strong>${escaparHtml(d.nombre)} ${escaparHtml(d.apellido)}</strong> (DNI ${escaparHtml(d.dni)}),</p>
+          <p style="margin:0 0 8px;">Te recordamos que tenés pendiente la <strong>cuota ${escaparHtml(d.numeroCuota)} de ${escaparHtml(d.cantidadCuotas)}</strong> del plan <strong>"${escaparHtml(d.planNombre)}"</strong> (${escaparHtml(d.modo)}).</p>
+          <p style="margin:0 0 8px;">Monto de la cuota: <strong>$${escaparHtml(formatearMonedaAR(d.montoCuota))}</strong>${d.fechaTope ? ` · Vence: <strong>${escaparHtml(formatearFechaCorta(d.fechaTope))}</strong>` : ''}.</p>
+          <p style="margin:0 0 12px;color:#475569;">Total del plan: $${escaparHtml(formatearMonedaAR(d.totalEsperado))} · Pagado: $${escaparHtml(formatearMonedaAR(d.totalPagado))} · Saldo: $${escaparHtml(formatearMonedaAR(d.saldo))}.</p>
+          ${filas ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr><th style="padding:6px 8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:left;">Cuota</th><th style="padding:6px 8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:left;">Monto</th><th style="padding:6px 8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:left;">Vence</th><th style="padding:6px 8px;border:1px solid #e2e8f0;background:#f8fafc;text-align:left;">Estado</th></tr></thead><tbody>${filas}</tbody></table>` : ''}
+          <p style="margin:16px 0 0;font-size:14px;color:#334155;">Si ya realizaste el pago, respondé este correo adjuntando el comprobante.</p>
+          <p style="margin:10px 0 0;font-size:14px;color:#334155;">¡Gracias por ser parte del Encuentro Nacional Dramatiza Salta 2026!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function notificarRecordatorioCuota(datos) {
+  const d = {
+    email: String(datos.email || '').trim(),
+    nombre: String(datos.nombre || '').trim(),
+    apellido: String(datos.apellido || '').trim(),
+    dni: String(datos.dni || '').trim(),
+    planNombre: String(datos.planNombre || 'Plan'),
+    modo: String(datos.modo || 'Estándar'),
+    numeroCuota: Number(datos.numeroCuota) || 1,
+    cantidadCuotas: Number(datos.cantidadCuotas) || 1,
+    montoCuota: Number(datos.montoCuota) || 0,
+    fechaTope: datos.fechaTope || '',
+    totalEsperado: Number(datos.totalEsperado) || 0,
+    totalPagado: Number(datos.totalPagado) || 0,
+    saldo: Number(datos.saldo) || 0,
+    detalleCuotas: Array.isArray(datos.detalleCuotas) ? datos.detalleCuotas : [],
+  };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) {
+    throw new Error('El asistente no tiene un email válido registrado.');
+  }
+  const texto = construirTextoRecordatorioCuota(d);
+  const html = construirHtmlRecordatorioCuota(d);
+  const asunto = `Recordatorio de pago — Cuota ${d.numeroCuota} de ${d.cantidadCuotas} — Encuentro Dramatiza Salta 2026`;
+  const salida = `Para: ${d.email}\nAsunto: ${asunto}\n\n${texto}`;
+  if (smtpConfigurado()) {
+    try {
+      const opciones = {
+        from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'inscripciones@localhost',
+        to: d.email,
+        subject: asunto,
+        text: texto,
+        html,
+      };
+      const info = await obtenerTransporter().sendMail(opciones);
+      try {
+        logs.escribirLog('', 'emails.log', `\n--- ${new Date().toISOString()} ---\n${salida}\n\nEnviado por SMTP: ${info.messageId}\n`);
+      } catch (_) { /* noop */ }
+      console.log(`[Mail] Recordatorio cuota ${d.numeroCuota}/${d.cantidadCuotas} enviado a ${d.email} (${info.messageId})`);
+      return { enviado: true, destino: d.email, asunto, messageId: info.messageId };
+    } catch (e) {
+      console.error('[Mail] Error al enviar recordatorio:', e.message);
+      registrarLog(`${salida}\n\nERROR SMTP: ${e.message}`);
+      throw new Error(`No se pudo enviar el correo: ${e.message}`);
+    }
+  }
+  registrarLog(salida);
+  return { enviado: false, destino: d.email, asunto, simulado: true };
+}
+
 module.exports = {
   notificarInscripcion,
+  notificarRecordatorioCuota,
   construirMensajeInscripcion,
   construirHtml,
   ETIQUETAS_ALIMENTACION,

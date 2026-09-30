@@ -1246,6 +1246,70 @@ app.get('/api/admin/asistentes', requireAuth, requirePermiso('perm_inscripciones
   } catch (e) { next(e); }
 });
 
+// Export XLSX: listado de asistentes ordenado por apellido y nombre
+// Columnas: DNI, Apellido y nombre, Correo, Teléfono, Alimentación,
+// Insc. talleres (SÍ/NO), Pago, Fecha (DD-MM-AAAA). Respeta filtros q y taller.
+function fechaGuion(valor) {
+  if (!valor) return '';
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return String(valor).slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+app.get('/api/admin/asistentes/export/xlsx', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const tallerFiltro = String(req.query.taller || '').trim();
+    const [lista, talleres] = await Promise.all([db.listarAsistentes(), db.listarTalleres()]);
+    const grupoDe = (id) => {
+      const t = (talleres || []).find((x) => String(x.id) === String(id));
+      if (!t) return String(id);
+      return t.pareja_id ? String(t.pareja_id) : String(t.id);
+    };
+    const visibles = (lista || []).filter((a) => {
+      if (q) {
+        const coincide = String(a.dni || '').includes(q)
+          || String(a.apellido || '').toLowerCase().includes(q)
+          || String(a.nombre || '').toLowerCase().includes(q)
+          || String(a.email || '').toLowerCase().includes(q);
+        if (!coincide) return false;
+      }
+      if (!tallerFiltro) return true;
+      const cant = Number(a.cantidad_talleres || 0);
+      if (tallerFiltro === '__sin_taller__') return cant === 0;
+      if (tallerFiltro === '__con_taller__') return cant > 0;
+      const ids = String(a.talleres_ids || '').split(',').map((s) => s.trim()).filter(Boolean);
+      return ids.some((id) => String(id) === tallerFiltro || grupoDe(id) === tallerFiltro);
+    });
+    const cabecera = ['DNI', 'Apellido y nombre', 'Correo', 'Teléfono', 'Alimentación', 'Insc. talleres', 'Pago', 'Fecha'];
+    const filas = visibles.map((a) => ([
+      String(a.dni || ''),
+      [a.apellido, a.nombre].filter(Boolean).join(', '),
+      String(a.email || ''),
+      String(a.telefono || ''),
+      ETIQUETAS_DIETA[a.alimentacion] || a.alimentacion || '',
+      Number(a.cantidad_talleres || 0) > 0 ? 'SÍ' : 'NO',
+      ETIQUETAS_ESTADO_PAGO[a.estado_pago] || a.estado_pago || '',
+      fechaGuion(a.creado_en),
+    ]));
+    const XLSX = require('xlsx');
+    const libro = XLSX.utils.book_new();
+    const hoja = XLSX.utils.aoa_to_sheet([cabecera, ...filas]);
+    hoja['!cols'] = [{ wch: 10 }, { wch: 32 }, { wch: 30 }, { wch: 14 }, { wch: 16 }, { wch: 13 }, { wch: 14 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(libro, hoja, 'Asistentes');
+    const buf = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+    const ahora = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const marca = `${ahora.getFullYear()}-${p2(ahora.getMonth() + 1)}-${p2(ahora.getDate())}_${p2(ahora.getHours())}${p2(ahora.getMinutes())}`;
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Content-Disposition', `attachment; filename="asistentes-${marca}.xlsx"`);
+    await db.registrarEvento('asistentes_exportados', `Export XLSX de asistentes: ${filas.length} fila(s)${q ? ` (búsqueda "${q}")` : ''}${tallerFiltro ? ` (filtro taller ${tallerFiltro})` : ''}`, req.sesion.usuario).catch(() => {});
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
 app.post('/api/admin/asistentes', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -1289,12 +1353,36 @@ app.put('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscripc
     await db.actualizarAsistente(dni, campos);
     if (body.talleres !== undefined) {
       const talleres = Array.isArray(body.talleres) ? body.talleres : parseIds(String(body.talleres || ''));
-      if (talleres.length === 0) throw new db.HttpError(400, 'Seleccioná al menos un taller.');
-      await db.reemplazarTalleresInscripcion(dni, talleres);
+      if (talleres.length === 0) {
+        // Permitir quitar todos los talleres: queda como solo-encuentro si figura en encuentro
+        const enEncuentro = await db.esAsistenteEncuentro(dni);
+        if (!enEncuentro) throw new db.HttpError(400, 'Seleccioná al menos un taller.');
+        await db.eliminarInscripcionesPorDni(dni);
+      } else {
+        await db.reemplazarTalleresInscripcion(dni, talleres);
+      }
     }
     await regenerarAcreditacion(dni);
     await db.registrarEvento('inscripcion_modificada', `Asistente actualizado: ${campos.nombre} ${campos.apellido} (DNI ${dni})`, req.sesion.usuario);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/admin/asistentes/:dni/ficha', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String(req.params.dni || '').replace(/\D/g, '');
+    const ficha = await db.obtenerFichaAsistente(dni);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(ficha);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String(req.params.dni || '').replace(/\D/g, '');
+    const ficha = await db.obtenerFichaAsistente(dni);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(ficha);
   } catch (e) { next(e); }
 });
 
@@ -1303,7 +1391,11 @@ app.delete('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscr
     const dni = String(req.params.dni || '').replace(/\D/g, '');
     if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
     const fila = await db.queryOne('SELECT nombre, apellido FROM inscripciones WHERE dni = ? LIMIT 1', [dni]);
-    if (!fila) throw new db.HttpError(404, 'Asistente no encontrado.');
+    if (!fila) {
+      const enc = await db.queryOne('SELECT nombre, apellido FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1', [dni]);
+      if (enc) throw new db.HttpError(409, 'La persona solo figura en el encuentro (sin talleres). Gestioná su baja desde la pestaña Encuentro.');
+      throw new db.HttpError(404, 'Asistente no encontrado.');
+    }
     const eliminadas = await db.eliminarInscripcionesPorDni(dni);
     await db.registrarEvento('inscripcion_eliminada', `Asistente eliminado: ${fila.nombre} ${fila.apellido} (DNI ${dni}) - ${eliminadas} inscripción(es)`, req.sesion.usuario);
     res.json({ ok: true, eliminadas });
@@ -1339,6 +1431,360 @@ app.get('/api/admin/eventos', requireAdmin, async (req, res, next) => {
     next(e);
   }
 });
+
+// ── Backup de la base de datos (descarga .sql / .json) ─────────────────
+function tipoDdl(col) {
+  if (col.data_type === 'character varying' || col.data_type === 'character') {
+    return col.character_maximum_length ? `${col.data_type}(${col.character_maximum_length})` : col.data_type;
+  }
+  if (col.data_type === 'numeric' && col.numeric_precision != null) {
+    return `numeric(${col.numeric_precision}${col.numeric_scale != null ? `,${col.numeric_scale}` : ''})`;
+  }
+  return col.data_type;
+}
+
+function tipoCast(col) {
+  if (col.data_type === 'character varying') return 'varchar';
+  if (col.data_type === 'timestamp with time zone') return 'timestamptz';
+  if (col.data_type === 'timestamp without time zone') return 'timestamp';
+  if (col.data_type === 'USER-DEFINED') return col.udt_name;
+  if (col.data_type === 'ARRAY') return `${String(col.udt_name || '').replace(/^_/, '')}[]`;
+  return col.data_type;
+}
+
+function literalSql(valor, col) {
+  if (valor === null || valor === undefined) return 'NULL';
+  if (typeof valor === 'boolean') return valor ? 'TRUE' : 'FALSE';
+  if (typeof valor === 'number') return Number.isFinite(valor) ? String(valor) : 'NULL';
+  const texto = typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
+  return `'${texto.replace(/'/g, "''")}'::${tipoCast(col)}`;
+}
+
+// Orden de inserción: padres primero (para bases que ya tienen las FK),
+// manejando además autorreferencias (ej. talleres.pareja_id -> talleres.id).
+function ordenarTablasPorDependencia(nombres, fks) {
+  const dependencias = new Map(nombres.map((n) => [n, new Set()]));
+  for (const fk of fks) {
+    if (fk.tabla === fk.refTabla) continue;
+    if (dependencias.has(fk.tabla) && dependencias.has(fk.refTabla)) dependencias.get(fk.tabla).add(fk.refTabla);
+  }
+  const orden = [];
+  const listos = new Set();
+  const restantes = new Set(nombres);
+  let avanzando = true;
+  while (restantes.size && avanzando) {
+    avanzando = false;
+    for (const tabla of [...restantes]) {
+      const deps = dependencias.get(tabla);
+      if ([...deps].every((d) => listos.has(d))) {
+        orden.push(tabla);
+        listos.add(tabla);
+        restantes.delete(tabla);
+        avanzando = true;
+      }
+    }
+  }
+  for (const tabla of restantes) orden.push(tabla);
+  return orden;
+}
+
+function ordenarFilasConAutoFk(filas, autoFks) {
+  if (!autoFks.length || filas.length < 2) return filas;
+  const pendientes = [...filas];
+  const orden = [];
+  const insertados = new Set();
+  let avanzando = true;
+  while (pendientes.length && avanzando) {
+    avanzando = false;
+    for (let i = 0; i < pendientes.length; i++) {
+      const fila = pendientes[i];
+      const ok = autoFks.every((fk) => {
+        const valor = fila[fk.col];
+        if (valor === null || valor === undefined) return true;
+        return insertados.has(`${fk.refCol}=${String(valor)}`);
+      });
+      if (!ok) continue;
+      autoFks.forEach((fk) => { if (fila[fk.refCol] !== null && fila[fk.refCol] !== undefined) insertados.add(`${fk.refCol}=${String(fila[fk.refCol])}`); });
+      orden.push(fila);
+      pendientes.splice(i, 1);
+      i--;
+      avanzando = true;
+    }
+  }
+  return [...orden, ...pendientes];
+}
+
+async function armarBackup() {
+  const nombres = (await db.query(
+    `SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+      ORDER BY table_name`
+  )).map((r) => r.table_name);
+
+  const fks = (await db.query(
+    `SELECT con.conname AS constraint_name,
+            rel.relname AS tabla,
+            child.attname AS columna,
+            refrel.relname AS ref_tabla,
+            parent.attname AS ref_columna
+       FROM pg_constraint con
+       JOIN pg_class rel ON rel.oid = con.conrelid
+       JOIN pg_class refrel ON refrel.oid = con.confrelid
+       JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+       JOIN unnest(con.conkey) WITH ORDINALITY AS ck(attnum, ord) ON TRUE
+       JOIN unnest(con.confkey) WITH ORDINALITY AS pk(attnum, ord) ON pk.ord = ck.ord
+       JOIN pg_attribute child ON child.attrelid = con.conrelid AND child.attnum = ck.attnum
+       JOIN pg_attribute parent ON parent.attrelid = con.confrelid AND parent.attnum = pk.attnum
+      WHERE con.contype = 'f' AND nsp.nspname = 'public'
+      ORDER BY con.conname, ck.ord`
+  )).map((r) => ({
+    constraintName: r.constraint_name,
+    tabla: r.tabla,
+    columna: r.columna,
+    refTabla: r.ref_tabla,
+    refColumna: r.ref_columna,
+  }));
+
+  const secuencias = await db.query(
+    `SELECT sequencename, data_type, start_value, increment_by, min_value, max_value, cache_size, cycle
+       FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename`
+  );
+
+  const restriccionesUnicas = [];
+  {
+    const filas = await db.query(
+      `SELECT tc.constraint_name, tc.table_name, kcu.column_name
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        WHERE tc.table_schema = 'public' AND tc.constraint_type = 'UNIQUE'
+        ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position`
+    );
+    for (const f of filas) {
+      let ultima = restriccionesUnicas[restriccionesUnicas.length - 1];
+      if (!ultima || ultima.nombre !== f.constraint_name) {
+        ultima = { nombre: f.constraint_name, tabla: f.table_name, columnas: [] };
+        restriccionesUnicas.push(ultima);
+      }
+      ultima.columnas.push(f.column_name);
+    }
+  }
+
+  const restriccionesChequeo = await db.query(
+    `SELECT tab.relname AS tabla, con.conname AS nombre, pg_get_constraintdef(con.oid) AS definicion
+       FROM pg_constraint con
+       JOIN pg_class tab ON tab.oid = con.conrelid
+       JOIN pg_namespace nsp ON nsp.oid = con.connamespace
+      WHERE nsp.nspname = 'public' AND con.contype = 'c'
+      ORDER BY tab.relname, con.conname`
+  );
+
+  const indicesUnicos = await db.query(
+    `SELECT idx.relname AS nombre, tab.relname AS tabla, pg_get_indexdef(ix.indexrelid) AS definicion
+       FROM pg_index ix
+       JOIN pg_class idx ON idx.oid = ix.indexrelid
+       JOIN pg_class tab ON tab.oid = ix.indrelid
+       JOIN pg_namespace nsp ON nsp.oid = tab.relnamespace
+      WHERE nsp.nspname = 'public' AND ix.indisunique AND ix.indisvalid
+        AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = ix.indexrelid)
+      ORDER BY tab.relname, idx.relname`
+  );
+
+  const esquema = [];
+  let totalFilas = 0;
+
+  for (const nombre of nombres) {
+    const columnas = await db.query(
+      `SELECT column_name, data_type, udt_name, character_maximum_length, numeric_precision,
+              numeric_scale, is_nullable, column_default, ordinal_position
+         FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ?
+        ORDER BY ordinal_position`, [nombre]);
+    const pk = (await db.query(
+      `SELECT kcu.column_name
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        WHERE tc.table_schema = 'public' AND tc.table_name = ? AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY kcu.ordinal_position`, [nombre]
+    )).map((r) => r.column_name);
+    const filas = (await db.query(`SELECT to_jsonb(t) AS fila FROM "public"."${nombre}" t`)).map((r) => r.fila);
+    totalFilas += filas.length;
+    esquema.push({ nombre, columnas, pk, filas });
+  }
+
+  // ── .sql ──
+  const lineas = [];
+  const ahora = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const marca = `${ahora.getFullYear()}-${p2(ahora.getMonth() + 1)}-${p2(ahora.getDate())} ${p2(ahora.getHours())}:${p2(ahora.getMinutes())}:${p2(ahora.getSeconds())}`;
+  lineas.push(`-- Backup de la base de datos (dramatiza-1)`);
+  lineas.push(`-- Generado: ${marca}`);
+  lineas.push(`-- Incluye esquema (CREATE TABLE + secuencias + restricciones + FK) y datos (TRUNCATE + INSERT).`);
+  lineas.push(`-- Restaurable en una base vacía o en esta misma base.`);
+  lineas.push(`-- Tablas: ${nombres.length} · Filas: ${totalFilas}`);
+  lineas.push('');
+  lineas.push('BEGIN;');
+  lineas.push('');
+
+  for (const s of secuencias) {
+    const ciclo = s.cycle ? 'CYCLE' : 'NO CYCLE';
+    lineas.push(`CREATE SEQUENCE IF NOT EXISTS "public"."${s.sequencename}"`);
+    lineas.push(`  AS ${s.data_type} START WITH ${s.start_value} MINVALUE ${s.min_value} MAXVALUE ${s.max_value}`);
+    lineas.push(`  INCREMENT BY ${s.increment_by} CACHE ${s.cache_size} ${ciclo};`);
+  }
+  lineas.push('');
+
+  for (const t of esquema) {
+    lineas.push(`-- ── ${t.nombre} ──`);
+    const defs = t.columnas.map((c) => {
+      const partes = [`"${c.column_name}" ${tipoDdl(c)}`];
+      if (c.is_nullable === 'NO') partes.push('NOT NULL');
+      const porDefecto = c.column_default && !String(c.column_default).startsWith('nextval(');
+      if (porDefecto) partes.push(`DEFAULT ${c.column_default}`);
+      return partes.join(' ');
+    });
+    if (t.pk.length) defs.push(`PRIMARY KEY (${t.pk.map((c) => `"${c}"`).join(', ')})`);
+    lineas.push(`CREATE TABLE IF NOT EXISTS "public"."${t.nombre}" (`);
+    lineas.push(defs.map((d) => `  ${d}`).join(',\n'));
+    lineas.push(');');
+    const seqCols = t.columnas.filter((c) => c.column_default && String(c.column_default).startsWith('nextval('));
+    for (const c of seqCols) {
+      const m = String(c.column_default).match(/nextval\('([^']+)'/);
+      if (!m) continue;
+      const seq = m[1].split('.').pop().replace(/"/g, '');
+      lineas.push(`ALTER SEQUENCE IF EXISTS "public"."${seq}" OWNED BY "public"."${t.nombre}"."${c.column_name}";`);
+      lineas.push(`ALTER TABLE "public"."${t.nombre}" ALTER COLUMN "${c.column_name}" SET DEFAULT nextval('public."${seq}"'::regclass);`);
+    }
+    lineas.push('');
+  }
+
+  const ordenTablas = ordenarTablasPorDependencia(nombres, fks);
+
+  // Un solo TRUNCATE de todas las tablas: si cada tabla se trunca en su turno,
+  // el CASCADE borre filas recién cargadas en tablas dependientes.
+  lineas.push('-- Vaciado único de todas las tablas (evita que el CASCADE borre datos ya cargados)');
+  lineas.push('TRUNCATE TABLE');
+  lineas.push(nombres.map((n) => `  "public"."${n}"`).join(',\n'));
+  lineas.push('  CASCADE;');
+  lineas.push('');
+
+  for (const t of esquema) {
+    for (const c of t.columnas) {
+      lineas.push(`ALTER TABLE "public"."${t.nombre}" ADD COLUMN IF NOT EXISTS "${c.column_name}" ${tipoDdl(c)}${c.is_nullable === 'NO' ? ' NOT NULL' : ''};`);
+    }
+  }
+  lineas.push('');
+
+  for (const nombre of ordenTablas) {
+    const t = esquema.find((x) => x.nombre === nombre);
+    const autoFks = fks.filter((f) => f.tabla === nombre && f.refTabla === nombre).map((f) => ({ col: f.columna, refCol: f.refColumna }));
+    const colList = t.columnas.map((c) => `"${c.column_name}"`).join(', ');
+    const filas = ordenarFilasConAutoFk(t.filas, autoFks);
+    if (filas.length) lineas.push(`-- ── datos de ${nombre} ──`);
+    for (const fila of filas) {
+      const vals = t.columnas.map((c) => literalSql(fila[c.column_name], c)).join(', ');
+      lineas.push(`INSERT INTO "public"."${nombre}" (${colList}) VALUES (${vals});`);
+    }
+    if (filas.length) lineas.push('');
+  }
+
+  lineas.push('-- Restricciones UNIQUE (requeridas por las claves foráneas)');
+  for (const u of restriccionesUnicas) {
+    lineas.push(`DO $bkp$ BEGIN`);
+    lineas.push(`  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${u.nombre.replace(/'/g, "''")}' AND conrelid = '"public"."${u.tabla}"'::regclass) THEN`);
+    lineas.push(`    ALTER TABLE "public"."${u.tabla}" ADD CONSTRAINT "${u.nombre}" UNIQUE (${u.columnas.map((c) => `"${c}"`).join(', ')});`);
+    lineas.push(`  END IF;`);
+    lineas.push(`END $bkp$;`);
+  }
+  lineas.push('');
+
+  lineas.push('-- Restricciones CHECK');
+  for (const c of restriccionesChequeo) {
+    lineas.push(`DO $bkp$ BEGIN`);
+    lineas.push(`  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${c.nombre.replace(/'/g, "''")}' AND conrelid = '"public"."${c.tabla}"'::regclass) THEN`);
+    lineas.push(`    ALTER TABLE "public"."${c.tabla}" ADD CONSTRAINT "${c.nombre}" ${c.definicion};`);
+    lineas.push(`  END IF;`);
+    lineas.push(`END $bkp$;`);
+  }
+  lineas.push('');
+
+  lineas.push('-- Índices únicos sin restricción asociada');
+  for (const i of indicesUnicos) {
+    const ddl = String(i.definicion).replace(
+      /^CREATE UNIQUE INDEX (\S+) ON ([A-Za-z_][A-Za-z0-9_$]*)\./,
+      (m, nom, esquema) => `CREATE UNIQUE INDEX IF NOT EXISTS "${nom.replace(/"/g, '""')}" ON "public".`
+    );
+    lineas.push(`${ddl};`);
+  }
+  lineas.push('');
+
+  lineas.push('-- Claves foráneas (se agregan solo si faltan)');
+  for (const fk of fks) {
+    lineas.push(`DO $bkp$ BEGIN`);
+    lineas.push(`  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${fk.constraintName.replace(/'/g, "''")}' AND conrelid = '"public"."${fk.tabla}"'::regclass) THEN`);
+    lineas.push(`    ALTER TABLE "public"."${fk.tabla}" ADD CONSTRAINT "${fk.constraintName}" FOREIGN KEY ("${fk.columna}") REFERENCES "public"."${fk.refTabla}" ("${fk.refColumna}");`);
+    lineas.push(`  END IF;`);
+    lineas.push(`END $bkp$;`);
+  }
+  lineas.push('');
+
+  for (const t of esquema) {
+    for (const c of t.columnas) {
+      if (!c.column_default || !String(c.column_default).startsWith('nextval(')) continue;
+      lineas.push(`SELECT setval(pg_get_serial_sequence('"public"."${t.nombre}"', '${c.column_name}'), COALESCE((SELECT MAX("${c.column_name}") FROM "public"."${t.nombre}"), 1), (SELECT COUNT(*) > 0 FROM "public"."${t.nombre}"));`);
+    }
+  }
+  lineas.push('');
+  lineas.push('COMMIT;');
+
+  // ── .json ──
+  const json = {
+    meta: {
+      proyecto: 'dramatiza-1',
+      generado_en: ahora.toISOString(),
+      tablas: nombres.length,
+      filas: totalFilas,
+    },
+    tablas: esquema.map((t) => ({
+      nombre: t.nombre,
+      columnas: t.columnas.map((c) => ({ nombre: c.column_name, tipo: tipoDdl(c), nullable: c.is_nullable !== 'NO', pk: t.pk.includes(c.column_name) })),
+      filas: t.filas.map((fila) => {
+        const ordenada = {};
+        for (const c of t.columnas) ordenada[c.column_name] = fila[c.column_name] === undefined ? null : fila[c.column_name];
+        return ordenada;
+      }),
+    })),
+  };
+
+  return { sql: lineas.join('\n'), json, tablas: nombres.length, filas: totalFilas };
+}
+
+function marcaArchivo(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+function responderBackup(formato) {
+  return async (req, res, next) => {
+    try {
+      const backup = await armarBackup();
+      const marca = marcaArchivo(new Date());
+      const esJson = formato === 'json';
+      res.set('Content-Type', esJson ? 'application/json; charset=utf-8' : 'application/sql; charset=utf-8');
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.set('Content-Disposition', `attachment; filename="backup-dramatiza-${marca}.${esJson ? 'json' : 'sql'}"`);
+      const detalle = `Backup ${esJson ? '.json' : '.sql'}: ${backup.tablas} tablas · ${backup.filas} filas${esJson ? '' : ` · ${Math.round(backup.sql.length / 1024)} KB`}`;
+      await db.registrarEvento('backup_descargado', detalle, req.sesion.usuario).catch(() => {});
+      res.send(esJson ? JSON.stringify(backup.json, null, 1) : backup.sql);
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+
+app.get('/api/admin/backup.sql', requireAdmin, responderBackup('sql'));
+app.get('/api/admin/backup.json', requireAdmin, responderBackup('json'));
 
 function dniParamValidado(req, res) {
   const dni = String(req.params.dni || '').replace(/\D/g, '');
@@ -1753,6 +2199,150 @@ app.get('/api/admin/pagos', requireAuth, requirePermiso('perm_inscripciones'), a
   }
 });
 
+// ── Export XLSX: listado de asistentes y sus pagos ──────────────────────
+const ETIQUETAS_DIETA = {
+  sin_restriccion: 'Sin restricción',
+  vegano: 'Vegano',
+  sin_tacc: 'Sin TACC',
+  sin_lactosa: 'Sin lactosa',
+  otro: 'Otro',
+};
+const ETIQUETAS_ESTADO_PAGO = {
+  no_pagado: 'No pagado',
+  pago_parcial: 'Pago parcial',
+  pago_completo: 'Pago completo',
+};
+
+function fechaCorta(valor) {
+  if (!valor) return '';
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return String(valor).slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+function marcarFormatoMoneda(hoja, columnas) {
+  const ref = hoja['!ref'];
+  if (!ref) return;
+  const partes = String(ref).split(':');
+  const ultimaFila = Number(String(partes[partes.length - 1]).replace(/\D/g, '')) || 0;
+  if (!ultimaFila) return;
+  for (const col of columnas) {
+    for (let fila = 2; fila <= ultimaFila; fila++) {
+      const celda = hoja[`${col}${fila}`];
+      if (celda && typeof celda.v === 'number') celda.z = '#,##0';
+    }
+  }
+}
+
+app.get('/api/admin/pagos/export/xlsx', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const filtro = String(req.query.q || '').replace(/\D/g, '');
+    const [asistentes, planes] = await Promise.all([db.listarAsistentes(), db.listarPagos()]);
+
+    const planesPorDni = new Map();
+    for (const p of planes) {
+      const dni = String(p.dni || '');
+      if (!planesPorDni.has(dni)) planesPorDni.set(dni, []);
+      planesPorDni.get(dni).push(p);
+    }
+
+    // Unión: todos los inscriptos + eventuales planes sin inscripción registrada
+    const personas = [];
+    const vistos = new Set();
+    for (const a of asistentes) {
+      const dni = String(a.dni);
+      vistos.add(dni);
+      personas.push({
+        dni,
+        apellido: a.apellido || '',
+        nombre: a.nombre || '',
+        email: a.email || '',
+        telefono: a.telefono || '',
+        alimentacion: a.alimentacion || 'sin_restriccion',
+        en_encuentro: Boolean(a.en_encuentro),
+        estado_pago: a.estado_pago || 'no_pagado',
+        talleres: a.talleres_nombres || '',
+        planes: planesPorDni.get(dni) || [],
+      });
+    }
+    for (const [dni, lista] of planesPorDni) {
+      if (vistos.has(dni)) continue;
+      const p = lista[0];
+      personas.push({
+        dni,
+        apellido: p.apellido || '',
+        nombre: p.nombre || '',
+        email: p.email || '',
+        telefono: p.telefono || '',
+        alimentacion: 'sin_restriccion',
+        en_encuentro: Boolean(p.encuentroId),
+        estado_pago: 'no_pagado',
+        talleres: '',
+        planes: lista,
+      });
+    }
+    const visibles = filtro ? personas.filter((p) => String(p.dni).includes(filtro)) : personas;
+
+    const cabecera = ['DNI', 'Apellido y nombre', 'Mail', 'Teléfono', 'Estado', 'Plan', 'Total / cuotas', 'Cuotas pago', 'Saldo', 'Fechas de pago'];
+    const filas = [];
+    const fmtMoneda = (n) => Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+    for (const p of visibles) {
+      const nombre = [p.apellido, p.nombre].filter(Boolean).join(', ');
+      const estado = ETIQUETAS_ESTADO_PAGO[p.estado_pago] || p.estado_pago || '';
+      if (!p.planes.length) {
+        filas.push([p.dni, nombre, p.email, p.telefono, estado, '', '', '', 0, '']);
+        continue;
+      }
+      for (const pl of p.planes) {
+        const detalle = Array.isArray(pl.cuotasDetalle) ? pl.cuotasDetalle : [];
+        const pagadas = Array.isArray(pl.cuotas) ? pl.cuotas : [];
+        const pagado = pagadas.reduce((s, c) => s + (Number(c.monto) || 0), 0);
+        const total = Number(pl.montoTotal) || 0;
+        const n = Number(pl.cantidadCuotas) || detalle.length || 0;
+        const fechas = pagadas
+          .slice()
+          .sort((a, b) => Number(a.numero) - Number(b.numero))
+          .map((c) => `${c.numero}: ${fechaCorta(c.fecha)}`)
+          .join(' · ');
+        filas.push([
+          p.dni,
+          nombre,
+          p.email,
+          p.telefono,
+          estado,
+          pl.planNombre || `Plan #${pl.planId}`,
+          n ? `$ ${fmtMoneda(total)} / ${n} cuota(s)` : `$ ${fmtMoneda(total)}`,
+          n ? `${pagadas.length}/${n}` : '',
+          total - pagado,
+          fechas,
+        ]);
+      }
+    }
+
+    const XLSX = require('xlsx');
+    const libro = XLSX.utils.book_new();
+    const hoja = XLSX.utils.aoa_to_sheet([cabecera, ...filas]);
+    marcarFormatoMoneda(hoja, ['I']);
+    hoja['!cols'] = [{ wch: 10 }, { wch: 32 }, { wch: 28 }, { wch: 14 }, { wch: 14 },
+      { wch: 30 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(libro, hoja, 'Pagos y cuotas');
+
+    const buf = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+    const ahora = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const marca = `${ahora.getFullYear()}-${p2(ahora.getMonth() + 1)}-${ahora.getDate()}_${p2(ahora.getHours())}${p2(ahora.getMinutes())}`;
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Content-Disposition', `attachment; filename="pagos-asistentes-${marca}.xlsx"`);
+    await db.registrarEvento('pagos_exportados', `Export XLSX de pagos: ${filas.length} fila(s)${filtro ? ` (filtro DNI ${filtro})` : ''}`, req.sesion.usuario).catch(() => {});
+    res.send(buf);
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post('/api/admin/pagos/asignar', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -1787,6 +2377,74 @@ app.post('/api/admin/pagos/cuota', requireAuth, requirePermiso('perm_inscripcion
       String(body.fecha_pago || '')
     );
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Recordatorio de pago de cuota por email (usa el email del encuentro)
+app.post('/api/admin/pagos/:id/recordatorio', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID inválido.');
+    const planes = await db.listarPagos();
+    const a = planes.find((x) => Number(x.asistentePlanId) === Number(id));
+    if (!a) throw new db.HttpError(404, 'Registro de pago no encontrado.');
+    const email = String(a.email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new db.HttpError(400, 'El asistente no tiene un email válido registrado.');
+    }
+    const n = Number(a.cantidadCuotas) || 1;
+    const detalle = Array.isArray(a.cuotasDetalle) ? a.cuotasDetalle : [];
+    const pagadas = new Set((Array.isArray(a.cuotas) ? a.cuotas : []).map((c) => Number(c.numero)));
+    const montoDe = (num) => {
+      const info = detalle.find((c) => Number(c.numero) === Number(num));
+      if (info && info.monto != null) return Number(info.monto) || 0;
+      return (Number(a.montoTotal) || 0) / n;
+    };
+    let num = req.body && req.body.cuota !== undefined ? Number(req.body.cuota) : NaN;
+    if (!Number.isInteger(num) || num < 1 || num > n) {
+      num = NaN;
+      for (let i = 1; i <= n; i++) {
+        if (!pagadas.has(i)) { num = i; break; }
+      }
+      if (!Number.isInteger(num)) throw new db.HttpError(400, 'El asistente ya tiene todas las cuotas pagadas.');
+    } else if (pagadas.has(num)) {
+      throw new db.HttpError(400, `La cuota ${num} ya figura como pagada.`);
+    }
+    const infoCuota = detalle.find((c) => Number(c.numero) === num);
+    const totalEsperado = detalle.length
+      ? detalle.reduce((s, c) => s + (Number(c.monto) || 0), 0)
+      : Number(a.montoTotal) || 0;
+    const totalPagado = (Array.isArray(a.cuotas) ? a.cuotas : []).reduce((s, c) => s + (Number(c.monto) || 0), 0);
+    const esTallerista = Boolean(a.esTallerista || a.es_tallerista);
+    const resultado = await notificaciones.notificarRecordatorioCuota({
+      email,
+      nombre: a.nombre || '',
+      apellido: a.apellido || '',
+      dni: String(a.dni || ''),
+      planNombre: a.planNombre || `Plan #${a.planId}`,
+      modo: esTallerista ? 'Tallerista 50%' : 'Estándar',
+      numeroCuota: num,
+      cantidadCuotas: n,
+      montoCuota: montoDe(num),
+      fechaTope: (infoCuota && infoCuota.fecha_tope) || '',
+      totalEsperado,
+      totalPagado,
+      saldo: totalEsperado - totalPagado,
+      detalleCuotas: detalle.map((c) => ({
+        numero: Number(c.numero),
+        monto: Number(c.monto) || 0,
+        fechaTope: c.fecha_tope || '',
+        pagada: pagadas.has(Number(c.numero)),
+      })),
+    });
+    await db.registrarEvento(
+      'recordatorio_cuota',
+      `Recordatorio cuota ${num}/${n} enviado a ${a.apellido || ''} ${a.nombre || ''} (DNI ${a.dni}, ${email}) - plan ${a.planNombre || a.planId}${resultado && resultado.simulado ? ' (simulado, sin SMTP)' : ''}`,
+      req.sesion.usuario
+    );
+    res.json({ ok: true, email, cuota: num, simulado: Boolean(resultado && resultado.simulado) });
   } catch (e) {
     next(e);
   }

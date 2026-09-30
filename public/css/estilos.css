@@ -1316,6 +1316,24 @@ body.dark .taller-partes-badge {
   font-weight: 600;
 }
 
+/* Acreditaciones: inscriptos por encima del cupo (llama la atención) */
+#tablaAcreditacionesTalleres .sobre-cupo {
+  background: #dc2626;
+  color: #fff;
+  font-weight: 800;
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  display: inline-block;
+  animation: parpadeo-sobre-cupo 1.2s ease-in-out infinite;
+}
+#tablaAcreditacionesTalleres .fila-sobre-cupo td:first-child {
+  border-left: 3px solid #dc2626;
+}
+@keyframes parpadeo-sobre-cupo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
 .tabla-talleres .ws-inscribir-btn {
   padding: 0.35rem 0.85rem;
   font-size: 0.78rem;

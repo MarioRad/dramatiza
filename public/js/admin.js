@@ -384,6 +384,66 @@ document.querySelectorAll('#subTabsPagos .sub-tab').forEach((btn) => {
   btn.addEventListener('click', () => activarSubTabPagos(btn.dataset.sub));
 });
 
+function subTabEventosActiva() {
+  return (document.querySelector('#subTabsEventos .sub-tab.activo') || {}).dataset?.sub || 'registro';
+}
+
+function activarSubTabEventos(sub) {
+  if (subTabEventosActiva() === sub) return;
+  for (const btn of document.querySelectorAll('#subTabsEventos .sub-tab')) {
+    btn.classList.toggle('activo', btn.dataset.sub === sub);
+  }
+  el('subEventosRegistro').hidden = sub !== 'registro';
+  el('subEventosBackup').hidden = sub !== 'backup';
+}
+
+document.querySelectorAll('#subTabsEventos .sub-tab').forEach((btn) => {
+  btn.addEventListener('click', () => activarSubTabEventos(btn.dataset.sub));
+});
+
+async function descargarBackup(formato) {
+  const mensaje = el('mensajeBackup');
+  const boton = formato === 'json' ? el('botonBackupJson') : el('botonBackupSql');
+  const textoOriginal = boton ? boton.textContent : '';
+  if (boton) {
+    boton.disabled = true;
+    boton.textContent = 'Generando…';
+  }
+  mostrarMensaje(mensaje, '', '');
+  try {
+    const res = await fetch(`/api/admin/backup.${formato}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (!res.ok) {
+      let msg = 'No se pudo generar la copia de seguridad.';
+      try { msg = (await res.json()).error || msg; } catch (_) { /* sin cuerpo JSON */ }
+      mostrarMensaje(mensaje, msg, 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || `backup-dramatiza.${formato}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    const mb = blob.size / (1024 * 1024);
+    mostrarMensaje(mensaje, `Copia descargada: ${nombre} (${mb >= 1 ? `${mb.toFixed(2)} MB` : `${Math.max(1, Math.round(blob.size / 1024))} KB`}).`, 'ok');
+  } catch (e) {
+    mostrarMensaje(mensaje, `No se pudo descargar la copia: ${e.message || e}`, 'error');
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = textoOriginal;
+    }
+  }
+}
+
+el('botonBackupSql')?.addEventListener('click', () => descargarBackup('sql'));
+el('botonBackupJson')?.addEventListener('click', () => descargarBackup('json'));
+
 function bloquesHorario(t) {
   const mFecha = String(t.fecha || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
   const mHora = String(t.hora || '').trim().match(/(\d{1,2}):(\d{2})/);
@@ -1067,7 +1127,7 @@ function poblarFiltroAsistenteTaller() {
     }
   }
   const opciones = [...grupos.entries()].sort((a,b) => String(a[1]).localeCompare(String(b[1])));
-  filtroAsistenteTaller.innerHTML = '<option value="">Todos los talleres</option>';
+  filtroAsistenteTaller.innerHTML = '<option value="">Todos</option><option value="__con_taller__">✓ Con talleres</option><option value="__sin_taller__">○ Sin talleres</option>';
   for (const [id, nombre] of opciones) {
     const opt = document.createElement('option');
     opt.value = String(id);
@@ -1104,6 +1164,8 @@ function talleresIdsAgrupadosDeAsistente(a) {
   return grupos;
 }
 
+let asistentesVisibles = [];
+
 function renderAsistentes(lista) {
   asistentesData = Array.isArray(lista) ? lista : [];
   const cuerpo = document.querySelector('#tablaAsistentes tbody');
@@ -1115,14 +1177,18 @@ function renderAsistentes(lista) {
     const coincideTexto = !q || String(a.dni||'').includes(q) || String(a.apellido||'').toLowerCase().includes(q) || String(a.nombre||'').toLowerCase().includes(q) || String(a.email||'').toLowerCase().includes(q);
     if (!coincideTexto) return false;
     if (!tallerFiltro) return true;
+    if (tallerFiltro === '__sin_taller__') return Number(a.cantidad_talleres || 0) === 0;
+    if (tallerFiltro === '__con_taller__') return Number(a.cantidad_talleres || 0) > 0;
     const grupos = talleresIdsAgrupadosDeAsistente(a);
     return grupos.has(tallerFiltro);
   });
   if (tallerFiltro || q) {
-    resumenAsistentes.textContent = `Asistentes: ${visibles.length} de ${asistentesData.length} · ${tallerFiltro ? ' · filtrado por taller' : ''}.`;
+    const etiquetaFiltro = tallerFiltro === '__sin_taller__' ? ' · Sin talleres' : tallerFiltro === '__con_taller__' ? ' · Con talleres' : tallerFiltro ? ' · filtrado por taller' : '';
+    resumenAsistentes.textContent = `Asistentes: ${visibles.length} de ${asistentesData.length}${etiquetaFiltro}${q ? ' · búsqueda' : ''}.`;
   } else {
     resumenAsistentes.textContent = `Asistentes: ${asistentesData.length} `;
   }
+  asistentesVisibles = visibles;
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
@@ -1151,7 +1217,7 @@ function renderAsistentes(lista) {
     const nombres = String(a.talleres_nombres||'').split(',').map(s=>s.trim()).filter(Boolean);
     for (const n of nombres.slice(0,3)) { const chip=document.createElement('div'); chip.className='chip-taller'; chip.textContent=n; chip.title=n; divTalleres.appendChild(chip); }
     if (nombres.length>3) { const more=document.createElement('div'); more.className='chip-taller chip-taller-mas'; more.textContent=`+${nombres.length-3} más`; more.title = nombres.slice(3).join(', '); divTalleres.appendChild(more); }
-    if (!nombres.length) divTalleres.textContent='—';
+    if (!nombres.length) { const sin=document.createElement('span'); sin.className='badge badge-encuentro-no'; sin.textContent='○ Sin taller'; sin.title='Inscripta al encuentro, sin talleres'; divTalleres.appendChild(sin); }
     tdTalleres.appendChild(divTalleres);
     const tdEncuentro = document.createElement('td');
     const enEnc2 = Boolean(a.en_encuentro);
@@ -1168,6 +1234,7 @@ function renderAsistentes(lista) {
     tdPago.appendChild(spanPago2);
     const tdFecha = document.createElement('td'); tdFecha.textContent=formatearFecha(a.creado_en); tdFecha.title = a.creado_en||''; tdFecha.style.whiteSpace='nowrap'; tdFecha.style.fontSize='0.82rem';
     const tdAcc = document.createElement('td'); const cont=document.createElement('div'); cont.className='acciones-fila';
+    const btnFicha=document.createElement('button'); btnFicha.type='button'; btnFicha.className='boton boton-chico'; btnFicha.textContent='Ficha'; btnFicha.title='Ver ficha completa'; btnFicha.addEventListener('click',()=>abrirFichaAsistente(a.dni)); cont.appendChild(btnFicha);
     const btnEdit=document.createElement('button'); btnEdit.type='button'; btnEdit.className='boton boton-chico'; btnEdit.textContent='Editar'; btnEdit.addEventListener('click',()=>abrirModalAsistente(a)); cont.appendChild(btnEdit);
     const btnDel=document.createElement('button'); btnDel.type='button'; btnDel.className='boton boton-peligro boton-chico'; btnDel.textContent='Eliminar'; btnDel.addEventListener('click', async()=>{
       if(!window.confirm(`¿Eliminar asistente ${a.apellido}, ${a.nombre} (DNI ${a.dni}) y todas sus inscripciones?`)) return;
@@ -1177,6 +1244,10 @@ function renderAsistentes(lista) {
       btnDel.disabled=false;
     }); cont.appendChild(btnDel);
     tdAcc.appendChild(cont);
+    // click en fila abre ficha (excepto botones)
+    tr.style.cursor='pointer';
+    tr.title='Click para ver ficha';
+    tr.addEventListener('click', (e)=>{ if(e.target.closest('button')) return; abrirFichaAsistente(a.dni); });
     tr.append(tdDni,tdNombre,tdEmail,tdTel,tdAlim,tdTalleres,tdEncuentro,tdPago,tdFecha,tdAcc);
     cuerpo.appendChild(tr);
   }
@@ -1193,6 +1264,53 @@ async function cargarAsistentes() {
   if(!res.ok){ resumenAsistentes.textContent=res.data.error||'No se pudieron cargar los asistentes.'; return; }
   renderAsistentes(res.data);
 }
+
+function fechaGuionCorta(valor) {
+  return String(formatearFecha(valor)).split(' - ')[0].replace(/\//g, '-');
+}
+
+async function exportarAsistentesExcel() {
+  const q = (buscarAsistente.value || '').trim();
+  const taller = filtroAsistenteTaller ? String(filtroAsistenteTaller.value || '').trim() : '';
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (taller) params.set('taller', taller);
+  mostrarMensaje(mensajePanel, 'Generando Excel de asistentes…', 'info');
+  try {
+    const res = await fetch(`/api/admin/asistentes/export/xlsx${params.toString() ? `?${params.toString()}` : ''}`, { credentials: 'same-origin' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      mostrarMensaje(mensajePanel, data.error || 'No se pudo exportar.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') || '';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'asistentes.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    mostrarMensaje(mensajePanel, `Excel descargado: ${nombre}.`, 'ok');
+  } catch (e) {
+    mostrarMensaje(mensajePanel, 'Error de red al exportar.', 'error');
+  }
+}
+
+function imprimirAsistentes() {
+  const filas = (asistentesVisibles && asistentesVisibles.length ? asistentesVisibles : []).map((a) => {
+    const nombre = `${a.apellido || ''}, ${a.nombre || ''}`.replace(/^,\s*/, '') || '—';
+    return `<tr><td>${escapeHtml(a.dni || '')}</td><td>${escapeHtml(nombre)}</td><td>${escapeHtml(a.email || '—')}</td><td>${escapeHtml(a.telefono || '—')}</td><td>${escapeHtml(ETIQUETAS_ALIMENTACION[a.alimentacion] || a.alimentacion || '—')}</td><td>${Number(a.cantidad_talleres || 0) > 0 ? 'SÍ' : 'NO'}</td><td>${escapeHtml(ETIQUETAS_PAGO[a.estado_pago] || a.estado_pago || '—')}</td><td>${escapeHtml(fechaGuionCorta(a.creado_en))}</td></tr>`;
+  }).join('');
+  const ahora = new Date().toLocaleString('es-AR');
+  const win = window.open('', '_blank');
+  if (!win) { mostrarMensaje(mensajePanel, 'El navegador bloqueó la ventana de impresión.', 'error'); return; }
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Listado de asistentes</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px;}h1{font-size:18px;margin:0 0 4px;}p{font-size:12px;color:#555;margin:0 0 12px;}table{width:100%;border-collapse:collapse;font-size:11px;}th,td{border:1px solid #999;padding:4px 6px;text-align:left;}th{background:#eee;}</style></head><body><h1>Listado de asistentes — Encuentro Dramatiza Salta 2026</h1><p>${asistentesVisibles.length} asistente(s) · Generado ${ahora}</p><table><thead><tr><th>DNI</th><th>Apellido y nombre</th><th>Correo</th><th>Teléfono</th><th>Alimentación</th><th>Insc. talleres</th><th>Pago</th><th>Fecha</th></tr></thead><tbody>${filas || '<tr><td colspan="8">Sin resultados para el filtro.</td></tr>'}</tbody></table><script>window.onload=()=>{window.print();};</scr${''}ipt></body></html>`);
+  win.document.close();
+}
+
+el('botonExportarAsistentes')?.addEventListener('click', exportarAsistentesExcel);
+el('botonImprimirAsistentes')?.addEventListener('click', imprimirAsistentes);
 
 function actualizarConflictoAsistente(){
   const aviso=modalAsistenteConflicto;
@@ -1265,9 +1383,12 @@ botonGuardarAsistente.addEventListener('click', async()=>{
   if(!/^\d{7,8}$/.test(dni)){ mostrarMensaje(mensajeAsistenteModal,'DNI inválido (7 u 8 dígitos).','error'); return; }
   if(apellido.length<2 || nombre.length<2){ mostrarMensaje(mensajeAsistenteModal,'Nombre y apellido requeridos.','error'); return; }
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ mostrarMensaje(mensajeAsistenteModal,'Email inválido.','error'); return; }
-  if(seleccionados.length===0){ mostrarMensaje(mensajeAsistenteModal,'Seleccioná al menos un taller.','error'); return; }
-  botonGuardarAsistente.disabled=true;
   const esNuevo=!asistenteEditando;
+  if(seleccionados.length===0 && esNuevo){ mostrarMensaje(mensajeAsistenteModal,'Seleccioná al menos un taller.','error'); return; }
+  if(seleccionados.length===0 && !esNuevo){
+    if(!window.confirm('Vas a dejar a esta persona sin talleres (quedará solo como inscripta al encuentro). ¿Continuar?')) return;
+  }
+  botonGuardarAsistente.disabled=true;
   const url= esNuevo ? '/api/admin/asistentes' : `/api/admin/asistentes/${encodeURIComponent(dni)}`;
   const method= esNuevo ? 'POST':'PUT';
   const payload={ dni, nombre, apellido, email, telefono, alimentacion, talleres: seleccionados };
@@ -1283,6 +1404,297 @@ botonGuardarAsistente.addEventListener('click', async()=>{
   else { mostrarMensaje(mensajePanel, esNuevo?'Asistente creado.':'Asistente actualizado.','ok'); cerrarModalAsistente(); await cargarDatos(); await cargarAsistentes(); if(subTabInscripcionActiva()==='talleres'){ await cargarInscripciones(); } }
   botonGuardarAsistente.disabled=false;
 });
+
+// ── Ficha de asistente ───────────────────────────────────────────────
+let fichaDniActual = null;
+let fichaDataActual = null;
+const modalFicha = el('modalFichaAsistente');
+const fichaCargando = el('fichaCargando');
+const fichaError = el('fichaError');
+const fichaDatos = el('fichaDatos');
+
+function cerrarFichaAsistente(){
+  if(modalFicha){ modalFicha.hidden=true; modalFicha.setAttribute('aria-hidden','true'); }
+  fichaDniActual=null;
+  fichaDataActual=null;
+}
+el('botonCerrarFicha')?.addEventListener('click', cerrarFichaAsistente);
+modalFicha?.addEventListener('click', (e)=>{ if(e.target===modalFicha) cerrarFichaAsistente(); });
+el('botonFichaEditar')?.addEventListener('click', ()=>{
+  if(!fichaDniActual) return;
+  const a = asistentesData.find(x=> String(x.dni)===String(fichaDniActual));
+  cerrarFichaAsistente();
+  abrirModalAsistente(a || { dni: fichaDniActual });
+});
+el('botonFichaQr')?.addEventListener('click', ()=>{
+  if(fichaDniActual) abrirModalQr(fichaDniActual);
+});
+el('botonFichaCopiarLink')?.addEventListener('click', async()=>{
+  if(!fichaDniActual) return;
+  const url = `${location.origin}${location.pathname}?ficha=${encodeURIComponent(fichaDniActual)}`;
+  try{ await navigator.clipboard.writeText(url); mostrarMensaje(mensajePanel,'Link copiado: '+url,'ok'); } catch(_){ prompt('Copiá el link:', url); }
+});
+el('botonFichaEliminar')?.addEventListener('click', async()=>{
+  if(!fichaDniActual) return;
+  const dni = fichaDniActual;
+  if(!window.confirm(`¿Eliminar asistente DNI ${dni} y todas sus inscripciones?`)) return;
+  const res = await api(`/api/admin/asistentes/${encodeURIComponent(dni)}`,{method:'DELETE'});
+  if(!res.ok){ mostrarMensaje(fichaError, res.data.error||'No se pudo eliminar.','error'); fichaError.hidden=false; } else { mostrarMensaje(mensajePanel,'Asistente eliminado.','ok'); cerrarFichaAsistente(); await cargarDatos(); await cargarAsistentes(); }
+});
+
+async function abrirFichaAsistente(dni){
+  const dniLimpio = String(dni||'').replace(/\D/g,'');
+  if(!/^\d{7,8}$/.test(dniLimpio)) return;
+  fichaDniActual = dniLimpio;
+  if(modalFicha){ modalFicha.hidden=false; modalFicha.setAttribute('aria-hidden','false'); }
+  fichaCargando.hidden=false; fichaCargando.textContent='Cargando ficha…';
+  fichaError.hidden=true; fichaError.textContent='';
+  fichaDatos.hidden=true;
+  el('tituloModalFicha').textContent = `Ficha — DNI ${dniLimpio}`;
+  try{
+    const res = await api(`/api/admin/asistentes/${encodeURIComponent(dniLimpio)}/ficha`);
+    if(!res.ok){ throw new Error(res.data.error||'No se pudo cargar la ficha.'); }
+    await renderFicha(res.data);
+    fichaCargando.hidden=true;
+    fichaDatos.hidden=false;
+    history.replaceState(null,'', `${location.pathname}?ficha=${encodeURIComponent(dniLimpio)}`);
+  }catch(e){
+    fichaCargando.hidden=true;
+    fichaError.textContent = e.message || String(e);
+    fichaError.hidden=false;
+    fichaError.className='mensaje visible error';
+  }
+}
+
+async function renderFicha(f){
+  const esc = escapeHtml;
+  // Datos personales
+  const dp = el('fichaDatosPersonales');
+  dp.innerHTML = `
+    <div><strong>DNI:</strong> ${esc(f.dni)}</div>
+    <div><strong>Nombre:</strong> ${esc(f.apellido)}, ${esc(f.nombre)}</div>
+    <div><strong>Email:</strong> ${esc(f.email||'—')} </div>
+    <div><strong>Tel:</strong> ${esc(f.telefono||'—')}</div>
+    <div><strong>Alimentación:</strong> ${esc(ETIQUETAS_ALIMENTACION[f.alimentacion]||f.alimentacion)}</div>
+    <div><strong>Creado:</strong> ${esc(formatearFecha(f.creado_en)||'—')}</div>
+    ${f.encuentro ? `<div style="margin-top:6px; font-size:0.85rem; color:var(--color-texto-suave);">Prov: ${esc(f.encuentro.provincia||'—')} · Ciudad: ${esc(f.encuentro.ciudad||'—')} · Ocup: ${esc(f.encuentro.ocupacion||'—')}</div>` : ''}
+  `;
+  // Estado
+  const est = el('fichaEstado');
+  const badgePago = `<span class="badge badge-pago ${f.estado_pago}">${esc(ETIQUETAS_PAGO[f.estado_pago]||f.estado_pago)}</span>`;
+  const badgeEnc = f.en_encuentro ? '<span class="badge badge-encuentro-si">✓ En encuentro</span>' : '<span class="badge badge-encuentro-no">○ Sin encuentro</span>';
+  const eleg = f.elegibilidad ? (f.elegibilidad.elegible ? '<span class="badge badge-encuentro-si">Elegible certificado</span>' : '<span class="badge badge-encuentro-no">No elegible</span>') : '';
+  est.innerHTML = `${badgePago} ${badgeEnc} ${eleg}<div style="margin-top:6px;">QR: ${f.qr_code ? `<code>${esc(f.qr_code)}</code>` : '— (sin acreditar)'}</div>`;
+  const qrPrev = el('fichaQrPreview');
+  if(f.qr_code){
+    qrPrev.innerHTML = `<img src="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/png" alt="QR" style="width:140px;height:140px; border:1px solid var(--color-borde); border-radius:8px; object-fit:contain; background:#fff;"><div style="margin-top:4px;"><a href="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/pdf" target="_blank" class="ayuda">Descargar PDF</a></div>`;
+  } else { qrPrev.innerHTML = '<span class="ayuda">Sin QR — Finalizá la inscripción</span>'; }
+  // Talleres — lectura + edición directa en ficha
+  const ft = el('fichaTalleres');
+  const talleresIdsActuales = new Set((f.talleres||[]).map(t=> Number(t.id)));
+  const renderFichaTalleresLectura = ()=>{
+    if(!f.talleres || !f.talleres.length) return '<span class="ayuda">Sin talleres</span>';
+    return '<div class="lista-talleres-inscripcion">'+ f.talleres.map(t=> `<div class="chip-taller" title="${esc(t.fecha)} ${esc(t.hora)}">${esc(t.taller)}<span style="font-size:0.75rem; color:var(--color-texto-suave); margin-left:6px;">${esc(t.fecha||'')} ${esc(t.hora||'')} ${esc(t.lugar||'')}</span></div>`).join('') + '</div>';
+  };
+  let fichaEditTalleres = false;
+  const dibujarFichaTalleres = ()=>{
+    if(!fichaEditTalleres){
+      ft.innerHTML = renderFichaTalleresLectura() + `<div style="margin-top:8px;"><button type="button" class="boton boton-secundario boton-chico" id="btnFichaEditarTalleres">Editar talleres</button></div><div id="fichaTalleresConflicto" class="aviso-conflicto" hidden></div><div id="fichaTalleresMsg" class="mensaje" style="margin-top:6px;"></div>`;
+      const btn = document.getElementById('btnFichaEditarTalleres');
+      if(btn) btn.addEventListener('click', ()=>{ fichaEditTalleres=true; dibujarFichaTalleres(); });
+      return;
+    }
+    // modo edición
+    if(!talleresActuales.length){
+      ft.innerHTML = '<span class="ayuda">Cargando talleres…</span>';
+      api('/api/admin/talleres').then(r=>{ if(r.ok) talleresActuales=r.data; dibujarFichaTalleres(); });
+      return;
+    }
+    const checks = talleresActuales.map(t=>{
+      const id=Number(t.id);
+      const marcado=talleresIdsActuales.has(id);
+      const lleno = Number(t.inscriptos)>=Number(t.cupo) && !marcado;
+      const disabled = lleno ? 'disabled' : '';
+      const etiqueta = lleno ? `${esc(t.nombre)} — Sin cupo` : `${esc(t.nombre)} — ${Number(t.cupo)-Number(t.inscriptos)} libres ${esc(t.fecha||'') } ${esc(t.hora||'')}`;
+      return `<label class="opcion-taller ${lleno?'opcion-taller-lleno':''}" title="${lleno?'Sin cupo':''}"><input type="checkbox" value="${id}" ${marcado?'checked':''} ${disabled}> <span>${etiqueta}</span></label>`;
+    }).join('');
+    ft.innerHTML = `<div class="talleres-multiple" id="fichaTalleresChecks" style="max-height:220px; overflow:auto; border:1px solid var(--color-borde); border-radius:8px; padding:8px;">${checks}</div><div id="fichaTalleresConflicto" class="aviso-conflicto" hidden></div><div style="margin-top:8px; display:flex; gap:8px;"><button type="button" class="boton boton-chico" id="btnFichaGuardarTalleres">Guardar talleres</button><button type="button" class="boton boton-secundario boton-chico" id="btnFichaCancelarTalleres">Cancelar</button></div><div id="fichaTalleresMsg" class="mensaje" style="margin-top:6px;"></div>`;
+    const actualizarConflictoFicha = ()=>{
+      const aviso = document.getElementById('fichaTalleresConflicto');
+      const sel=[...document.querySelectorAll('#fichaTalleresChecks input:checked')].map(c=> Number(c.value));
+      const byId=new Map(talleresActuales.map(t=>[Number(t.id),t]));
+      const extra=sel.map(id=>byId.get(id)).filter(Boolean);
+      const pares=[]; for(let i=0;i<extra.length;i++) for(let j=i+1;j<extra.length;j++) if(talleresSeSuperponenEdicion(extra[i],extra[j])) pares.push([extra[i],extra[j]]);
+      if(pares.length){ aviso.innerHTML=`<strong>⚠ Conflicto:</strong><br>${pares.map(([a,b])=>`• ${esc(a.nombre)} ↔ ${esc(b.nombre)}`).join('<br>')}`; aviso.hidden=false; } else { aviso.hidden=true; aviso.innerHTML=''; }
+    };
+    document.getElementById('fichaTalleresChecks')?.addEventListener('change', actualizarConflictoFicha);
+    actualizarConflictoFicha();
+    document.getElementById('btnFichaCancelarTalleres')?.addEventListener('click', ()=>{ fichaEditTalleres=false; dibujarFichaTalleres(); });
+    document.getElementById('btnFichaGuardarTalleres')?.addEventListener('click', async()=>{
+      const sel=[...document.querySelectorAll('#fichaTalleresChecks input:checked')].map(c=> Number(c.value));
+      if(sel.length===0){
+        if(!f.encuentro){ const m=document.getElementById('fichaTalleresMsg'); m.textContent='Seleccioná al menos un taller.'; m.className='mensaje visible error'; return; }
+        if(!window.confirm('Vas a dejar a esta persona sin talleres (quedará solo como inscripta al encuentro). ¿Continuar?')) return;
+      }
+      const btn=document.getElementById('btnFichaGuardarTalleres'); btn.disabled=true;
+      const res=await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}`,{method:'PUT', body:JSON.stringify({ nombre:f.nombre, apellido:f.apellido, email:f.email, telefono:f.telefono||'', alimentacion:f.alimentacion||'sin_restriccion', talleres: sel })});
+      const msgEl=document.getElementById('fichaTalleresMsg');
+      if(!res.ok){ msgEl.textContent=res.data.error||'No se pudo guardar.'; msgEl.className='mensaje visible error'; if(String(msgEl.textContent).toLowerCase().includes('cupo')) alert('No hay más cupos disponibles'); }
+      else { msgEl.textContent='Talleres actualizados.'; msgEl.className='mensaje visible ok'; fichaEditTalleres=false; const nueva=await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/ficha`); if(nueva.ok){ Object.assign(f, nueva.data); await renderFicha(f); await cargarAsistentes(); } else { setTimeout(()=> dibujarFichaTalleres(), 500); } }
+      btn.disabled=false;
+    });
+  };
+  dibujarFichaTalleres();
+  // Encuentro
+  const fe = el('fichaEncuentro');
+  if(!f.encuentro){ fe.innerHTML='<span class="ayuda">No figura en el listado del encuentro</span>'; }
+  else {
+    const e = f.encuentro;
+    fe.innerHTML = `
+      <div><strong>DNI:</strong> ${esc(e.dni)} · <strong>Marca:</strong> ${esc(e.marca_temporal||e.creado_en||'—')}</div>
+      <div><strong>Nombre:</strong> ${esc(e.apellido||'')}, ${esc(e.nombre||'')}</div>
+      <div><strong>Email:</strong> ${esc(e.email||'—')} · <strong>Tel:</strong> ${esc(e.telefono||'—')}</div>
+      <div><strong>Nac:</strong> ${esc(e.fecha_nacimiento||'—')} · <strong>Prov:</strong> ${esc(e.provincia||'—')} · <strong>Ciudad:</strong> ${esc(e.ciudad||'—')}</div>
+      <div><strong>Ocupación:</strong> ${esc(e.ocupacion||'—')} · <strong>Opción pago:</strong> ${esc(e.opcion_pago||'—')} · <strong>Pago sheet:</strong> ${esc(e.pago||'—')}</div>
+    `;
+  }
+  // Pagos — edición directa (asignar plan, cuotas, tallerista)
+  const fp = el('fichaPagos');
+  let fichaPlanesDisponibles = null;
+  const cargarPlanesDisponibles = async()=>{
+    if(fichaPlanesDisponibles) return fichaPlanesDisponibles;
+    const r=await api('/api/admin/pagos/planes');
+    fichaPlanesDisponibles = r.ok && Array.isArray(r.data) ? r.data : [];
+    return fichaPlanesDisponibles;
+  };
+  const dibujarFichaPagos = async()=>{
+    const planesAct = f.planes || [];
+    let html = '';
+    if(!planesAct.length){
+      html += '<div class="ayuda" style="margin-bottom:8px;">Sin plan asignado</div>';
+    } else {
+      html += planesAct.map(pl=> {
+        const pagadas = Array.isArray(pl.pagos)? pl.pagos.length:0;
+        const total = Number(pl.cantidadCuotas)||0;
+        const pct = total? Math.round(pagadas/total*100):0;
+        const cuotas = Array.isArray(pl.cuotasDetalle)? pl.cuotasDetalle.map((c)=>{
+          const pag = Array.isArray(pl.pagos) && pl.pagos.find(p=> Number(p.numero)===Number(c.numero));
+          const checked = pag ? 'checked' : '';
+          return `<label style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid var(--color-borde);"><input type="checkbox" data-plan="${pl.asistentePlanId}" data-num="${c.numero}" data-monto="${c.monto}" ${checked}> <span>Cuota ${c.numero} — $${esc(String(c.monto))}</span> <span style="margin-left:auto; font-size:0.80rem; color:var(--color-texto-suave);">${pag? '✓ '+esc(pag.fecha||'pagada'): '○ pendiente'}</span></label>`;
+        }).join('') : '<span class="ayuda">Sin detalle</span>';
+        return `<div style="border:1px solid var(--color-borde); border-radius:8px; padding:8px; margin-bottom:8px;">
+          <div style="display:flex; gap:8px; align-items:center;"><strong>${esc(pl.planNombre||('Plan #'+pl.planId))}</strong> <label style="margin-left:auto; font-size:0.85rem;"><input type="checkbox" data-tallerista-plan="${pl.asistentePlanId}" ${pl.esTallerista?'checked':''}> Tallerista 50%</label></div>
+          <div style="font-size:0.85rem; color:var(--color-texto-suave);">Total $${esc(String(pl.montoTotal))} · ${pagadas}/${total} cuotas (${pct}%)</div>
+          <div style="margin-top:6px;">${cuotas}</div>
+        </div>`;
+      }).join('');
+    }
+    const planesDisp = await cargarPlanesDisponibles();
+    const opciones = planesDisp.map(p=> `<option value="${p.id}">${esc(p.nombre)} — $${esc(String(p.monto_total))} · ${esc(String(p.cantidad_cuotas))} cuotas${p.es_tallerista?' (tallerista)':''}</option>`).join('');
+    html += `<div style="margin-top:8px; border-top:1px solid var(--color-borde); padding-top:8px;">
+      <div style="font-weight:600; margin-bottom:6px;">Asignar / cambiar plan</div>
+      <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="campo" style="min-width:200px; flex:1;"><label>Plan</label><select id="fichaSelectPlan"><option value="">-- elegir plan --</option>${opciones}</select></div>
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.90rem;"><input type="checkbox" id="fichaCheckTallerista"> Tallerista 50%</label>
+        <button type="button" class="boton boton-secundario boton-chico" id="btnFichaAsignarPlan">Asignar plan</button>
+      </div>
+      <div id="fichaPagosMsg" class="mensaje" style="margin-top:6px;"></div>
+    </div>`;
+    fp.innerHTML = html;
+    // listeners cuotas
+    fp.querySelectorAll('input[data-plan][data-num]').forEach(chk=>{
+      chk.addEventListener('change', async()=>{
+        const planId=Number(chk.dataset.plan);
+        const num=Number(chk.dataset.num);
+        const monto=Number(chk.dataset.monto)||0;
+        chk.disabled=true;
+        let res;
+        if(chk.checked){
+          const hoy=new Date().toISOString().slice(0,10);
+          res=await api('/api/admin/pagos/cuota',{method:'POST', body:JSON.stringify({ asistente_plan_id: planId, numero_cuota: num, monto, fecha_pago: hoy })});
+        } else {
+          res=await api('/api/admin/pagos/cuota',{method:'DELETE', body:JSON.stringify({ asistente_plan_id: planId, numero_cuota: num })});
+        }
+        const msgEl=document.getElementById('fichaPagosMsg');
+        if(!res.ok){ msgEl.textContent=res.data.error||'No se pudo actualizar cuota.'; msgEl.className='mensaje visible error'; chk.checked=!chk.checked; }
+        else {
+          msgEl.textContent= chk.checked ? `Cuota ${num} marcada pagada.` : `Cuota ${num} marcada pendiente.`;
+          msgEl.className='mensaje visible ok';
+          const nueva=await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/ficha`); if(nueva.ok){ Object.assign(f, nueva.data); await dibujarFichaPagos(); await cargarAsistentes(); }
+        }
+        chk.disabled=false;
+      });
+    });
+    fp.querySelectorAll('input[data-tallerista-plan]').forEach(chk=>{
+      chk.addEventListener('change', async()=>{
+        const planId=Number(chk.dataset.talleristaPlan);
+        chk.disabled=true;
+        const res=await api(`/api/admin/pagos/${planId}/tallerista`,{method:'PUT', body:JSON.stringify({ es_tallerista: chk.checked })});
+        const msgEl=document.getElementById('fichaPagosMsg');
+        if(!res.ok){ msgEl.textContent=res.data.error||'No se pudo actualizar tallerista.'; msgEl.className='mensaje visible error'; chk.checked=!chk.checked; }
+        else { msgEl.textContent= chk.checked ? 'Marcado como tallerista (50%).' : 'Quitada marca tallerista.'; msgEl.className='mensaje visible ok'; const nueva=await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/ficha`); if(nueva.ok){ Object.assign(f, nueva.data); await dibujarFichaPagos(); await cargarAsistentes(); } }
+        chk.disabled=false;
+      });
+    });
+    const btnAsignar=document.getElementById('btnFichaAsignarPlan');
+    if(btnAsignar){
+      btnAsignar.addEventListener('click', async()=>{
+        const sel=document.getElementById('fichaSelectPlan');
+        const planId=Number(sel.value);
+        if(!planId){ const m=document.getElementById('fichaPagosMsg'); m.textContent='Elegí un plan.'; m.className='mensaje visible error'; return; }
+        const esTallerista=document.getElementById('fichaCheckTallerista')?.checked || false;
+        btnAsignar.disabled=true;
+        const res=await api('/api/admin/pagos/asignar',{method:'POST', body:JSON.stringify({ dni: f.dni, plan_id: planId, es_tallerista: esTallerista })});
+        const msgEl=document.getElementById('fichaPagosMsg');
+        if(!res.ok){ msgEl.textContent=res.data.error||'No se pudo asignar plan.'; msgEl.className='mensaje visible error'; }
+        else { msgEl.textContent='Plan asignado.'; msgEl.className='mensaje visible ok'; const nueva=await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/ficha`); if(nueva.ok){ Object.assign(f, nueva.data); await dibujarFichaPagos(); await cargarAsistentes(); } }
+        btnAsignar.disabled=false;
+      });
+    }
+  };
+  await dibujarFichaPagos();
+  // Asistencia talleres
+  const fa = el('fichaAsistencia');
+  if(f.elegibilidad && Array.isArray(f.elegibilidad.asistencias) && f.elegibilidad.asistencias.length){
+    fa.innerHTML = f.elegibilidad.asistencias.map(a=> `<div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--color-borde);"><span>${esc(a.taller)}</span><span>${a.tieneIngreso?'✓ Ing':'○ Ing'} / ${a.tieneEgreso?'✓ Egr':'○ Egr'} ${a.completo?'<span class="badge badge-encuentro-si">OK</span>':'<span class="badge badge-encuentro-no">Falta</span>'}</span></div>`).join('') + (f.elegibilidad.elegible? '<div style="margin-top:6px; color:var(--color-ok);">✓ Elegible para certificado</div>' : '<div style="margin-top:6px; color:var(--color-peligro);">Requiere ingreso+egreso por taller</div>');
+  } else if(f.asistenciasTalleres && f.asistenciasTalleres.length){
+    const fmt = (iso)=> formatearFecha(iso)||iso||'';
+    fa.innerHTML = f.asistenciasTalleres.map(r=> `<div style="padding:2px 0; border-bottom:1px solid var(--color-borde);">${esc(r.tipo)} — taller #${r.taller_id}${r.bloque_id? ' bloq '+r.bloque_id:''} — ${esc(fmt(r.registrado_en))} <span class="ayuda">por ${esc(r.usuario||'—')}</span></div>`).join('');
+  } else { fa.innerHTML='<span class="ayuda">Sin registros de asistencia</span>'; }
+  // Acreditaciones
+  const fac = el('fichaAcreditaciones');
+  if(!f.acreditaciones || !f.acreditaciones.length){ fac.innerHTML='<span class="ayuda">Nunca acreditado</span>'; }
+  else { fac.innerHTML = f.acreditaciones.map(a=> `<div style="padding:4px 0; border-bottom:1px solid var(--color-borde);">${esc(formatearFecha(a.registrado_en))} — <code>${esc(a.qr_code||'—')}</code> <span class="ayuda">por ${esc(a.usuario||'—')}</span></div>`).join(''); }
+  // Comidas
+  const fc = el('fichaComidas');
+  if(!f.comidas || !f.comidas.length){ fc.innerHTML='<span class="ayuda">Sin retiros de desayuno/merienda</span>'; }
+  else { fc.innerHTML = f.comidas.map(c=> `<div style="padding:4px 0; border-bottom:1px solid var(--color-borde);">${esc(formatearFecha(c.registrado_en))} — ${esc(c.titulo)} <span class="ayuda">${esc(c.dia)} ${esc(c.hora_inicio||'')}–${esc(c.hora_fin||'')}</span></div>`).join(''); }
+  // Certificados
+  const fcert = el('fichaCertificados');
+  if(!f.certificados || !f.certificados.length){ fcert.innerHTML='<span class="ayuda">Sin certificados emitidos</span>'; }
+  else { fcert.innerHTML = f.certificados.map(c=> `<div style="padding:4px 0; border-bottom:1px solid var(--color-borde);"><code>${esc(c.codigo)}</code> — ${esc(c.tipo)} — ${esc(formatearFecha(c.creado_en))} <a href="/verificar.html?c=${encodeURIComponent(c.codigo)}" target="_blank">Verificar</a></div>`).join(''); }
+  // Eventos
+  const fev = el('fichaEventos');
+  if(!f.eventos || !f.eventos.length){ fev.innerHTML='<span class="ayuda">Sin eventos</span>'; }
+  else { fev.innerHTML = f.eventos.map(ev=> `<div style="padding:3px 0; border-bottom:1px solid var(--color-borde);"><span class="badge badge-encuentro-si" style="font-size:0.70rem;">${esc(ev.tipo)}</span> ${esc(ev.detalle||'')} <span class="ayuda">— ${esc(ev.usuario||'—')} ${esc(formatearFecha(ev.creado_en)||'')}</span></div>`).join(''); }
+}
+
+function checkFichaQuery(){
+  const params = new URLSearchParams(location.search);
+  const dni = params.get('ficha');
+  if(dni && /^\d{7,8}$/.test(String(dni).replace(/\D/g,''))){
+    // asegurar que el panel de asistentes esté visible (dramatiza-1 agrupa en sub-pestañas)
+    if (typeof activarSubTabInscripcion === 'function') activarSubTabInscripcion('asistentes');
+    setTimeout(()=> abrirFichaAsistente(dni), 600);
+  }
+}
+// llamar al cargar datos luego de login
+const _cargarDatosOrig = cargarDatos;
+cargarDatos = async function(){
+  const r = await _cargarDatosOrig.apply(this, arguments);
+  checkFichaQuery();
+  return r;
+};
 
 function renderEventos(eventos) {
   eventosData = Array.isArray(eventos) ? eventos : [];
@@ -1616,6 +2028,7 @@ function renderAcreditaciones(datos) {
 
     const cupoNum = Number(t.cupo) || 0;
     const inscriptosNum = Number(t.inscriptos) || 0;
+    const sobreCupo = cupoNum > 0 && inscriptosNum > cupoNum;
     const libres = Math.max(0, cupoNum - inscriptosNum);
     const tdLibres = document.createElement('td');
     tdLibres.textContent = libres;
@@ -1624,6 +2037,12 @@ function renderAcreditaciones(datos) {
 
     const tdInscriptos = document.createElement('td');
     tdInscriptos.textContent = t.inscriptos;
+    if (sobreCupo) {
+      tdInscriptos.className = 'sobre-cupo';
+      tdInscriptos.title = `Excede el cupo en ${inscriptosNum - cupoNum} (cupo ${cupoNum})`;
+      tr.classList.add('fila-sobre-cupo');
+      tr.title = `${t.taller}: ${inscriptosNum} inscriptos superan el cupo de ${cupoNum}`;
+    }
 
     const tdAcreditados = document.createElement('td');
     tdAcreditados.textContent = t.acreditados;
@@ -2035,7 +2454,8 @@ async function cargarDatos() {
   // Si ya hay asistentes cargados, re-renderizar con el filtro actualizado
   if (asistentesData.length) renderAsistentes(asistentesData);
   encuentroPersonas = Array.isArray(encuentro.data?.personas) ? encuentro.data.personas : [];
-  resumenEncuentro.textContent = `Personas cargadas: ${encuentro.data.total ?? encuentroPersonas.length}.`;
+  const inscriptosUnicos = new Set((inscripciones.data || []).map((x) => String(x.dni))).size;
+  resumenEncuentro.textContent = `Encuentro (listado importado): ${encuentro.data.total ?? encuentroPersonas.length} · Inscriptos a talleres: ${inscriptosUnicos}.`;
   if (subTabInscripcionActiva() === 'encuentro') renderEncuentroPersonas(encuentroPersonas);
   if (esAdmin) {
     const [, , , eventos, usuarios, config] = respuestas;
@@ -3177,7 +3597,7 @@ function renderPagos() {
   if (visibles.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 9;
+    td.colSpan = 5;
     td.textContent = dniFiltro ? 'Sin resultados.' : 'No hay asistentes con plan asignado.';
     td.style.color = 'var(--color-texto-suave)';
     tr.appendChild(td);
@@ -3185,7 +3605,10 @@ function renderPagos() {
     return;
   }
   for (const a of visibles) {
-    const tr = document.createElement('tr');
+    const tr1 = document.createElement('tr');
+    tr1.className = 'fila-inscripcion fila1';
+    const tr2 = document.createElement('tr');
+    tr2.className = 'fila-inscripcion fila2';
     const pagadas = cuotaPagadaSet(a);
     const n = Number(a.cantidadCuotas) || 1;
     const detalleCuotas = a.cuotasDetalle || [];
@@ -3200,7 +3623,19 @@ function renderPagos() {
       tdDni.title = 'DNI 7x sin ficha de asistente - corregir o eliminar';
     }
     const tdNombre = document.createElement('td');
-    tdNombre.textContent = [a.apellido, a.nombre].filter(Boolean).join(', ') || '—';
+    tdNombre.colSpan = 2;
+    tdNombre.style.fontWeight = '600';
+    tdNombre.style.textAlign = 'left';
+    const nombreFuerte = document.createElement('div');
+    nombreFuerte.textContent = [a.apellido, a.nombre].filter(Boolean).join(', ') || '—';
+    tdNombre.appendChild(nombreFuerte);
+    const emailChico = document.createElement('div');
+    emailChico.textContent = a.email || 'sin email';
+    emailChico.style.fontWeight = '400';
+    emailChico.style.fontSize = '0.75rem';
+    emailChico.style.color = a.email ? 'var(--color-texto-suave)' : '#b45309';
+    emailChico.style.wordBreak = 'break-all';
+    tdNombre.appendChild(emailChico);
     if (!a.nombre && !a.apellido && String(a.dni).startsWith('7')) tdNombre.style.color = '#856404';
     const tdPlan = document.createElement('td');
     tdPlan.textContent = a.planNombre || '—';
@@ -3236,11 +3671,15 @@ function renderPagos() {
     });
     tdModo.appendChild(document.createElement('br'));
     tdModo.appendChild(btnToggle);
-    const tdTotal = document.createElement('td');
-    tdTotal.textContent = detalleCuotas.length
-      ? `${formatearMoneda(a.montoTotal)}${esTallerista ? ' (50%)' : ''} · ${detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' / ')}`
-      : `${formatearMoneda(a.montoTotal)} / ${formatearMoneda(montoCuota(a, 1))}`;
-    tdTotal.className = 'pagos-total';
+    const totalLinea = document.createElement('div');
+    totalLinea.className = 'pagos-total';
+    totalLinea.style.marginTop = '0.3rem';
+    totalLinea.style.fontSize = '0.78rem';
+    totalLinea.textContent = detalleCuotas.length
+      ? `$${formatearMoneda(a.montoTotal)}${esTallerista ? ' (50%)' : ''} · ${detalleCuotas.map((c) => formatearMoneda(c.monto)).join(' / ')}`
+      : `$${formatearMoneda(a.montoTotal)} / ${formatearMoneda(montoCuota(a, 1))}`;
+    totalLinea.title = `Total $${formatearMoneda(a.montoTotal)} en ${n} cuota(s)`;
+    tdModo.appendChild(totalLinea);
 
     const tdCuotas = document.createElement('td');
     const caja = document.createElement('div');
@@ -3351,14 +3790,34 @@ function renderPagos() {
     }
 
     const tdAcc = document.createElement('td');
+    tdAcc.rowSpan = 2;
     tdAcc.style.whiteSpace = 'nowrap';
+    tdAcc.style.verticalAlign = 'middle';
+    const accCol = document.createElement('div');
+    accCol.style.display = 'flex';
+    accCol.style.flexDirection = 'column';
+    accCol.style.gap = '4px';
+    accCol.style.alignItems = 'stretch';
+    const btnRecordatorio = document.createElement('button');
+    btnRecordatorio.type = 'button'; btnRecordatorio.className = 'boton boton-chico'; btnRecordatorio.textContent = '✉ Recordar';
+    const prox = proximaCuotaPendiente(a);
+    const tieneEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(a.email || ''));
+    if (!tieneEmail) {
+      btnRecordatorio.disabled = true;
+      btnRecordatorio.title = 'Sin email registrado — no se puede enviar recordatorio';
+    } else if (!prox) {
+      btnRecordatorio.disabled = true;
+      btnRecordatorio.title = 'Sin cuotas pendientes';
+    } else {
+      btnRecordatorio.title = `Enviar recordatorio de cuota ${prox.numero}/${n} ($${formatearMoneda(prox.monto)}) a ${a.email}`;
+    }
+    btnRecordatorio.addEventListener('click', () => enviarRecordatorioCuota(a, btnRecordatorio));
     const btnEdit = document.createElement('button');
-    btnEdit.type = 'button'; btnEdit.className = 'boton boton-chico'; btnEdit.textContent = 'Editar';
+    btnEdit.type = 'button'; btnEdit.className = 'boton boton-chico boton-secundario'; btnEdit.textContent = 'Editar';
     btnEdit.title = 'Editar DNI / plan / tallerista';
     btnEdit.addEventListener('click', () => abrirModalEditarPago(a));
     const btnDel = document.createElement('button');
     btnDel.type = 'button'; btnDel.className = 'boton boton-peligro boton-chico'; btnDel.textContent = 'Eliminar';
-    btnDel.style.marginLeft = '4px';
     btnDel.title = 'Eliminar registro de pago';
     btnDel.addEventListener('click', async () => {
       if (!confirm(`¿Eliminar registro de pago DNI ${a.dni} - ${a.planNombre}? Se borrarán también sus cuotas.`)) return;
@@ -3368,11 +3827,50 @@ function renderPagos() {
       else { mostrarMensaje(mensajePagos, 'Registro eliminado.', 'ok'); await cargarPagos(); }
       btnDel.disabled = false;
     });
-    tdAcc.appendChild(btnEdit); tdAcc.appendChild(btnDel);
+    accCol.appendChild(btnRecordatorio); accCol.appendChild(btnEdit); accCol.appendChild(btnDel);
+    tdAcc.appendChild(accCol);
 
-    tr.append(tdDni, tdNombre, tdPlan, tdModo, tdTotal, tdCuotas, tdEstado, tdComp, tdAcc);
-    tbody.appendChild(tr);
+    tr1.append(tdDni, tdNombre, tdEstado, tdAcc);
+    tr2.append(tdPlan, tdModo, tdCuotas, tdComp);
+    tbody.appendChild(tr1);
+    tbody.appendChild(tr2);
   }
+}
+
+function proximaCuotaPendiente(a) {
+  const n = Number(a.cantidadCuotas) || 1;
+  const pagadas = cuotaPagadaSet(a);
+  const detalle = Array.isArray(a.cuotasDetalle) ? a.cuotasDetalle : [];
+  for (let i = 1; i <= n; i++) {
+    if (!pagadas.has(i)) {
+      const info = detalle.find((c) => Number(c.numero) === i);
+      return { numero: i, monto: info && info.monto != null ? Number(info.monto) : montoCuota(a, i), fecha_tope: (info && info.fecha_tope) || '' };
+    }
+  }
+  return null;
+}
+
+async function enviarRecordatorioCuota(a, btn) {
+  const prox = proximaCuotaPendiente(a);
+  if (!prox) { mostrarMensaje(mensajePagos, 'Sin cuotas pendientes.', 'info'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(a.email || ''))) { mostrarMensaje(mensajePagos, 'El asistente no tiene un email válido registrado.', 'error'); return; }
+  const nombreMostrar = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
+  const detalleVence = prox.fecha_tope ? ` (vence ${formatearFechaTope(prox.fecha_tope)})` : '';
+  if (!window.confirm(`¿Enviar recordatorio de cuota ${prox.numero}/${Number(a.cantidadCuotas) || 1} ($${formatearMoneda(prox.monto)}${detalleVence}) a ${nombreMostrar} <${a.email}>?`)) return;
+  if (btn) btn.disabled = true;
+  mostrarMensaje(mensajePagos, `Enviando recordatorio a ${a.email}…`, 'info');
+  try {
+    const res = await api(`/api/admin/pagos/${a.asistentePlanId}/recordatorio`, { method: 'POST', body: JSON.stringify({ cuota: prox.numero }) });
+    if (!res.ok) {
+      mostrarMensaje(mensajePagos, (res.data && res.data.error) || 'No se pudo enviar el recordatorio.', 'error');
+    } else {
+      const sim = res.data && res.data.simulado ? ' (registrado en log — SMTP no configurado)' : '';
+      mostrarMensaje(mensajePagos, `Recordatorio de cuota ${prox.numero} enviado a ${res.data.email || a.email}.${sim}`, 'ok');
+    }
+  } catch (e) {
+    mostrarMensaje(mensajePagos, 'Error de red al enviar el recordatorio.', 'error');
+  }
+  if (btn) btn.disabled = false;
 }
 
 function triggerSubirComprobante(asistente) {
@@ -3671,6 +4169,44 @@ botonGuardarCuota.addEventListener('click', async () => {
 });
 
 filtroPagoDni.addEventListener('input', renderPagos);
+
+// ── Export XLSX de asistentes y pagos ───────────────────────────────
+el('botonExportarPagos')?.addEventListener('click', async () => {
+  const btn = el('botonExportarPagos');
+  const textoOriginal = btn.textContent;
+  const q = (filtroPagoDni?.value || '').replace(/\D/g, '');
+  btn.disabled = true;
+  btn.textContent = 'Generando…';
+  try {
+    const res = await fetch(`/api/admin/pagos/export/xlsx${q ? `?q=${encodeURIComponent(q)}` : ''}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      let msg = 'No se pudo generar el archivo.';
+      try { msg = (await res.json()).error || msg; } catch (_) { /* sin cuerpo JSON */ }
+      mostrarMensaje(mensajePagos, msg, 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'pagos-asistentes.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    mostrarMensaje(mensajePagos, `Archivo generado: ${nombre} (${Math.max(1, Math.round(blob.size / 1024))} KB).`, 'ok');
+  } catch (e) {
+    mostrarMensaje(mensajePagos, `No se pudo exportar: ${e.message || e}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
+});
 
 // ── Notificaciones a la app móvil ──────────────────────────────────
 const mensajeNotificaciones = el('mensajeNotificaciones');
@@ -3993,18 +4529,20 @@ async function cargarDashboard() {
     api('/api/admin/encuentro'),
   ]);
 
-  // --- KPI 1: Inscriptos en general (DNI únicos del encuentro + fallback) ---
+  // --- KPI 1: Inscriptos en general (DNI únicos inscriptos a talleres) ---
+  // Fuente única: /api/admin/asistentes — mismo número que Gestión de Menús,
+  // Asistentes y Acreditaciones (el listado del encuentro se muestra aparte en KPI 2).
   let totalGeneral = 0;
-  if (eRes && eRes.ok && eRes.data && typeof eRes.data.total === 'number') {
-    totalGeneral = Number(eRes.data.total) || 0;
-  } else if (eRes && eRes.ok && Array.isArray(eRes.data.personas)) {
-    totalGeneral = eRes.data.personas.length;
-  } else if (aRes.ok && Array.isArray(aRes.data)) {
+  if (aRes.ok && Array.isArray(aRes.data)) {
     totalGeneral = aRes.data.length;
   } else if (iRes.ok && Array.isArray(iRes.data)) {
     totalGeneral = new Set(iRes.data.map((x) => String(x.dni))).size;
+  } else if (eRes && eRes.ok && eRes.data && typeof eRes.data.total === 'number') {
+    totalGeneral = Number(eRes.data.total) || 0;
+  } else if (eRes && eRes.ok && Array.isArray(eRes.data.personas)) {
+    totalGeneral = eRes.data.personas.length;
   }
-  // fallback: si no hay encuentro, usar asistentes + inscripciones como total
+  // fallback: si no hay asistentes/inscripciones, usar el encuentro
   if (totalGeneral === 0 && iRes.ok && Array.isArray(iRes.data)) {
     totalGeneral = new Set(iRes.data.map((x) => String(x.dni))).size;
   }
@@ -4039,20 +4577,21 @@ async function cargarDashboard() {
   const asistentesConTaller = aRes.ok && Array.isArray(aRes.data) ? aRes.data.length : new Set(
     (iRes.ok && Array.isArray(iRes.data) ? iRes.data : []).map((x) => String(x.dni))
   ).size;
-  // Cálculo correcto basado en encuentro (fuente de verdad para faltantes)
-  // Antes: faltan = totalGeneral - asistentesConTaller daba 1 porque 13 inscriptos no están en encuentro
-  // Ahora: faltan = encuentro sin taller (14)
+  // KPI 2: base = listado del encuentro (con y sin taller). No se mezcla con el
+  // total de inscriptos (82) para no comparar dos universos distintos.
   let encuentroConTaller = 0;
   let encuentroSin = 0;
+  let encuentroTotal = 0;
   if (eRes && eRes.ok && Array.isArray(eRes.data?.personas)) {
     encuentroConTaller = eRes.data.personas.filter((p) => p.tiene_talleres).length;
-    const encTotal = typeof eRes.data.total === 'number' ? eRes.data.total : eRes.data.personas.length;
-    encuentroSin = Math.max(0, encTotal - encuentroConTaller);
+    encuentroTotal = typeof eRes.data.total === 'number' ? eRes.data.total : eRes.data.personas.length;
+    encuentroSin = Math.max(0, encuentroTotal - encuentroConTaller);
   } else {
+    encuentroTotal = totalGeneral;
     encuentroConTaller = asistentesConTaller;
     encuentroSin = Math.max(0, totalGeneral - asistentesConTaller);
   }
-  const pctInscriptosTalleres = totalGeneral > 0 ? Math.round((encuentroConTaller / totalGeneral) * 100) : 0;
+  const pctInscriptosTalleres = encuentroTotal > 0 ? Math.round((encuentroConTaller / encuentroTotal) * 100) : 0;
   if (kpiTalleresValor) {
     kpiTalleresValor.textContent = `${encuentroConTaller} / ${encuentroSin}`;
     kpiTalleresValor.title = 'Click para filtrar faltantes en Importadas del encuentro';
@@ -4062,19 +4601,19 @@ async function cargarDashboard() {
     kpiTalleresCard.style.cursor = 'pointer';
     kpiTalleresCard.title = 'Click para ver sin taller en Importadas del encuentro';
   }
-  if (kpiTalleresSub) kpiTalleresSub.textContent = totalGeneral > 0
-    ? `${encuentroSin} sin taller en encuentro · ${pctInscriptosTalleres}% con taller`
+  if (kpiTalleresSub) kpiTalleresSub.textContent = encuentroTotal > 0
+    ? `${encuentroConTaller} de ${encuentroTotal} con taller · ${encuentroSin} sin taller · ${pctInscriptosTalleres}%`
     : `${encuentroConTaller} con taller`;
   if (kpiTalleresBar) kpiTalleresBar.style.width = `${Math.min(100, pctInscriptosTalleres)}%`;
-  // actualizar sub de KPI1 con detalle de faltantes + extras no en encuentro
+  // sub de KPI 1: cruce entre inscriptos (82) y el listado del encuentro
   if (kpiInscriptosSub && totalGeneral > 0) {
     const extraNoEncuentro = Math.max(0, asistentesConTaller - encuentroConTaller);
-    let texto = `${totalGeneral} en total (encuentro) · ${encuentroConTaller} con taller · ${encuentroSin} sin taller`;
-    if (extraNoEncuentro > 0) {
-      texto += ` (+${extraNoEncuentro} inscriptos fuera del listado del encuentro; total con taller ${asistentesConTaller})`;
-    }
+    let texto = `${totalGeneral} DNI únicos con taller · ${encuentroConTaller} también en el encuentro · ${extraNoEncuentro} solo inscriptos (carga manual)`;
+    if (encuentroSin > 0) texto += ` · ${encuentroSin} del encuentro sin talleres`;
     kpiInscriptosSub.textContent = texto;
-    kpiInscriptosSub.title = extraNoEncuentro > 0 ? `Hay ${extraNoEncuentro} DNIs inscriptos a talleres que no figuran en el listado del encuentro (ej. carga manual). Por eso el cálculo anterior 65-66=1 no coincidía con los 14 sin taller del listado.` : '';
+    kpiInscriptosSub.title = extraNoEncuentro > 0
+      ? `Hay ${extraNoEncuentro} DNIs inscriptos a talleres que no figuran en el listado del encuentro.`
+      : '';
   }
 
   // --- KPI 3: Monto recaudado ---

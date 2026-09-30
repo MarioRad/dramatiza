@@ -358,12 +358,12 @@ async function cambiarEstadoPagoInscripcion(id, estadoPago) {
 }
 
 async function esAsistenteEncuentro(dni) {
-  const fila = await queryOne('SELECT id FROM encuentro_inscripciones WHERE dni = ?', [dni]);
+  const fila = await queryOne('SELECT id FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE', [dni]);
   return !!fila;
 }
 
 async function buscarEncuentroPorDni(dni) {
-  return queryOne('SELECT nombre, apellido, email, telefono, pago FROM encuentro_inscripciones WHERE dni = ?', [dni]);
+  return queryOne('SELECT nombre, apellido, email, telefono, pago FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE', [dni]);
 }
 
 async function listarInscripcionesPorDni(dni) {
@@ -710,35 +710,234 @@ async function eliminarInscripcionesPorDni(dni) {
 // ── Asistentes (CRUD agregado sobre inscripciones) ────────────────────
 
 async function listarAsistentes() {
+  // Unión: personas con talleres + personas solo del encuentro (sin talleres).
+  // Así todas las personas figuran en Asistentes, tengan o no taller.
   return query(
-    `SELECT
-       i.dni,
-       MIN(i.nombre) AS nombre,
-       MIN(i.apellido) AS apellido,
-       MIN(i.email) AS email,
-       MIN(i.telefono) AS telefono,
-       MIN(i.alimentacion) AS alimentacion,
-       BOOL_OR(i.en_encuentro) AS en_encuentro,
-       MIN(i.estado_pago) AS estado_pago,
-       MIN(i.creado_en) AS creado_en,
-       COUNT(*) AS cantidad_talleres,
-       STRING_AGG(t.nombre, ', ' ORDER BY t.fecha, t.hora) AS talleres_nombres,
-       STRING_AGG(CAST(t.id AS TEXT), ',' ORDER BY t.fecha, t.hora) AS talleres_ids
-     FROM inscripciones i
-     JOIN talleres t ON t.id = i.taller_id
-     GROUP BY i.dni
-     ORDER BY MIN(i.apellido), MIN(i.nombre)`
+    `SELECT dni, nombre, apellido, email, telefono, alimentacion,
+            en_encuentro, estado_pago, creado_en,
+            cantidad_talleres, talleres_nombres, talleres_ids
+     FROM (
+       SELECT
+          i.dni AS dni,
+          MIN(i.nombre) AS nombre,
+          MIN(i.apellido) AS apellido,
+          MIN(i.email) AS email,
+          MIN(i.telefono) AS telefono,
+          MIN(i.alimentacion) AS alimentacion,
+          (BOOL_OR(i.en_encuentro) OR BOOL_OR(e.id IS NOT NULL)) AS en_encuentro,
+          MIN(i.estado_pago) AS estado_pago,
+          MIN(i.creado_en) AS creado_en,
+          COUNT(*) AS cantidad_talleres,
+          STRING_AGG(t.nombre, ', ' ORDER BY t.fecha, t.hora) AS talleres_nombres,
+          STRING_AGG(CAST(t.id AS TEXT), ',' ORDER BY t.fecha, t.hora) AS talleres_ids
+        FROM inscripciones i
+        JOIN talleres t ON t.id = i.taller_id
+        LEFT JOIN encuentro_inscripciones e ON e.dni = i.dni AND e.oculto = FALSE
+        GROUP BY i.dni
+       UNION ALL
+       SELECT
+          e.dni AS dni,
+          e.nombre AS nombre,
+          e.apellido AS apellido,
+          e.email AS email,
+          e.telefono AS telefono,
+          'sin_restriccion' AS alimentacion,
+          TRUE AS en_encuentro,
+          COALESCE(NULLIF(e.pago, ''), 'no_pagado') AS estado_pago,
+          e.creado_en AS creado_en,
+          0 AS cantidad_talleres,
+          '' AS talleres_nombres,
+          '' AS talleres_ids
+        FROM encuentro_inscripciones e
+        WHERE e.oculto = FALSE
+          AND NOT EXISTS (SELECT 1 FROM inscripciones i2 WHERE i2.dni = e.dni)
+     ) AS unidos
+     ORDER BY apellido, nombre`
   );
 }
 
 async function actualizarAsistente(dni, { nombre, apellido, email, telefono, alimentacion }) {
-  const existe = await queryOne('SELECT dni FROM inscripciones WHERE dni = ? LIMIT 1', [dni]);
-  if (!existe) throw new HttpError(404, 'Asistente no encontrado.');
-  await mutation(
-    'UPDATE inscripciones SET nombre = ?, apellido = ?, email = ?, telefono = ?, alimentacion = ? WHERE dni = ?',
-    [String(nombre || '').trim(), String(apellido || '').trim(), String(email || '').trim(), String(telefono || '').trim().replace(/\D/g, ''), String(alimentacion || 'sin_restriccion').trim(), dni]
-  );
+  const nombreLimpio = String(nombre || '').trim();
+  const apellidoLimpio = String(apellido || '').trim();
+  const emailLimpio = String(email || '').trim();
+  const telLimpio = String(telefono || '').trim().replace(/\D/g, '');
+  const alimLimpia = String(alimentacion || 'sin_restriccion').trim();
+  const enInscripciones = await queryOne('SELECT dni FROM inscripciones WHERE dni = ? LIMIT 1', [dni]);
+  const enEncuentro = await queryOne('SELECT id FROM encuentro_inscripciones WHERE dni = ? LIMIT 1', [dni]);
+  if (!enInscripciones && !enEncuentro) throw new HttpError(404, 'Asistente no encontrado.');
+  if (enInscripciones) {
+    await mutation(
+      'UPDATE inscripciones SET nombre = ?, apellido = ?, email = ?, telefono = ?, alimentacion = ? WHERE dni = ?',
+      [nombreLimpio, apellidoLimpio, emailLimpio, telLimpio, alimLimpia, dni]
+    );
+  }
+  if (enEncuentro) {
+    await mutation(
+      'UPDATE encuentro_inscripciones SET nombre = ?, apellido = ?, email = ?, telefono = ? WHERE dni = ?',
+      [nombreLimpio, apellidoLimpio, emailLimpio, telLimpio, dni]
+    );
+  }
   return true;
+}
+
+async function obtenerFichaAsistente(dni) {
+  const dniLimpio = String(dni || '').replace(/\D/g, '');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido.');
+  let base = await queryOne(
+    `SELECT
+        MIN(i.nombre) AS nombre,
+        MIN(i.apellido) AS apellido,
+        MIN(i.email) AS email,
+        MIN(i.telefono) AS telefono,
+        MIN(i.alimentacion) AS alimentacion,
+        (BOOL_OR(i.en_encuentro) OR BOOL_OR(e.id IS NOT NULL)) AS en_encuentro,
+        MIN(i.estado_pago) AS estado_pago,
+        MIN(i.creado_en) AS creado_en,
+        MIN(i.qr_code) AS qr_code,
+        MIN(i.qr_data) AS qr_data
+     FROM inscripciones i
+     LEFT JOIN encuentro_inscripciones e ON e.dni = i.dni AND e.oculto = FALSE
+     WHERE i.dni = ? GROUP BY i.dni`,
+    [dniLimpio]
+  );
+  if (!base) {
+    // Persona solo del encuentro (sin talleres): construir base desde encuentro
+    const enc = await queryOne(
+      `SELECT dni, nombre, apellido, email, telefono, pago, creado_en
+       FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1`,
+      [dniLimpio]
+    );
+    if (!enc) throw new HttpError(404, 'Asistente no encontrado.');
+    base = {
+      nombre: enc.nombre || '',
+      apellido: enc.apellido || '',
+      email: enc.email || '',
+      telefono: enc.telefono || '',
+      alimentacion: 'sin_restriccion',
+      en_encuentro: true,
+      estado_pago: enc.pago || 'no_pagado',
+      creado_en: enc.creado_en,
+      qr_code: '',
+      qr_data: '',
+    };
+  }
+  const inscripciones = await listarInscripcionesPorDni(dniLimpio);
+  const talleres = inscripciones.map((r) => ({
+    id: Number(r.taller_id),
+    taller: r.taller,
+    descripcion: r.descripcion || '',
+    fecha: r.fecha || '',
+    hora: r.hora || '',
+    lugar: r.lugar || '',
+    duracion_hs: Number(r.duracion_hs) || 0,
+  }));
+  let encuentro = null;
+  try { encuentro = await buscarEncuentroPorDni(dniLimpio); } catch (_) { encuentro = null; }
+  // detallado de encuentro si existe fila completa
+  let encuentroDetalle = null;
+  try {
+    encuentroDetalle = await queryOne(
+      `SELECT id, dni, nombre, apellido, email, telefono, pago, marca_temporal, fecha_nacimiento, provincia, ciudad, ocupacion, opcion_pago, creado_en, oculto
+       FROM encuentro_inscripciones WHERE dni = ? LIMIT 1`,
+      [dniLimpio]
+    );
+  } catch (_) { encuentroDetalle = encuentro ? { ...encuentro, dni: dniLimpio } : null; }
+  let acreditacion = null;
+  try { acreditacion = await buscarAcreditacionPorDni(dniLimpio); } catch (_) {}
+  // acreditaciones múltiples (todos los registros de acreditacion)
+  let acreditaciones = [];
+  try {
+    acreditaciones = await query(
+      `SELECT dni, nombre, apellido, qr_code, usuario, registrado_en FROM acreditaciones WHERE dni = ? ORDER BY registrado_en DESC`,
+      [dniLimpio]
+    );
+  } catch (e) { if (e.code !== '42P01') throw e; }
+  // comidas
+  let comidas = [];
+  try {
+    comidas = await query(
+      `SELECT c.bloque_id, b.titulo, b.dia, b.hora_inicio, b.hora_fin, c.creado_en AS registrado_en
+       FROM comidas_asistencias c JOIN programa_bloques b ON b.id = c.bloque_id WHERE c.dni = ? ORDER BY c.creado_en DESC`,
+      [dniLimpio]
+    );
+  } catch (e) { if (e.code !== '42P01') throw e; }
+  // pagos
+  let planes = [];
+  let pagosCuotas = [];
+  try {
+    const rows = await query(
+      `SELECT a.id AS asistente_plan_id, a.plan_id, p.nombre AS plan_nombre, a.monto_total, a.cantidad_cuotas, a.cuotas, a.es_tallerista, a.creado_en
+       FROM asistente_planes a LEFT JOIN planes_pago p ON p.id = a.plan_id WHERE a.dni = ? ORDER BY a.id`,
+      [dniLimpio]
+    );
+    planes = rows.map((r) => ({
+      asistentePlanId: Number(r.asistente_plan_id),
+      planId: Number(r.plan_id),
+      planNombre: r.plan_nombre || '',
+      montoTotal: Number(r.monto_total) || 0,
+      cantidadCuotas: Number(r.cantidad_cuotas) || 0,
+      esTallerista: Boolean(r.es_tallerista),
+      cuotasDetalle: normalizarDetalleCuotas(r.cuotas, r.cantidad_cuotas, r.monto_total),
+      creado_en: r.creado_en,
+    }));
+    if (planes.length) {
+      const ids = planes.map((p) => p.asistentePlanId);
+      const cuotasRows = await query(
+        `SELECT asistente_plan_id, numero_cuota, monto, fecha_pago FROM pagos_cuotas WHERE asistente_plan_id IN (${ids.map(() => '?').join(',')}) ORDER BY numero_cuota`,
+        ids
+      );
+      const porPlan = new Map();
+      for (const c of cuotasRows) {
+        const k = Number(c.asistente_plan_id);
+        if (!porPlan.has(k)) porPlan.set(k, []);
+        porPlan.get(k).push({ numero: Number(c.numero_cuota), monto: Number(c.monto) || 0, fecha: c.fecha_pago || '' });
+      }
+      for (const pl of planes) pl.pagos = porPlan.get(pl.asistentePlanId) || [];
+    }
+  } catch (e) { if (e.code !== '42P01' && e.code !== '42703') throw e; }
+  // taller asistencias
+  let asistenciasTalleres = [];
+  try {
+    const rows = await query(`SELECT taller_id, bloque_id, tipo, usuario, registrado_en FROM taller_asistencias WHERE dni = ? ORDER BY registrado_en`, [dniLimpio]);
+    asistenciasTalleres = rows.map((r) => ({ taller_id: Number(r.taller_id), bloque_id: r.bloque_id ? Number(r.bloque_id) : null, tipo: r.tipo, usuario: r.usuario || '', registrado_en: r.registrado_en }));
+  } catch (e) { if (e.code !== '42P01') throw e; }
+  // certificados
+  let certificados = [];
+  try {
+    certificados = await query(`SELECT id, codigo, tipo, nombre, apellido, detalle, talleres_ids, hash_firma, emitido_por, creado_en FROM certificados WHERE dni = ? ORDER BY creado_en DESC`, [dniLimpio]);
+  } catch (e) { if (e.code !== '42P01') throw e; }
+  // elegibilidad
+  let elegibilidad = null;
+  try { elegibilidad = await verificarElegibilidadAsistente(dniLimpio); } catch (_) {}
+  // eventos relacionados
+  let eventos = [];
+  try {
+    eventos = await query(`SELECT id, tipo, detalle, usuario, creado_en FROM eventos WHERE detalle ILIKE ? ORDER BY id DESC LIMIT 20`, [`%${dniLimpio}%`]);
+  } catch (_) { eventos = []; }
+  return {
+    dni: dniLimpio,
+    nombre: base.nombre || '',
+    apellido: base.apellido || '',
+    email: base.email || '',
+    telefono: base.telefono || '',
+    alimentacion: base.alimentacion || 'sin_restriccion',
+    en_encuentro: Boolean(base.en_encuentro),
+    estado_pago: base.estado_pago || 'no_pagado',
+    creado_en: base.creado_en,
+    qr_code: base.qr_code || '',
+    qr_data: base.qr_data || '',
+    talleres,
+    encuentro: encuentroDetalle,
+    acreditacion,
+    acreditaciones,
+    comidas,
+    planes,
+    pagosCuotas,
+    asistenciasTalleres,
+    certificados: certificados.map((c) => ({ ...c, id: Number(c.id) })),
+    elegibilidad,
+    eventos: eventos.map((ev) => ({ ...ev, id: Number(ev.id) })),
+  };
 }
 
 async function registrarEvento(tipo, detalle, usuario = 'admin') {
@@ -870,11 +1069,26 @@ async function reemplazarTalleresInscripcion(dni, ids) {
     : [];
   if (seleccionIds.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
 
-  const persona = await queryOne(
+  let persona = await queryOne(
     'SELECT dni, nombre, apellido, email, telefono, alimentacion FROM inscripciones WHERE dni = ? ORDER BY id LIMIT 1',
     [dni]
   );
-  if (!persona) throw new HttpError(404, 'No se encontraron inscripciones para el DNI indicado.');
+  if (!persona) {
+    // Persona solo del encuentro: usar sus datos para crear las inscripciones a talleres
+    const enc = await queryOne(
+      'SELECT dni, nombre, apellido, email, telefono, pago FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1',
+      [dni]
+    );
+    if (!enc) throw new HttpError(404, 'No se encontraron inscripciones para el DNI indicado.');
+    persona = {
+      dni: enc.dni,
+      nombre: enc.nombre || '',
+      apellido: enc.apellido || '',
+      email: enc.email || '',
+      telefono: enc.telefono || '',
+      alimentacion: 'sin_restriccion',
+    };
+  }
 
   return transaction(async (run) => {
     const actuales = await run(
@@ -914,8 +1128,19 @@ async function reemplazarTalleresInscripcion(dni, ids) {
       );
     }
 
-    const estadoPago = actuales[0] && actuales[0].estado_pago ? actuales[0].estado_pago : 'no_pagado';
-    const enEncuentro = actuales.some((a) => a.en_encuentro) ? 1 : 0;
+    let estadoPago = actuales[0] && actuales[0].estado_pago ? actuales[0].estado_pago : 'no_pagado';
+    let enEncuentro = actuales.some((a) => a.en_encuentro) ? 1 : 0;
+    if (actuales.length === 0) {
+      // Viene solo del encuentro: heredar pago y marcar en_encuentro
+      const encPago = await run('SELECT pago FROM encuentro_inscripciones WHERE dni = ? LIMIT 1', [dni]);
+      if (encPago.length > 0) {
+        enEncuentro = 1;
+        if (encPago[0].pago) estadoPago = encPago[0].pago;
+      }
+    } else {
+      const encExiste = await run('SELECT id FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1', [dni]);
+      if (encExiste.length > 0) enEncuentro = 1;
+    }
 
     for (const id of idsActuales) {
       if (!seleccionIds.includes(id)) {
@@ -2167,4 +2392,5 @@ module.exports = {
   crearCertificado,
   eliminarCertificado,
   verificarElegibilidadAsistente,
+  obtenerFichaAsistente,
 };

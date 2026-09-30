@@ -93,9 +93,9 @@
                 <div class="kpi-icon kpi-icon--blue">👥</div>
               </div>
               <div class="kpi-card" id="kpiTalleres">
-                <div class="kpi-label">Inscriptos a talleres / Faltantes</div>
+                <div class="kpi-label">Encuentro — con taller / sin taller</div>
                 <div class="kpi-value" id="kpiTalleresValor">—</div>
-                <div class="kpi-sub" id="kpiTalleresSub">—</div>
+                <div class="kpi-sub" id="kpiTalleresSub">Listado del encuentro (ocultas no cuentan)</div>
                 <div class="kpi-progress"><div class="kpi-progress-bar" id="kpiTalleresBar" style="width:0%"></div></div>
                 <div class="kpi-icon kpi-icon--green">🎓</div>
               </div>
@@ -212,9 +212,11 @@
             <div id="subInscripcionesAsistentes" hidden>
               <div class="cabecera-panel">
                 <h3>Asistentes</h3>
-                <div style="display:flex;gap:8px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
                   <button id="botonNuevoAsistente" class="boton boton-secundario boton-chico" type="button">+ Nuevo asistente</button>
                   <button id="botonActualizarAsistentes" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+                  <button id="botonExportarAsistentes" class="boton boton-secundario boton-chico" type="button" title="Descargar Excel con el listado visible (respeta búsqueda y filtro por taller)">Exportar Excel</button>
+                  <button id="botonImprimirAsistentes" class="boton boton-secundario boton-chico" type="button" title="Imprimir el listado visible (respeta búsqueda y filtro por taller)">Imprimir</button>
                 </div>
               </div>
               <p class="ayuda" id="resumenAsistentes"></p>
@@ -226,7 +228,9 @@
                 <div class="campo">
                   <label for="filtroAsistenteTaller">Filtrar por taller</label>
                   <select id="filtroAsistenteTaller">
-                    <option value="">Todos los talleres</option>
+                    <option value="">Todos</option>
+                    <option value="__con_taller__">✓ Con talleres</option>
+                    <option value="__sin_taller__">○ Sin talleres</option>
                   </select>
                 </div>
               </div>
@@ -388,7 +392,10 @@
             </div>
 
             <div class="pagos-seccion">
-              <div class="pagos-seccion-cabecera"><h4>3 · Asistentes y cuotas</h4></div>
+              <div class="pagos-seccion-cabecera" style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:0.4rem;">
+                <h4 style="margin:0;">3 · Asistentes y cuotas</h4>
+                <button type="button" class="boton boton-secundario boton-chico" id="botonExportarPagos" title="Descargar XLSX con todos los asistentes y sus pagos (respeta el filtro de DNI si está activo)">Exportar Excel</button>
+              </div>
               <p class="ayuda" id="resumenPagos"></p>
               <div class="filtros-barra">
                 <div class="campo">
@@ -397,9 +404,20 @@
                 </div>
               </div>
               <div class="tabla-envoltura">
-                <table id="tablaPagos">
+                <table id="tablaPagos" class="tabla-inscripciones-dosfilas">
                   <thead>
-                    <tr><th>DNI</th><th>Nombre</th><th>Plan</th><th>Modo</th><th>Total / cuotas</th><th>Cuotas (pago + comprobante)</th><th>Estado</th><th>Comprobantes</th><th>Acciones</th></tr>
+                    <tr class="header-fila1">
+                      <th>DNI</th>
+                      <th colspan="2">Apellido y nombre</th>
+                      <th>Estado</th>
+                      <th rowspan="2">Acciones</th>
+                    </tr>
+                    <tr class="header-fila2">
+                      <th>Plan</th>
+                      <th>Modo · Total / cuotas</th>
+                      <th>Cuotas (pago + comprobante)</th>
+                      <th>Comprobantes</th>
+                    </tr>
                   </thead>
                   <tbody></tbody>
                 </table>
@@ -702,21 +720,46 @@
           <div id="vistaEventos" class="tab-contenido" hidden>
             <h3>Registro de eventos</h3>
             <p class="ayuda">Auditoría: acciones registradas por los usuarios del sistema.</p>
-            <p class="ayuda" id="resumenEventos"></p>
-            <div class="tabla-envoltura">
-              <table id="tablaEventos">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Tipo</th>
-                    <th>Detalle</th>
-                    <th>Usuario</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+
+            <div class="sub-tabs" id="subTabsEventos">
+              <button type="button" class="sub-tab activo" data-sub="registro">Registro de eventos</button>
+              <button type="button" class="sub-tab" data-sub="backup">Copia de seguridad</button>
             </div>
-            <div id="paginacionEventos" class="paginacion" hidden></div>
+
+            <div id="subEventosRegistro">
+              <p class="ayuda" id="resumenEventos"></p>
+              <div class="tabla-envoltura">
+                <table id="tablaEventos">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Tipo</th>
+                      <th>Detalle</th>
+                      <th>Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div id="paginacionEventos" class="paginacion" hidden></div>
+            </div>
+
+            <div id="subEventosBackup" hidden>
+              <div class="pagos-seccion">
+                <div class="pagos-seccion-cabecera"><h4>Copia de seguridad de la base de datos</h4></div>
+                <p class="ayuda">
+                  El archivo <strong>.sql</strong> incluye esquema (tablas, secuencias, restricciones y claves
+                  foráneas) y todos los datos: se puede restaurar en una base vacía o en esta misma base.
+                  El archivo <strong>.json</strong> trae el mismo contenido en formato legible para
+                  lectura o migración.
+                </p>
+                <div class="pagos-fila">
+                  <button type="button" class="boton" id="botonBackupSql">Descargar .sql</button>
+                  <button type="button" class="boton boton-secundario" id="botonBackupJson">Descargar .json</button>
+                </div>
+                <div id="mensajeBackup" class="mensaje" role="alert"></div>
+              </div>
+            </div>
           </div>
 
           <div id="vistaUsuarios" class="tab-contenido" hidden>
@@ -988,6 +1031,83 @@
     </div>
   </div>
 
+  <div id="modalFichaAsistente" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-edicion" role="dialog" aria-modal="true" aria-labelledby="tituloModalFicha" style="max-width:900px; width:95vw; max-height:90vh; overflow:auto;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--color-borde); padding-bottom:10px; margin-bottom:10px;">
+        <h3 id="tituloModalFicha" style="margin:0;">Ficha del asistente</h3>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button type="button" class="boton boton-secundario boton-chico" id="botonFichaEditar">Editar</button>
+          <button type="button" class="boton boton-secundario boton-chico" id="botonFichaQr">QR</button>
+          <button type="button" class="boton boton-secundario boton-chico" id="botonFichaCopiarLink" title="Copiar link a la ficha">Copiar link</button>
+          <button type="button" class="boton boton-secundario boton-chico" id="botonCerrarFicha">Cerrar</button>
+        </div>
+      </div>
+      <div id="fichaContenido">
+        <div id="fichaCargando" class="ayuda">Cargando…</div>
+        <div id="fichaError" class="mensaje" role="alert" hidden></div>
+        <div id="fichaDatos" hidden>
+          <div class="ficha-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Datos personales</h4>
+              <div id="fichaDatosPersonales" style="font-size:0.92rem; line-height:1.6;"></div>
+            </div>
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Estado</h4>
+              <div id="fichaEstado" style="font-size:0.92rem; line-height:1.6;"></div>
+              <div id="fichaQrPreview" style="margin-top:10px; text-align:center;"></div>
+            </div>
+          </div>
+
+          <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px; margin-top:12px;">
+            <h4 style="margin:0 0 8px 0;">Talleres inscriptos</h4>
+            <div id="fichaTalleres"></div>
+          </div>
+
+          <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px; margin-top:12px;">
+            <h4 style="margin:0 0 8px 0;">Encuentro (importado)</h4>
+            <div id="fichaEncuentro" style="font-size:0.90rem;"></div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Pagos y cuotas</h4>
+              <div id="fichaPagos" style="font-size:0.90rem;"></div>
+            </div>
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Asistencia a talleres</h4>
+              <div id="fichaAsistencia" style="font-size:0.90rem;"></div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Acreditaciones</h4>
+              <div id="fichaAcreditaciones" style="font-size:0.90rem;"></div>
+            </div>
+            <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px;">
+              <h4 style="margin:0 0 8px 0;">Comidas (desayuno/merienda)</h4>
+              <div id="fichaComidas" style="font-size:0.90rem;"></div>
+            </div>
+          </div>
+
+          <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px; margin-top:12px;">
+            <h4 style="margin:0 0 8px 0;">Certificados</h4>
+            <div id="fichaCertificados" style="font-size:0.90rem;"></div>
+          </div>
+
+          <div class="ficha-bloque" style="border:1px solid var(--color-borde); border-radius:10px; padding:12px; margin-top:12px;">
+            <h4 style="margin:0 0 8px 0;">Historial (últimos 20 eventos)</h4>
+            <div id="fichaEventos" style="font-size:0.85rem;"></div>
+          </div>
+
+          <div style="margin-top:14px; display:flex; gap:8px; justify-content:flex-end;">
+            <button type="button" class="boton boton-peligro boton-chico" id="botonFichaEliminar">Eliminar asistente</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="modalUsuario" class="modal" hidden aria-hidden="true">
     <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalUsuarioTitulo">
       <h3 id="modalUsuarioTitulo">Nuevo usuario</h3>
@@ -1181,6 +1301,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=34"></script>
+  <script src="/js/admin.js?v=36"></script>
 </body>
 </html>
