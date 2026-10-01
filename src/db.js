@@ -2021,6 +2021,9 @@ async function sincronizarEstadoPagoPorDni(dni) {
   // montos por cuota difieran de los esperados del plan.
   const estado = totalEsperado === 0 ? 'no_pagado' : totalPagado + 0.01 >= totalEsperado ? 'pago_completo' : totalPagado > 0 ? 'pago_parcial' : 'no_pagado';
   await mutation('UPDATE inscripciones SET estado_pago = ? WHERE dni = ?', [estado, dni]);
+  // La ficha y el listado de solo-encuentro leen encuentro_inscripciones.pago:
+  // mantenerlo sincronizado para que no muestre un estado viejo.
+  await mutation('UPDATE encuentro_inscripciones SET pago = ? WHERE dni = ?', [estado, dni]);
   return estado;
 }
 
