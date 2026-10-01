@@ -3388,6 +3388,14 @@ function formatearFechaTope(valor) {
   return String(valor || '');
 }
 
+// Normaliza cualquier fecha (ISO con hora, DATE de pg) a YYYY-MM-DD para <input type="date">.
+// Se toman los primeros 10 caracteres a propósito (sin convertir zona horaria):
+// la columna es DATE sin hora y pg la serializa como medianoche UTC del mismo día.
+function fechaInput(valor) {
+  const m = String(valor || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}` : '';
+}
+
 function montoCuota(a, numero) {
   const det = (a.cuotasDetalle || []).find((c) => Number(c.numero) === Number(numero));
   if (det && det.monto != null) return Number(det.monto);
@@ -4113,7 +4121,7 @@ function abrirModalCuota(a, numero, pagada) {
   modalCuotaPlanId.value = a.asistentePlanId;
   modalCuotaNumero.value = numero;
   modalCuotaMonto.value = pagada ? (pagoPrevio ? pagoPrevio.monto : montoEsperado) : montoEsperado;
-  modalCuotaFecha.value = pagada ? (pagoPrevio && pagoPrevio.fecha ? pagoPrevio.fecha : '') : new Intl.DateTimeFormat('en-CA', { timeZone: TZ_SALTA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  modalCuotaFecha.value = pagada ? fechaInput(pagoPrevio && pagoPrevio.fecha) : new Intl.DateTimeFormat('en-CA', { timeZone: TZ_SALTA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const nombre = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
   const tope = det && det.fecha_tope ? ` · vence ${formatearFechaTope(det.fecha_tope)}` : '';
   modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}${tope}`;
