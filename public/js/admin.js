@@ -3371,6 +3371,7 @@ const modalCuotaNumero = el('modalCuotaNumero');
 const modalCuotaMonto = el('modalCuotaMonto');
 const modalCuotaFecha = el('modalCuotaFecha');
 const botonGuardarCuota = el('botonGuardarCuota');
+const botonQuitarCuota = el('botonQuitarCuota');
 const botonCancelarCuota = el('botonCancelarCuota');
 
 let planesPago = [];
@@ -4113,8 +4114,9 @@ function abrirModalCuota(a, numero, pagada) {
   const nombre = [a.apellido, a.nombre].filter(Boolean).join(', ') || a.dni;
   const tope = det && det.fecha_tope ? ` · vence ${formatearFechaTope(det.fecha_tope)}` : '';
   modalCuotaInfo.textContent = `${nombre} · Cuota ${numero}/${a.cantidadCuotas}${tope}`;
-  document.getElementById('modalCuotaTitulo').textContent = pagada ? 'Quitar pago de cuota' : 'Registrar pago de cuota';
-  botonGuardarCuota.textContent = pagada ? 'Quitar pago' : 'Registrar pago';
+  document.getElementById('modalCuotaTitulo').textContent = pagada ? 'Editar pago de cuota' : 'Registrar pago de cuota';
+  botonGuardarCuota.textContent = pagada ? 'Guardar cambios' : 'Registrar pago';
+  if (botonQuitarCuota) botonQuitarCuota.hidden = !pagada;
   modalCuota.hidden = false;
   modalCuota.setAttribute('aria-hidden', 'false');
 }
@@ -4135,37 +4137,42 @@ botonGuardarCuota.addEventListener('click', async () => {
   if (!cuotaContexto) return;
   const { asistentePlanId, numero, pagada } = cuotaContexto;
   botonGuardarCuota.disabled = true;
-  if (pagada) {
-    const res = await api('/api/admin/pagos/cuota', {
-      method: 'DELETE',
-      body: JSON.stringify({ asistente_plan_id: asistentePlanId, numero_cuota: numero }),
-    });
-    if (!res.ok) {
-      mostrarMensaje(mensajePagos, res.data.error || 'No se pudo quitar el pago.', 'error');
-    } else {
-      mostrarMensaje(mensajePagos, 'Pago de cuota eliminado.', 'ok');
-      cerrarModalCuota();
-      await cargarPagos();
-    }
+  const res = await api('/api/admin/pagos/cuota', {
+    method: 'POST',
+    body: JSON.stringify({
+      asistente_plan_id: asistentePlanId,
+      numero_cuota: numero,
+      monto: Number(modalCuotaMonto.value) || 0,
+      fecha_pago: modalCuotaFecha.value,
+    }),
+  });
+  if (!res.ok) {
+    mostrarMensaje(mensajePagos, res.data.error || (pagada ? 'No se pudo actualizar el pago.' : 'No se pudo registrar el pago.'), 'error');
   } else {
-    const res = await api('/api/admin/pagos/cuota', {
-      method: 'POST',
-      body: JSON.stringify({
-        asistente_plan_id: asistentePlanId,
-        numero_cuota: numero,
-        monto: Number(modalCuotaMonto.value) || 0,
-        fecha_pago: modalCuotaFecha.value,
-      }),
-    });
-    if (!res.ok) {
-      mostrarMensaje(mensajePagos, res.data.error || 'No se pudo registrar el pago.', 'error');
-    } else {
-      mostrarMensaje(mensajePagos, 'Pago de cuota registrado.', 'ok');
-      cerrarModalCuota();
-      await cargarPagos();
-    }
+    mostrarMensaje(mensajePagos, pagada ? `Cuota ${numero} actualizada.` : 'Pago de cuota registrado.', 'ok');
+    cerrarModalCuota();
+    await cargarPagos();
   }
   botonGuardarCuota.disabled = false;
+});
+
+botonQuitarCuota?.addEventListener('click', async () => {
+  if (!cuotaContexto) return;
+  const { asistentePlanId, numero } = cuotaContexto;
+  if (!window.confirm(`¿Quitar el pago de la cuota ${numero}?`)) return;
+  botonQuitarCuota.disabled = true;
+  const res = await api('/api/admin/pagos/cuota', {
+    method: 'DELETE',
+    body: JSON.stringify({ asistente_plan_id: asistentePlanId, numero_cuota: numero }),
+  });
+  if (!res.ok) {
+    mostrarMensaje(mensajePagos, res.data.error || 'No se pudo quitar el pago.', 'error');
+  } else {
+    mostrarMensaje(mensajePagos, 'Pago de cuota eliminado.', 'ok');
+    cerrarModalCuota();
+    await cargarPagos();
+  }
+  botonQuitarCuota.disabled = false;
 });
 
 filtroPagoDni.addEventListener('input', renderPagos);
