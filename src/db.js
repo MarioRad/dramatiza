@@ -1902,28 +1902,34 @@ async function listarPagos() {
   });
   const asistentes = query(
     `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas, a.es_tallerista,
-            COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
-            COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono,
+            COALESCE(NULLIF(e.nombre, ''), i.nombre, '') AS nombre,
+            COALESCE(NULLIF(e.apellido, ''), i.apellido, '') AS apellido,
+            COALESCE(NULLIF(e.email, ''), i.email, '') AS email,
+            COALESCE(NULLIF(e.telefono, ''), i.telefono, '') AS telefono,
             COALESCE(e.id, 0) AS encuentro_id,
             COALESCE(e.comprobante, '') AS comprobante,
             COALESCE(e.comprobante_nombre, '') AS comprobante_nombre,
             COALESCE(e.comprobante_tipo, '') AS comprobante_tipo
      FROM asistente_planes a
      LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
-     ORDER BY e.apellido, e.nombre, a.dni`
+     LEFT JOIN (SELECT dni, MIN(nombre) AS nombre, MIN(apellido) AS apellido, MIN(email) AS email, MIN(telefono) AS telefono FROM inscripciones GROUP BY dni) i ON i.dni = a.dni
+     ORDER BY COALESCE(NULLIF(e.apellido, ''), i.apellido, ''), COALESCE(NULLIF(e.nombre, ''), i.nombre, ''), a.dni`
   ).catch(async (e) => {
     if (e.code === '42703' && String(e.message).includes('es_tallerista')) {
       return query(
         `SELECT a.id AS asistente_plan_id, a.dni, a.plan_id, a.monto_total, a.cantidad_cuotas, a.cuotas,
-                COALESCE(e.nombre, '') AS nombre, COALESCE(e.apellido, '') AS apellido,
-                COALESCE(e.email, '') AS email, COALESCE(e.telefono, '') AS telefono,
+                COALESCE(NULLIF(e.nombre, ''), i.nombre, '') AS nombre,
+                COALESCE(NULLIF(e.apellido, ''), i.apellido, '') AS apellido,
+                COALESCE(NULLIF(e.email, ''), i.email, '') AS email,
+                COALESCE(NULLIF(e.telefono, ''), i.telefono, '') AS telefono,
                 COALESCE(e.id, 0) AS encuentro_id,
                 COALESCE(e.comprobante, '') AS comprobante,
                 COALESCE(e.comprobante_nombre, '') AS comprobante_nombre,
                 COALESCE(e.comprobante_tipo, '') AS comprobante_tipo
          FROM asistente_planes a
          LEFT JOIN encuentro_inscripciones e ON e.dni = a.dni
-         ORDER BY e.apellido, e.nombre, a.dni`
+         LEFT JOIN (SELECT dni, MIN(nombre) AS nombre, MIN(apellido) AS apellido, MIN(email) AS email, MIN(telefono) AS telefono FROM inscripciones GROUP BY dni) i ON i.dni = a.dni
+         ORDER BY COALESCE(NULLIF(e.apellido, ''), i.apellido, ''), COALESCE(NULLIF(e.nombre, ''), i.nombre, ''), a.dni`
       );
     }
     throw e;
