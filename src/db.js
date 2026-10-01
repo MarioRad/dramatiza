@@ -2004,24 +2004,16 @@ async function sincronizarEstadoPagoPorDni(dni) {
   if (aps.length === 0) return;
   let totalEsperado = 0;
   let totalPagado = 0;
-  let todasCompletas = true;
   for (const ap of aps) {
     const detalle = normalizarDetalleCuotas(ap.cuotas, ap.cantidad_cuotas, ap.monto_total);
-    const esperadoPlan = detalle.reduce((s,c)=> s + (Number(c.monto)||0), 0);
-    totalEsperado += esperadoPlan;
+    totalEsperado += detalle.reduce((s,c)=> s + (Number(c.monto)||0), 0);
     const pagos = await query('SELECT numero_cuota, monto FROM pagos_cuotas WHERE asistente_plan_id = ?', [ap.id]);
-    const pagosMap = new Map(pagos.map(p=> [Number(p.numero_cuota), Number(p.monto)||0]));
     totalPagado += pagos.reduce((s,p)=> s + (Number(p.monto)||0), 0);
-    for (const c of detalle) {
-      const montoPagado = pagosMap.get(Number(c.numero));
-      const esperado = Number(c.monto) || 0;
-      if (montoPagado === undefined || montoPagado + 0.01 < esperado) {
-        todasCompletas = false;
-      }
-    }
     // si hay pagos de cuotas no esperadas (fuera de detalle) igual cuentan, pero ya se sumaron
   }
-  const estado = totalEsperado === 0 ? 'no_pagado' : (todasCompletas && totalPagado + 0.01 >= totalEsperado) ? 'pago_completo' : totalPagado > 0 ? 'pago_parcial' : 'no_pagado';
+  // Si la suma pagada cubre el total del plan figura pago total, aunque los
+  // montos por cuota difieran de los esperados del plan.
+  const estado = totalEsperado === 0 ? 'no_pagado' : totalPagado + 0.01 >= totalEsperado ? 'pago_completo' : totalPagado > 0 ? 'pago_parcial' : 'no_pagado';
   await mutation('UPDATE inscripciones SET estado_pago = ? WHERE dni = ?', [estado, dni]);
   return estado;
 }
