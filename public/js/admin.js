@@ -3789,6 +3789,13 @@ function renderPagos() {
     badge.textContent = `${compsCuotaCount}/${n}`;
     badge.title = `${compsCuotaCount} de ${n} cuotas con comprobante` + (a.comprobante ? ' + 1 encuentro' : '');
     tdComp.appendChild(badge);
+    const abonadoLinea = document.createElement('div');
+    abonadoLinea.style.fontSize = '0.72rem';
+    abonadoLinea.style.marginTop = '2px';
+    abonadoLinea.style.fontWeight = '700';
+    abonadoLinea.textContent = `$${formatearMoneda(totalPagado)}`;
+    abonadoLinea.title = `Total abonado $${formatearMoneda(totalPagado)} de $${formatearMoneda(totalEsperado)}`;
+    tdComp.appendChild(abonadoLinea);
     if (a.comprobante) {
       const extra = document.createElement('div');
       extra.style.fontSize = '0.65rem'; extra.style.marginTop = '2px';
