@@ -3591,8 +3591,16 @@ formAsignarPlan.addEventListener('submit', async (e) => {
 function renderPagos() {
   const tbody = tablaPagos.querySelector('tbody');
   tbody.innerHTML = '';
-  const dniFiltro = filtroPagoDni.value.trim().replace(/\D/g, '');
-  const visibles = pagosAsistentes.filter((a) => !dniFiltro || String(a.dni).includes(dniFiltro));
+  const qRaw = filtroPagoDni.value.trim();
+  const dniFiltro = qRaw.replace(/\D/g, '');
+  const sinTildes = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const textoFiltro = sinTildes(qRaw);
+  const visibles = pagosAsistentes.filter((a) => {
+    if (!qRaw) return true;
+    if (dniFiltro && String(a.dni).includes(dniFiltro)) return true;
+    const nombre = sinTildes(`${a.apellido || ''} ${a.nombre || ''}`);
+    return textoFiltro ? nombre.includes(textoFiltro) : false;
+  });
   const talleristasCount = pagosAsistentes.filter((x) => x.esTallerista || x.es_tallerista).length;
   // Contar comprobantes por cuota (multi-comprobante: hasta cantidadCuotas)
   let totalSlots = 0, totalCompsCuota = 0;
@@ -4199,7 +4207,7 @@ filtroPagoDni.addEventListener('input', renderPagos);
 el('botonExportarPagos')?.addEventListener('click', async () => {
   const btn = el('botonExportarPagos');
   const textoOriginal = btn.textContent;
-  const q = (filtroPagoDni?.value || '').replace(/\D/g, '');
+  const q = (filtroPagoDni?.value || '').trim();
   btn.disabled = true;
   btn.textContent = 'Generando…';
   try {

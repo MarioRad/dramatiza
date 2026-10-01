@@ -2237,7 +2237,7 @@ function marcarFormatoMoneda(hoja, columnas) {
 
 app.get('/api/admin/pagos/export/xlsx', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
-    const filtro = String(req.query.q || '').replace(/\D/g, '');
+    const filtro = String(req.query.q || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const [asistentes, planes] = await Promise.all([db.listarAsistentes(), db.listarPagos()]);
 
     const planesPorDni = new Map();
@@ -2282,7 +2282,8 @@ app.get('/api/admin/pagos/export/xlsx', requireAuth, requirePermiso('perm_inscri
         planes: lista,
       });
     }
-    const visibles = filtro ? personas.filter((p) => String(p.dni).includes(filtro)) : personas;
+    const sinTildes = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const visibles = filtro ? personas.filter((p) => String(p.dni).includes(filtro) || sinTildes(`${p.apellido || ''} ${p.nombre || ''}`).includes(filtro)) : personas;
 
     const cabecera = ['DNI', 'Apellido y nombre', 'Mail', 'Teléfono', 'Estado', 'Plan', 'Total / cuotas', 'Cuotas pago', 'Saldo', 'Fechas de pago'];
     const filas = [];
