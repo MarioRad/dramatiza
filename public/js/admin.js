@@ -5227,14 +5227,32 @@ let materialesData = [];
 let materialTallerId = null;
 let materialDestinatarios = 0;
 
+function poblarFiltroMaterialTaller() {
+  const sel = el('buscarMaterialTaller');
+  if (!sel) return;
+  const actual = sel.value || '';
+  sel.innerHTML = '';
+  const optTodos = document.createElement('option');
+  optTodos.value = '';
+  optTodos.textContent = 'Todos';
+  sel.appendChild(optTodos);
+  for (const t of materialesData) {
+    const opt = document.createElement('option');
+    opt.value = String(t.taller_id);
+    opt.textContent = `${t.nombre || 'Sin nombre'}${t.disertante ? ` — ${t.disertante}` : ''}`;
+    sel.appendChild(opt);
+  }
+  if (actual && materialesData.some((t) => String(t.taller_id) === actual)) sel.value = actual;
+}
+
 function materialesFiltrados() {
-  const q = (el('buscarMaterialTaller')?.value || '').trim().toLowerCase();
+  const q = (el('buscarMaterialTaller')?.value || '').trim();
   const estado = (el('filtroMaterialEstado')?.value || '').trim();
   return materialesData.filter((t) => {
     if (estado === 'con' && !t.tiene_materiales) return false;
     if (estado === 'sin' && t.tiene_materiales) return false;
     if (!q) return true;
-    return `${t.nombre || ''} ${t.disertante || ''}`.toLowerCase().includes(q);
+    return String(t.taller_id) === q;
   });
 }
 
@@ -5249,6 +5267,7 @@ async function cargarMateriales() {
     return;
   }
   materialesData = Array.isArray(res.data) ? res.data : [];
+  poblarFiltroMaterialTaller();
   renderMateriales();
 }
 
@@ -5336,7 +5355,7 @@ function cerrarModalMaterial() {
   materialTallerId = null;
 }
 
-el('buscarMaterialTaller')?.addEventListener('input', renderMateriales);
+el('buscarMaterialTaller')?.addEventListener('change', renderMateriales);
 el('filtroMaterialEstado')?.addEventListener('change', renderMateriales);
 el('botonActualizarMateriales')?.addEventListener('click', () => cargarMateriales());
 el('botonCerrarMaterial')?.addEventListener('click', cerrarModalMaterial);
