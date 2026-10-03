@@ -5355,7 +5355,11 @@ function cerrarModalMaterial() {
   materialTallerId = null;
 }
 
-el('buscarMaterialTaller')?.addEventListener('change', renderMateriales);
+el('buscarMaterialTaller')?.addEventListener('change', () => {
+  renderMateriales();
+  const id = (el('buscarMaterialTaller')?.value || '').trim();
+  if (id) abrirModalMaterial(Number(id));
+});
 el('filtroMaterialEstado')?.addEventListener('change', renderMateriales);
 el('botonActualizarMateriales')?.addEventListener('click', () => cargarMateriales());
 el('botonCerrarMaterial')?.addEventListener('click', cerrarModalMaterial);
