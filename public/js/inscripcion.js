@@ -825,3 +825,37 @@ formulario.addEventListener('submit', async (e) => {
 });
 
 cargarTalleres();
+
+/* ── Auspiciantes ("Nos Acompañan") — pie de la página pública ─────── */
+(function () {
+  const seccion = document.getElementById('seccionAuspiciantes');
+  const grid = document.getElementById('auspiciantesGrid');
+  if (!seccion || !grid) return;
+  fetch('/api/auspiciantes', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : []))
+    .then((filas) => {
+      if (!Array.isArray(filas) || !filas.length) return;
+      grid.innerHTML = '';
+      for (const a of filas) {
+        if (!a.imagen) continue;
+        const item = document.createElement('div');
+        item.className = 'auspiciante-item';
+        const img = document.createElement('img');
+        img.src = a.imagen;
+        img.alt = a.nombre || 'Auspiciante';
+        img.loading = 'lazy';
+        img.width = 300;
+        img.height = 250;
+        item.appendChild(img);
+        if (a.nombre) {
+          const nom = document.createElement('div');
+          nom.className = 'auspiciante-nombre';
+          nom.textContent = a.nombre;
+          item.appendChild(nom);
+        }
+        grid.appendChild(item);
+      }
+      if (grid.children.length) seccion.hidden = false;
+    })
+    .catch(() => {});
+})();

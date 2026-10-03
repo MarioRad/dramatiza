@@ -2942,6 +2942,102 @@ app.post('/api/admin/ponentes/dias', requireAuth, async (req, res, next) => {
   }
 });
 
+// ── Auspiciantes ("Nos Acompañan") ──────────────────────────────────────
+
+const AUSPICIANTES_DIR = path.join(UPLOADS_DIR, 'auspiciantes');
+function ensureAuspiciantesDir() { if (!fs.existsSync(AUSPICIANTES_DIR)) fs.mkdirSync(AUSPICIANTES_DIR, { recursive: true }); }
+const uploadAuspiciante = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Solo se permiten archivos de imagen'));
+  },
+});
+function supabaseAuspiciantePath(filename) { return `auspiciantes/${filename}`; }
+async function uploadImagenAuspiciante(file) {
+  const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+  const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+  const useSupabase = process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage;
+  if (useSupabase) {
+    try {
+      const { error } = await supabaseAdmin.storage.from(STORAGE_BUCKET).upload(supabaseAuspiciantePath(name), file.buffer, { contentType: file.mimetype, upsert: false });
+      if (!error) return name;
+      console.warn('[Storage auspiciante] Supabase falló, usando filesystem local:', error.message);
+    } catch (e) { console.warn('[Storage auspiciante] Supabase error:', e.message); }
+  }
+  ensureAuspiciantesDir();
+  await fs.promises.writeFile(path.join(AUSPICIANTES_DIR, name), file.buffer);
+  return name;
+}
+async function deleteImagenAuspiciante(imagen) {
+  if (!imagen) return;
+  if (process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage) {
+    try { await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([supabaseAuspiciantePath(imagen)]); } catch (_) {}
+  }
+  try {
+    for (const dir of [AUSPICIANTES_DIR, UPLOADS_DIR]) {
+      const localPath = path.join(dir, path.basename(imagen));
+      if (fs.existsSync(localPath)) await fs.promises.unlink(localPath);
+    }
+  } catch (_) {}
+}
+function getAuspicianteUrl(imagen) {
+  if (!imagen) return '';
+  if (/^https?:\/\//.test(imagen)) return imagen;
+  if (process.env.SUPABASE_URL && supabaseAdmin && supabaseAdmin.storage) {
+    try {
+      const { data } = supabaseAdmin.storage.from(STORAGE_BUCKET).getPublicUrl(supabaseAuspiciantePath(imagen));
+      if (data?.publicUrl && !data.publicUrl.includes('supabase.co/undefined')) return data.publicUrl;
+    } catch (_) {}
+  }
+  const base = path.basename(imagen);
+  try {
+    if (fs.existsSync(path.join(AUSPICIANTES_DIR, base))) return `/uploads/auspiciantes/${base}`;
+  } catch (_) {}
+  return `/uploads/auspiciantes/${base}`;
+}
+
+// Pública: lista de auspiciantes para la página de inscripción a talleres
+app.get('/api/auspiciantes', async (req, res, next) => {
+  try {
+    const filas = await db.listarAuspiciantes();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(filas.map((a) => ({ id: Number(a.id), nombre: a.nombre || '', imagen: getAuspicianteUrl(a.imagen) })));
+  } catch (e) { next(e); }
+});
+
+app.get('/api/admin/auspiciantes', requireAuth, async (req, res, next) => {
+  try {
+    const filas = await db.listarAuspiciantes();
+    res.json(filas.map((a) => ({ id: Number(a.id), nombre: a.nombre || '', imagen: getAuspicianteUrl(a.imagen), archivo: a.imagen || '' })));
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/auspiciantes', requireAuth, uploadAuspiciante.single('imagen'), async (req, res, next) => {
+  try {
+    if (!req.file) throw new db.HttpError(400, 'Seleccioná una imagen (PNG/JPG).');
+    const nombre = String((req.body || {}).nombre || '').trim();
+    const imagen = await uploadImagenAuspiciante(req.file);
+    const id = await db.crearAuspiciante({ nombre, imagen });
+    await db.registrarEvento('auspiciante_creado', `Auspiciante creado: "${nombre || imagen}"`, req.sesion.usuario);
+    res.status(201).json({ ok: true, id });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/admin/auspiciantes/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de auspiciante inválido.');
+    const existente = await db.obtenerAuspiciante(id);
+    if (!existente) throw new db.HttpError(404, 'Auspiciante no encontrado.');
+    await db.eliminarAuspiciante(id);
+    await deleteImagenAuspiciante(existente.imagen);
+    await db.registrarEvento('auspiciante_eliminado', `Auspiciante eliminado: "${existente.nombre || existente.imagen}"`, req.sesion.usuario);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ── Programa (admin CRUD bloques) ──────────────────────────────────────
 
 app.get('/api/admin/programa', requireAuth, async (req, res, next) => {

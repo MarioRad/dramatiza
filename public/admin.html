@@ -27,6 +27,7 @@
         <button type="button" class="tab sidebar-link" data-vista="dashboard"><span class="sidebar-icon">📊</span><span>Dashboard</span></button>
         <button type="button" class="tab sidebar-link" data-vista="inscripciones"><span class="sidebar-icon">📝</span><span>Inscripciones</span></button>
         <button type="button" class="tab sidebar-link" data-vista="ponentes"><span class="sidebar-icon">🎤</span><span>Ponentes</span></button>
+        <button type="button" class="tab sidebar-link" data-vista="auspiciantes"><span class="sidebar-icon">🤝</span><span>Auspiciantes</span></button>
         <button type="button" class="tab sidebar-link" data-vista="programa"><span class="sidebar-icon">📅</span><span>Programa</span></button>
         <button type="button" class="tab sidebar-link" data-vista="encuentro"><span class="sidebar-icon">📥</span><span>Importar listado</span></button>
         <button type="button" class="tab sidebar-link" data-vista="pagos"><span class="sidebar-icon">💳</span><span>Pagos y cuotas</span></button>
@@ -806,6 +807,39 @@
             </div>
           </div>
 
+          <div id="vistaAuspiciantes" class="tab-contenido" hidden>
+            <div class="cabecera-panel">
+              <h3>Auspiciantes — “Nos Acompañan”</h3>
+              <button id="botonActualizarAuspiciantes" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+            </div>
+            <p class="ayuda">Las imágenes se muestran en la página pública de inscripción a talleres, al pie, por arriba del link de admin. Cada imagen se presenta en 300 × 250 px.</p>
+            <div id="mensajeAuspiciantes" class="mensaje" role="alert"></div>
+            <form id="formAuspiciante" class="pagos-fila" style="align-items:flex-end;">
+              <div class="campo">
+                <label for="auspicianteNombre">Nombre (opcional)</label>
+                <input type="text" id="auspicianteNombre" maxlength="200" placeholder="Ej: Municipalidad de Salta">
+              </div>
+              <div class="campo">
+                <label for="auspicianteImagen">Imagen (PNG/JPG, máx 10 MB)</label>
+                <input type="file" id="auspicianteImagen" accept="image/*" required>
+              </div>
+              <button type="submit" class="boton boton-secundario" id="botonGuardarAuspiciante">Cargar auspiciante</button>
+            </form>
+            <p class="ayuda" id="resumenAuspiciantes"></p>
+            <div class="tabla-envoltura">
+              <table id="tablaAuspiciantes">
+                <thead>
+                  <tr>
+                    <th style="width:120px">Imagen (300×250)</th>
+                    <th>Nombre</th>
+                    <th style="width:110px">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
           <div id="vistaPrograma" class="tab-contenido" hidden>
             <div id="programaAdminApp"></div>
           </div>
@@ -1302,6 +1336,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=36"></script>
+  <script src="/js/admin.js?v=37"></script>
 </body>
 </html>

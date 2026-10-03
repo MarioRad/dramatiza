@@ -82,6 +82,9 @@ async function initPool() {
       await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT NOT NULL DEFAULT ''`).catch(()=>{});
       await pool.query(`ALTER TABLE pagos_cuotas ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      // 010_auspiciantes: tabla de auspiciantes ("Nos Acompañan")
+      await pool.query(`CREATE TABLE IF NOT EXISTS auspiciantes (id SERIAL PRIMARY KEY, nombre TEXT NOT NULL DEFAULT '', imagen TEXT NOT NULL DEFAULT '', orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(()=>{});
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_auspiciantes_orden ON auspiciantes(orden, id)').catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -2281,6 +2284,32 @@ async function verificarElegibilidadAsistente(dni) {
   return { elegible: todasOk && asistencias.length>0, inscripciones, asistencias };
 }
 
+// ── Auspiciantes ("Nos Acompañan") ─────────────────────────────────────
+
+async function listarAuspiciantes() {
+  return query('SELECT id, nombre, imagen, orden, creado_en FROM auspiciantes ORDER BY orden, id');
+}
+
+async function crearAuspiciante({ nombre = '', imagen = '' }) {
+  const max = await queryOne('SELECT COALESCE(MAX(orden), -1) AS m FROM auspiciantes');
+  const orden = Number(max?.m ?? -1) + 1;
+  const filasRes = await query(
+    'INSERT INTO auspiciantes (nombre, imagen, orden) VALUES (?, ?, ?) RETURNING id',
+    [String(nombre || '').trim(), String(imagen || '').trim(), orden]
+  );
+  return Number(filasRes[0].id);
+}
+
+async function obtenerAuspiciante(id) {
+  return queryOne('SELECT id, nombre, imagen, orden FROM auspiciantes WHERE id = ?', [id]);
+}
+
+async function eliminarAuspiciante(id) {
+  const res = await mutation('DELETE FROM auspiciantes WHERE id = ?', [id]);
+  if (!res.filasAfectadas) throw new HttpError(404, 'Auspiciante no encontrado.');
+  return true;
+}
+
 module.exports = {
   HttpError,
   query,
@@ -2394,4 +2423,8 @@ module.exports = {
   eliminarCertificado,
   verificarElegibilidadAsistente,
   obtenerFichaAsistente,
+  listarAuspiciantes,
+  crearAuspiciante,
+  obtenerAuspiciante,
+  eliminarAuspiciante,
 };

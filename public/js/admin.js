@@ -11,6 +11,8 @@ const ETIQUETAS_EVENTO = {
   ponente_creado: 'Ponente creado',
   ponente_modificado: 'Ponente modificado',
   ponente_eliminado: 'Ponente eliminado',
+  auspiciante_creado: 'Auspiciante creado',
+  auspiciante_eliminado: 'Auspiciante eliminado',
   usuario_creado: 'Usuario creado',
   usuario_modificado: 'Usuario modificado',
   usuario_eliminado: 'Usuario eliminado',
@@ -32,6 +34,7 @@ const TITULOS_VISTA = {
   dashboard: 'Dashboard',
   inscripciones: 'Inscripciones',
   ponentes: 'Ponentes',
+  auspiciantes: 'Auspiciantes',
   programa: 'Programa del Encuentro',
   encuentro: 'Importar listado',
   pagos: 'Gestión de pagos y cuotas',
@@ -257,6 +260,9 @@ function cambiarVista(vista) {
   }
   if (vista === 'ponentes') {
     cargarPonentes();
+  }
+  if (vista === 'auspiciantes') {
+    cargarAuspiciantes();
   }
   if (vista === 'programa') {
     cargarProgramaAdmin();
@@ -5078,3 +5084,84 @@ document.querySelectorAll('#subTabsCertificados .sub-tab').forEach(btn=>{
     if(sub==='ponentes') cargarCertPonentesLista();
   });
 });
+
+// ── Auspiciantes ("Nos Acompañan") ─────────────────────────────────────
+async function cargarAuspiciantes() {
+  const tbody = el('tablaAuspiciantes')?.querySelector('tbody');
+  const resumen = el('resumenAuspiciantes');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="3" class="cargando">Cargando…</td></tr>';
+  const res = await api('/api/admin/auspiciantes');
+  if (!res.ok) {
+    tbody.innerHTML = '';
+    mostrarMensaje(el('mensajeAuspiciantes'), res.data.error || 'No se pudieron cargar los auspiciantes.', 'error');
+    return;
+  }
+  const filas = Array.isArray(res.data) ? res.data : [];
+  if (resumen) resumen.textContent = filas.length ? `${filas.length} auspiciante(s)` : 'Todavía no hay auspiciantes cargados.';
+  tbody.innerHTML = '';
+  for (const a of filas) {
+    const tr = document.createElement('tr');
+    const tdImg = document.createElement('td');
+    tdImg.style.textAlign = 'center';
+    if (a.imagen) {
+      const img = document.createElement('img');
+      img.src = a.imagen;
+      img.alt = a.nombre || 'Auspiciante';
+      img.style.cssText = 'width:120px;height:100px;object-fit:contain;background:#fff;border:1px solid var(--color-borde);border-radius:8px;';
+      tdImg.appendChild(img);
+    } else tdImg.textContent = '—';
+    const tdNom = document.createElement('td');
+    tdNom.textContent = a.nombre || '—';
+    const tdAcc = document.createElement('td');
+    tdAcc.style.textAlign = 'center';
+    const btnDel = document.createElement('button');
+    btnDel.type = 'button';
+    btnDel.className = 'boton boton-peligro boton-chico';
+    btnDel.textContent = 'Eliminar';
+    btnDel.addEventListener('click', () => eliminarAuspiciante(a.id, a.nombre));
+    tdAcc.appendChild(btnDel);
+    tr.append(tdImg, tdNom, tdAcc);
+    tbody.appendChild(tr);
+  }
+}
+
+async function eliminarAuspiciante(id, nombre) {
+  if (!window.confirm(`¿Eliminar el auspiciante "${nombre || 'sin nombre'}"? Esta acción no se puede deshacer.`)) return;
+  const res = await api(`/api/admin/auspiciantes/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    mostrarMensaje(el('mensajeAuspiciantes'), res.data.error || 'No se pudo eliminar.', 'error');
+    return;
+  }
+  mostrarMensaje(el('mensajeAuspiciantes'), 'Auspiciante eliminado.', 'ok');
+  await cargarAuspiciantes();
+}
+
+el('formAuspiciante')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const inputNombre = el('auspicianteNombre');
+  const inputImg = el('auspicianteImagen');
+  const btn = el('botonGuardarAuspiciante');
+  const file = inputImg?.files?.[0];
+  if (!file) { mostrarMensaje(el('mensajeAuspiciantes'), 'Seleccioná una imagen.', 'error'); return; }
+  if (!/^image\//.test(file.type)) { mostrarMensaje(el('mensajeAuspiciantes'), 'Solo se permiten archivos de imagen.', 'error'); return; }
+  if (file.size > 10 * 1024 * 1024) { mostrarMensaje(el('mensajeAuspiciantes'), 'La imagen supera los 10 MB.', 'error'); return; }
+  const fd = new FormData();
+  fd.append('nombre', inputNombre?.value || '');
+  fd.append('imagen', file);
+  if (btn) { btn.disabled = true; btn.textContent = 'Cargando…'; }
+  try {
+    const r = await fetch('/api/admin/auspiciantes', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { mostrarMensaje(el('mensajeAuspiciantes'), data.error || 'No se pudo cargar el auspiciante.', 'error'); return; }
+    mostrarMensaje(el('mensajeAuspiciantes'), 'Auspiciante cargado.', 'ok');
+    if (inputNombre) inputNombre.value = '';
+    if (inputImg) inputImg.value = '';
+    await cargarAuspiciantes();
+  } catch (_) {
+    mostrarMensaje(el('mensajeAuspiciantes'), 'No se pudo conectar con el servidor.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Cargar auspiciante'; }
+  }
+});
+el('botonActualizarAuspiciantes')?.addEventListener('click', () => cargarAuspiciantes());
