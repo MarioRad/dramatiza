@@ -131,7 +131,7 @@ let asistentesData = [];
 let asistenteEditando = null;
 let eventosData = [];
 let eventosPaginaActual = 1;
-const EVENTOS_POR_PAGINA = 5;
+const EVENTOS_POR_PAGINA = 20;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -1705,23 +1705,61 @@ cargarDatos = async function(){
 function renderEventos(eventos) {
   eventosData = Array.isArray(eventos) ? eventos : [];
   eventosPaginaActual = 1;
+  poblarFiltroEventoTipo();
   renderPaginaEventos();
+}
+
+function etiquetaEvento(tipo) {
+  return ETIQUETAS_EVENTO[tipo] || tipo || '—';
+}
+
+function poblarFiltroEventoTipo() {
+  const sel = el('filtroEventoTipo');
+  if (!sel) return;
+  const actual = sel.value || '';
+  const tipos = [...new Set(eventosData.map((ev) => String(ev.tipo || '')))].filter(Boolean).sort();
+  sel.innerHTML = '';
+  const optTodos = document.createElement('option');
+  optTodos.value = '';
+  optTodos.textContent = 'Todos';
+  sel.appendChild(optTodos);
+  for (const t of tipos) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = etiquetaEvento(t);
+    sel.appendChild(opt);
+  }
+  if (actual && tipos.includes(actual)) sel.value = actual;
+}
+
+function obtenerEventosFiltrados() {
+  const tipo = (el('filtroEventoTipo')?.value || '').trim();
+  const q = (el('buscarEvento')?.value || '').trim().toLowerCase();
+  return eventosData.filter((ev) => {
+    if (tipo && String(ev.tipo || '') !== tipo) return false;
+    if (!q) return true;
+    const hay = `${ev.detalle || ''} ${ev.usuario || ''} ${etiquetaEvento(ev.tipo)}`.toLowerCase();
+    return hay.includes(q);
+  });
 }
 
 function renderPaginaEventos() {
   const cuerpo = document.querySelector('#tablaEventos tbody');
   cuerpo.innerHTML = '';
-  const total = eventosData.length;
+  const filtrados = obtenerEventosFiltrados();
+  const total = filtrados.length;
   const totalPaginas = Math.max(1, Math.ceil(total / EVENTOS_POR_PAGINA));
   if (eventosPaginaActual > totalPaginas) eventosPaginaActual = totalPaginas;
   if (eventosPaginaActual < 1) eventosPaginaActual = 1;
 
   if (total === 0) {
-    resumenEventos.textContent = 'Total: 0 evento(s).';
+    resumenEventos.textContent = eventosData.length > 0
+      ? `Sin resultados para el filtro (de ${eventosData.length} evento(s)).`
+      : 'Total: 0 evento(s).';
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 4;
-    td.textContent = 'No hay eventos registrados.';
+    td.textContent = eventosData.length > 0 ? 'Sin resultados para el filtro aplicado.' : 'No hay eventos registrados.';
     td.style.color = 'var(--color-texto-suave)';
     td.style.textAlign = 'center';
     td.style.padding = '1.2rem';
@@ -1733,8 +1771,11 @@ function renderPaginaEventos() {
 
   const inicio = (eventosPaginaActual - 1) * EVENTOS_POR_PAGINA;
   const fin = Math.min(inicio + EVENTOS_POR_PAGINA, total);
-  resumenEventos.textContent = `Total: ${total} evento(s) · Mostrando ${inicio + 1}–${fin} · Página ${eventosPaginaActual} de ${totalPaginas}.`;
-  const paginaEventos = eventosData.slice(inicio, fin);
+  const sufijoFiltro = total !== eventosData.length ? ` (filtrados de ${eventosData.length})` : '';
+  resumenEventos.textContent = total === 0 && eventosData.length > 0
+    ? `Sin resultados para el filtro (de ${eventosData.length} evento(s)).`
+    : `Total: ${total} evento(s)${sufijoFiltro} · Mostrando ${inicio + 1}–${fin} · Página ${eventosPaginaActual} de ${totalPaginas}.`;
+  const paginaEventos = filtrados.slice(inicio, fin);
   for (const ev of paginaEventos) {
     const tr = document.createElement('tr');
     const tdFecha = document.createElement('td');
@@ -1818,6 +1859,15 @@ function renderPaginacionEventos(total, totalPaginas) {
 
   cont.appendChild(crearBoton('Siguiente ›', eventosPaginaActual + 1, eventosPaginaActual === totalPaginas));
 }
+
+el('filtroEventoTipo')?.addEventListener('change', () => {
+  eventosPaginaActual = 1;
+  renderPaginaEventos();
+});
+el('buscarEvento')?.addEventListener('input', () => {
+  eventosPaginaActual = 1;
+  renderPaginaEventos();
+});
 
 function abrirModalUsuario(usuario) {
   usuarioEditando = usuario || null;

@@ -729,6 +729,18 @@
 
             <div id="subEventosRegistro">
               <p class="ayuda" id="resumenEventos"></p>
+              <div class="filtros-barra">
+                <div class="campo">
+                  <label for="filtroEventoTipo">Tipo de evento</label>
+                  <select id="filtroEventoTipo">
+                    <option value="">Todos</option>
+                  </select>
+                </div>
+                <div class="campo">
+                  <label for="buscarEvento">Buscar en detalle o usuario</label>
+                  <input type="text" id="buscarEvento" placeholder="Ej: DNI, taller, usuario…">
+                </div>
+              </div>
               <div class="tabla-envoltura">
                 <table id="tablaEventos">
                   <thead>
@@ -1336,6 +1348,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=37"></script>
+  <script src="/js/admin.js?v=38"></script>
 </body>
 </html>
