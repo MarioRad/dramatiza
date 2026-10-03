@@ -1131,6 +1131,72 @@ app.put('/api/admin/talleres/:id/ponentes', requireAuth, requirePermiso('perm_ta
   } catch (e) { next(e); }
 });
 
+// ── Materiales por taller (texto libre + envío por mail a inscriptos) ────
+
+app.get('/api/admin/materiales', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(await db.listarTalleresConMateriales());
+  } catch (e) { next(e); }
+});
+
+app.get('/api/admin/talleres/:id/materiales', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
+    const mainId = await db.resolverTallerPrincipal(id);
+    const taller = await db.obtenerTaller(mainId);
+    const mat = await db.obtenerMaterialTaller(mainId);
+    const destinatarios = await db.listarDestinatariosMateriales(mainId);
+    res.json({
+      taller_id: mainId,
+      taller: taller ? taller.nombre : '',
+      materiales: mat.materiales || '',
+      actualizado_en: mat.actualizado_en,
+      destinatarios: destinatarios.length,
+    });
+  } catch (e) { next(e); }
+});
+
+app.put('/api/admin/talleres/:id/materiales', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
+    const mainId = await db.resolverTallerPrincipal(id);
+    const materiales = String((req.body || {}).materiales || '');
+    if (materiales.trim().length > 5000) throw new db.HttpError(400, 'La lista de materiales es demasiado larga (máx 5000 caracteres).');
+    await db.guardarMaterialTaller(mainId, materiales, req.sesion.usuario);
+    const taller = await db.obtenerTaller(mainId);
+    await db.registrarEvento('materiales_actualizados', `Materiales actualizados del taller "${taller ? taller.nombre : mainId}"`, req.sesion.usuario);
+    res.json({ ok: true, taller_id: mainId });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/talleres/:id/materiales/enviar', requireAuth, requirePermiso('perm_talleres'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!esIdValido(id)) throw new db.HttpError(400, 'ID de taller inválido.');
+    const mainId = await db.resolverTallerPrincipal(id);
+    const taller = await db.obtenerTaller(mainId);
+    if (!taller) throw new db.HttpError(404, 'Taller no encontrado.');
+    const mat = await db.obtenerMaterialTaller(mainId);
+    if (!String(mat.materiales || '').trim()) throw new db.HttpError(400, 'Este taller no tiene materiales cargados. Cargalos antes de enviar.');
+    const destinatarios = await db.listarDestinatariosMateriales(mainId);
+    if (!destinatarios.length) throw new db.HttpError(400, 'Este taller no tiene inscriptos para notificar.');
+    const resultado = await notificaciones.enviarMaterialesTaller({
+      tallerNombre: taller.nombre,
+      materiales: mat.materiales,
+      destinatarios,
+    });
+    await db.registrarEvento(
+      'materiales_enviados',
+      `Materiales del taller "${taller.nombre}" enviados: ${resultado.enviados}/${resultado.validos} (${resultado.sinEmail} sin email)${resultado.simulado ? ' [SIMULADO: SMTP no configurado]' : ''}`,
+      req.sesion.usuario
+    );
+    res.json({ ok: true, taller: taller.nombre, ...resultado });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/admin/inscripciones', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const listado = await db.listarInscripciones();

@@ -28,6 +28,7 @@
         <button type="button" class="tab sidebar-link" data-vista="inscripciones"><span class="sidebar-icon">📝</span><span>Inscripciones</span></button>
         <button type="button" class="tab sidebar-link" data-vista="ponentes"><span class="sidebar-icon">🎤</span><span>Ponentes</span></button>
         <button type="button" class="tab sidebar-link" data-vista="auspiciantes"><span class="sidebar-icon">🤝</span><span>Auspiciantes</span></button>
+        <button type="button" class="tab sidebar-link" data-vista="materiales"><span class="sidebar-icon">🧰</span><span>Materiales</span></button>
         <button type="button" class="tab sidebar-link" data-vista="programa"><span class="sidebar-icon">📅</span><span>Programa</span></button>
         <button type="button" class="tab sidebar-link" data-vista="encuentro"><span class="sidebar-icon">📥</span><span>Importar listado</span></button>
         <button type="button" class="tab sidebar-link" data-vista="pagos"><span class="sidebar-icon">💳</span><span>Pagos y cuotas</span></button>
@@ -852,6 +853,44 @@
             </div>
           </div>
 
+          <div id="vistaMateriales" class="tab-contenido" hidden>
+            <div class="cabecera-panel">
+              <h3>Materiales por taller</h3>
+              <button id="botonActualizarMateriales" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+            </div>
+            <p class="ayuda">Cargá la lista de materiales que pide cada tallerista (texto libre) y enviala por correo a todos los inscriptos del taller. En talleres de 2 partes se notifica a los inscriptos de ambas.</p>
+            <div id="mensajeMateriales" class="mensaje" role="alert"></div>
+            <div class="filtros-barra">
+              <div class="campo">
+                <label for="buscarMaterialTaller">Buscar taller</label>
+                <input type="text" id="buscarMaterialTaller" placeholder="Ej: mimo, ESI…">
+              </div>
+              <div class="campo">
+                <label for="filtroMaterialEstado">Estado</label>
+                <select id="filtroMaterialEstado">
+                  <option value="">Todos</option>
+                  <option value="con">Con materiales</option>
+                  <option value="sin">Sin materiales</option>
+                </select>
+              </div>
+            </div>
+            <p class="ayuda" id="resumenMateriales"></p>
+            <div class="tabla-envoltura">
+              <table id="tablaMateriales">
+                <thead>
+                  <tr>
+                    <th>Taller</th>
+                    <th>Fecha / Hora</th>
+                    <th>Inscriptos</th>
+                    <th>Materiales</th>
+                    <th style="width:130px">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
           <div id="vistaPrograma" class="tab-contenido" hidden>
             <div id="programaAdminApp"></div>
           </div>
@@ -1346,8 +1385,29 @@
     </div>
   </div>
 
+  <div id="modalMaterial" class="modal" hidden aria-hidden="true">
+    <div class="modal-contenido modal-contenido-medio modal-contenido-con-scroll" role="dialog" aria-modal="true" aria-labelledby="modalMaterialTitulo">
+      <div class="modal-encabezado">
+        <h3 id="modalMaterialTitulo">Materiales del taller</h3>
+        <button type="button" class="modal-cerrar" id="botonCerrarMaterial" aria-label="Cerrar" title="Cerrar">×</button>
+      </div>
+      <div id="mensajeMaterialModal" class="mensaje" role="alert"></div>
+      <p class="ayuda" id="materialTallerInfo"></p>
+      <div class="campo">
+        <label for="materialTexto">Lista de materiales (texto libre)</label>
+        <textarea id="materialTexto" rows="8" maxlength="5000" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--color-borde);border-radius:8px;font-size:0.95rem;" placeholder="Ej: Ropa cómoda, una manta, cuaderno y lápiz…"></textarea>
+        <p class="ayuda-campo">Se enviará tal cual a los inscriptos por correo electrónico.</p>
+      </div>
+      <div class="modal-acciones">
+        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarMaterial">Cerrar</button>
+        <button type="button" class="boton boton-secundario boton-modal" id="botonGuardarMaterial">Guardar</button>
+        <button type="button" class="boton boton-modal" id="botonEnviarMaterial">Enviar a inscriptos</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=38"></script>
+  <script src="/js/admin.js?v=39"></script>
 </body>
 </html>

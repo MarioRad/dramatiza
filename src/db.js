@@ -85,6 +85,8 @@ async function initPool() {
       // 010_auspiciantes: tabla de auspiciantes ("Nos Acompañan")
       await pool.query(`CREATE TABLE IF NOT EXISTS auspiciantes (id SERIAL PRIMARY KEY, nombre TEXT NOT NULL DEFAULT '', imagen TEXT NOT NULL DEFAULT '', orden INTEGER NOT NULL DEFAULT 0, creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(()=>{});
       await pool.query('CREATE INDEX IF NOT EXISTS idx_auspiciantes_orden ON auspiciantes(orden, id)').catch(()=>{});
+      // 011_taller_materiales: lista de materiales por taller (texto libre)
+      await pool.query(`CREATE TABLE IF NOT EXISTS taller_materiales (taller_id INTEGER PRIMARY KEY REFERENCES talleres(id) ON DELETE CASCADE, materiales TEXT NOT NULL DEFAULT '', actualizado_por TEXT NOT NULL DEFAULT '', actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -2310,6 +2312,82 @@ async function eliminarAuspiciante(id) {
   return true;
 }
 
+// ── Materiales por taller (texto libre del tallerista) ─────────────────
+// Se guardan por taller lógico (id principal; las partes comparten materiales
+// y destinatarios con su principal vía pareja_id).
+
+async function resolverTallerPrincipal(id) {
+  const t = await queryOne('SELECT id, pareja_id FROM talleres WHERE id = ?', [id]);
+  if (!t) throw new HttpError(404, 'Taller no encontrado.');
+  return Number(t.pareja_id) || Number(t.id);
+}
+
+async function grupoIdsTaller(mainId) {
+  const filas = await query('SELECT id FROM talleres WHERE id = ? OR pareja_id = ?', [mainId, mainId]);
+  return filas.map((r) => Number(r.id));
+}
+
+async function obtenerMaterialTaller(mainId) {
+  const fila = await queryOne('SELECT taller_id, materiales, actualizado_por, actualizado_en FROM taller_materiales WHERE taller_id = ?', [mainId]);
+  return fila ? { taller_id: Number(fila.taller_id), materiales: fila.materiales || '', actualizado_por: fila.actualizado_por || '', actualizado_en: fila.actualizado_en } : { taller_id: Number(mainId), materiales: '', actualizado_por: '', actualizado_en: null };
+}
+
+async function guardarMaterialTaller(mainId, materiales, usuario = '') {
+  const texto = String(materiales || '').trim();
+  await query(
+    `INSERT INTO taller_materiales (taller_id, materiales, actualizado_por, actualizado_en)
+     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT (taller_id) DO UPDATE SET materiales = EXCLUDED.materiales, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = CURRENT_TIMESTAMP`,
+    [mainId, texto, String(usuario || '')]
+  );
+  return true;
+}
+
+async function listarTalleresConMateriales() {
+  const talleres = await listarTalleres();
+  const mats = await query('SELECT taller_id, materiales, actualizado_en FROM taller_materiales');
+  const porId = new Map(mats.map((m) => [Number(m.taller_id), m]));
+  // Agrupar por taller lógico (principal + partes)
+  const grupos = new Map();
+  for (const t of talleres) {
+    const mainId = Number(t.pareja_id) || Number(t.id);
+    if (!grupos.has(mainId)) grupos.set(mainId, { mainId, partes: [], inscriptos: 0, materiales: '', actualizado_en: null });
+    const g = grupos.get(mainId);
+    g.partes.push(t);
+    g.inscriptos = Math.max(g.inscriptos, Number(t.inscriptos) || 0);
+    const m = porId.get(mainId) || porId.get(Number(t.id));
+    if (m && !g.materiales) { g.materiales = m.materiales || ''; g.actualizado_en = m.actualizado_en; }
+  }
+  return [...grupos.values()].map((g) => {
+    const principal = g.partes.find((p) => Number(p.id) === g.mainId) || g.partes[0];
+    return {
+      taller_id: g.mainId,
+      nombre: principal.nombre,
+      fecha: principal.fecha || '',
+      hora: principal.hora || '',
+      lugar: principal.lugar || '',
+      disertante: principal.disertante || '',
+      partes: g.partes.length,
+      inscriptos: g.inscriptos,
+      tiene_materiales: Boolean(String(g.materiales || '').trim()),
+      materiales: g.materiales || '',
+      actualizado_en: g.actualizado_en,
+    };
+  });
+}
+
+async function listarDestinatariosMateriales(mainId) {
+  const ids = await grupoIdsTaller(mainId);
+  if (!ids.length) return [];
+  const filas = await query(
+    `SELECT dni, MIN(nombre) AS nombre, MIN(apellido) AS apellido, MIN(email) AS email
+     FROM inscripciones WHERE taller_id IN (${ids.map(() => '?').join(',')})
+     GROUP BY dni ORDER BY MIN(apellido), MIN(nombre)`,
+    ids
+  );
+  return filas.map((r) => ({ dni: r.dni, nombre: r.nombre || '', apellido: r.apellido || '', email: String(r.email || '').trim() }));
+}
+
 module.exports = {
   HttpError,
   query,
@@ -2427,4 +2505,10 @@ module.exports = {
   crearAuspiciante,
   obtenerAuspiciante,
   eliminarAuspiciante,
+  resolverTallerPrincipal,
+  grupoIdsTaller,
+  obtenerMaterialTaller,
+  guardarMaterialTaller,
+  listarTalleresConMateriales,
+  listarDestinatariosMateriales,
 };

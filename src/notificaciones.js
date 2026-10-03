@@ -368,10 +368,98 @@ async function notificarRecordatorioCuota(datos) {
   return { enviado: false, destino: d.email, asunto, simulado: true };
 }
 
+function construirTextoMateriales({ tallerNombre, materiales, nombre, apellido }) {
+  const lineas = [];
+  lineas.push(`Hola ${nombre} ${apellido}!`.replace(/ +/g, ' ').trim() || 'Hola!');
+  lineas.push('');
+  lineas.push(`Te escribimos por el taller "${tallerNombre}" del Encuentro Nacional Dramatiza Salta 2026, al que estás inscripto/a.`);
+  lineas.push('El/la tallerista indica que lleves los siguientes materiales:');
+  lineas.push('');
+  lineas.push(materiales);
+  lineas.push('');
+  lineas.push('¡Nos vemos en el encuentro!');
+  return lineas.join('\n');
+}
+
+function construirHtmlMateriales({ tallerNombre, materiales, nombre, apellido }) {
+  const logoRuta = acreditacion.resolverImagen('ENCUENTRO_LOGO_IMG', 'public/logo.png');
+  const logoSrc = logoRuta ? imagenDataUrl(logoRuta, acreditacion.tipoMime(logoRuta)) : null;
+  const materialesHtml = escaparHtml(materiales).replace(/\n/g, '<br>');
+  const saludo = escaparHtml(`${nombre} ${apellido}`.replace(/ +/g, ' ').trim());
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:linear-gradient(135deg,#565657,#181716);padding:20px 24px;text-align:center;color:#fff;">
+          ${logoSrc ? `<img src="${logoSrc}" alt="Logo" style="max-height:56px;background:#33333200;border-radius:8px;padding:4px;">` : ''}
+          <h2 style="margin:12px 0 0;font-size:18px;">Materiales para tu taller</h2>
+        </td></tr>
+        <tr><td style="padding:24px;">
+          <p style="margin:0 0 8px;">Hola <strong>${saludo || 'participante'}</strong>,</p>
+          <p style="margin:0 0 8px;">Te escribimos por el taller <strong>"${escaparHtml(tallerNombre)}"</strong> del Encuentro Nacional Dramatiza Salta 2026, al que estás inscripto/a.</p>
+          <p style="margin:0 0 6px;font-weight:bold;">El/la tallerista indica que lleves los siguientes materiales:</p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;font-size:14px;line-height:1.6;">${materialesHtml}</div>
+          <p style="margin:16px 0 0;font-size:14px;color:#334155;">¡Nos vemos en el encuentro!</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function emailValido(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+}
+
+// Envío masivo de materiales a los inscriptos de un taller.
+// destinatarios: [{ email, nombre, apellido, dni }]. Devuelve conteo + detalle.
+async function enviarMaterialesTaller({ tallerNombre, materiales, destinatarios }) {
+  const lista = Array.isArray(destinatarios) ? destinatarios : [];
+  const asunto = `Materiales para el taller "${tallerNombre}" — Encuentro Dramatiza Salta 2026`;
+  const validos = lista.filter((d) => emailValido(d.email));
+  const sinEmail = lista.length - validos.length;
+
+  if (!smtpConfigurado()) {
+    const muestra = validos.slice(0, 3).map((d) => `${d.nombre} ${d.apellido} <${d.email}>`.trim()).join(', ');
+    registrarLog(`Para (${validos.length} destinatario(s)${sinEmail ? `, ${sinEmail} sin email válido omitido(s)` : ''}): ${muestra}${validos.length > 3 ? ', …' : ''}\nAsunto: ${asunto}\n\n${construirTextoMateriales({ tallerNombre, materiales, nombre: '(nombre)', apellido: '' })}`);
+    return { enviado: false, simulado: true, total: lista.length, validos: validos.length, sinEmail, enviados: 0, fallidos: [] };
+  }
+
+  let enviados = 0;
+  const fallidos = [];
+  for (const d of validos) {
+    const texto = construirTextoMateriales({ tallerNombre, materiales, nombre: d.nombre, apellido: d.apellido });
+    const html = construirHtmlMateriales({ tallerNombre, materiales, nombre: d.nombre, apellido: d.apellido });
+    try {
+      const info = await obtenerTransporter().sendMail({
+        from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'inscripciones@localhost',
+        to: d.email,
+        subject: asunto,
+        text: texto,
+        html,
+      });
+      enviados++;
+      console.log(`[Mail] Materiales taller "${tallerNombre}" enviados a ${d.email} (${info.messageId})`);
+    } catch (e) {
+      console.error(`[Mail] Error al enviar materiales a ${d.email}:`, e.message);
+      fallidos.push({ email: d.email, dni: d.dni || '', error: e.message });
+    }
+  }
+  try {
+    logs.escribirLog('', 'emails.log', `\n--- ${new Date().toISOString()} ---\nMateriales taller "${tallerNombre}": ${enviados}/${validos.length} enviados (${sinEmail} sin email válido, ${fallidos.length} fallidos)\n`);
+  } catch (_) { /* noop */ }
+  return { enviado: true, simulado: false, total: lista.length, validos: validos.length, sinEmail, enviados, fallidos };
+}
+
 module.exports = {
   notificarInscripcion,
   notificarRecordatorioCuota,
   construirMensajeInscripcion,
   construirHtml,
+  enviarMaterialesTaller,
   ETIQUETAS_ALIMENTACION,
 };

@@ -13,6 +13,8 @@ const ETIQUETAS_EVENTO = {
   ponente_eliminado: 'Ponente eliminado',
   auspiciante_creado: 'Auspiciante creado',
   auspiciante_eliminado: 'Auspiciante eliminado',
+  materiales_actualizados: 'Materiales actualizados',
+  materiales_enviados: 'Materiales enviados',
   usuario_creado: 'Usuario creado',
   usuario_modificado: 'Usuario modificado',
   usuario_eliminado: 'Usuario eliminado',
@@ -35,6 +37,7 @@ const TITULOS_VISTA = {
   inscripciones: 'Inscripciones',
   ponentes: 'Ponentes',
   auspiciantes: 'Auspiciantes',
+  materiales: 'Materiales por taller',
   programa: 'Programa del Encuentro',
   encuentro: 'Importar listado',
   pagos: 'Gestión de pagos y cuotas',
@@ -263,6 +266,9 @@ function cambiarVista(vista) {
   }
   if (vista === 'auspiciantes') {
     cargarAuspiciantes();
+  }
+  if (vista === 'materiales') {
+    cargarMateriales();
   }
   if (vista === 'programa') {
     cargarProgramaAdmin();
@@ -5215,3 +5221,175 @@ el('formAuspiciante')?.addEventListener('submit', async (e) => {
   }
 });
 el('botonActualizarAuspiciantes')?.addEventListener('click', () => cargarAuspiciantes());
+
+// ── Materiales por taller (texto libre + envío por mail) ───────────────
+let materialesData = [];
+let materialTallerId = null;
+let materialDestinatarios = 0;
+
+function materialesFiltrados() {
+  const q = (el('buscarMaterialTaller')?.value || '').trim().toLowerCase();
+  const estado = (el('filtroMaterialEstado')?.value || '').trim();
+  return materialesData.filter((t) => {
+    if (estado === 'con' && !t.tiene_materiales) return false;
+    if (estado === 'sin' && t.tiene_materiales) return false;
+    if (!q) return true;
+    return `${t.nombre || ''} ${t.disertante || ''}`.toLowerCase().includes(q);
+  });
+}
+
+async function cargarMateriales() {
+  const tbody = el('tablaMateriales')?.querySelector('tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="cargando">Cargando…</td></tr>';
+  const res = await api('/api/admin/materiales');
+  if (!res.ok) {
+    tbody.innerHTML = '';
+    mostrarMensaje(el('mensajeMateriales'), res.data.error || 'No se pudieron cargar los talleres.', 'error');
+    return;
+  }
+  materialesData = Array.isArray(res.data) ? res.data : [];
+  renderMateriales();
+}
+
+function renderMateriales() {
+  const tbody = el('tablaMateriales')?.querySelector('tbody');
+  if (!tbody) return;
+  const filas = materialesFiltrados();
+  const resumen = el('resumenMateriales');
+  if (resumen) {
+    const con = materialesData.filter((t) => t.tiene_materiales).length;
+    resumen.textContent = `${materialesData.length} taller(es) · ${con} con materiales` + (filas.length !== materialesData.length ? ` · mostrando ${filas.length}` : '');
+  }
+  tbody.innerHTML = '';
+  if (!filas.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = materialesData.length ? 'Sin resultados para el filtro.' : 'No hay talleres cargados.';
+    td.style.color = 'var(--color-texto-suave)';
+    td.style.textAlign = 'center';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const t of filas) {
+    const tr = document.createElement('tr');
+    const tdNom = document.createElement('td');
+    tdNom.textContent = t.nombre || '—';
+    if (t.disertante) { const d = document.createElement('div'); d.style.fontSize = '0.78rem'; d.style.color = 'var(--color-texto-suave)'; d.textContent = t.disertante; tdNom.appendChild(d); }
+    const tdFh = document.createElement('td');
+    tdFh.textContent = [t.fecha ? formatoFecha(t.fecha) : '', t.hora || ''].filter(Boolean).join(' · ') || '—';
+    tdFh.style.whiteSpace = 'nowrap';
+    const tdIns = document.createElement('td');
+    tdIns.textContent = String(t.inscriptos ?? 0);
+    tdIns.style.textAlign = 'center';
+    const tdMat = document.createElement('td');
+    if (t.tiene_materiales) {
+      const b = document.createElement('span');
+      b.className = 'badge badge-encuentro-si';
+      b.textContent = '✓ Cargados';
+      b.title = t.materiales;
+      tdMat.appendChild(b);
+    } else {
+      const b = document.createElement('span');
+      b.className = 'badge badge-encuentro-no';
+      b.textContent = 'Sin cargar';
+      tdMat.appendChild(b);
+    }
+    const tdAcc = document.createElement('td');
+    tdAcc.style.textAlign = 'center';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'boton boton-secundario boton-chico';
+    btn.textContent = 'Gestionar';
+    btn.addEventListener('click', () => abrirModalMaterial(t.taller_id));
+    tdAcc.appendChild(btn);
+    tr.append(tdNom, tdFh, tdIns, tdMat, tdAcc);
+    tbody.appendChild(tr);
+  }
+}
+
+async function abrirModalMaterial(tallerId) {
+  materialTallerId = tallerId;
+  materialDestinatarios = 0;
+  el('materialTexto').value = '';
+  el('materialTallerInfo').textContent = 'Cargando…';
+  mostrarMensaje(el('mensajeMaterialModal'), '', '');
+  el('modalMaterial').hidden = false;
+  el('modalMaterial').setAttribute('aria-hidden', 'false');
+  const res = await api(`/api/admin/talleres/${tallerId}/materiales`);
+  if (!res.ok) {
+    mostrarMensaje(el('mensajeMaterialModal'), res.data.error || 'No se pudo cargar.', 'error');
+    el('materialTallerInfo').textContent = '';
+    return;
+  }
+  el('materialTexto').value = res.data.materiales || '';
+  materialDestinatarios = Number(res.data.destinatarios) || 0;
+  el('materialTallerInfo').textContent = `"${res.data.taller || ''}" · ${materialDestinatarios} inscripto(s) con email potencial`;
+  el('botonEnviarMaterial').textContent = `Enviar a inscriptos (${materialDestinatarios})`;
+}
+
+function cerrarModalMaterial() {
+  el('modalMaterial').hidden = true;
+  el('modalMaterial').setAttribute('aria-hidden', 'true');
+  materialTallerId = null;
+}
+
+el('buscarMaterialTaller')?.addEventListener('input', renderMateriales);
+el('filtroMaterialEstado')?.addEventListener('change', renderMateriales);
+el('botonActualizarMateriales')?.addEventListener('click', () => cargarMateriales());
+el('botonCerrarMaterial')?.addEventListener('click', cerrarModalMaterial);
+el('botonCancelarMaterial')?.addEventListener('click', cerrarModalMaterial);
+
+el('botonGuardarMaterial')?.addEventListener('click', async () => {
+  if (!materialTallerId) return;
+  const btn = el('botonGuardarMaterial');
+  const texto = el('materialTexto').value || '';
+  btn.disabled = true;
+  try {
+    const res = await api(`/api/admin/talleres/${materialTallerId}/materiales`, {
+      method: 'PUT',
+      body: JSON.stringify({ materiales: texto }),
+    });
+    if (!res.ok) { mostrarMensaje(el('mensajeMaterialModal'), res.data.error || 'No se pudo guardar.', 'error'); return; }
+    mostrarMensaje(el('mensajeMaterialModal'), 'Materiales guardados.', 'ok');
+    await cargarMateriales();
+  } catch (_) {
+    mostrarMensaje(el('mensajeMaterialModal'), 'No se pudo conectar con el servidor.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('botonEnviarMaterial')?.addEventListener('click', async () => {
+  if (!materialTallerId) return;
+  const texto = (el('materialTexto').value || '').trim();
+  if (!texto) { mostrarMensaje(el('mensajeMaterialModal'), 'Cargá y guardá los materiales antes de enviar.', 'error'); return; }
+  if (!window.confirm(`¿Enviar los materiales por correo a ${materialDestinatarios} inscripto(s)?`)) return;
+  const btn = el('botonEnviarMaterial');
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+  try {
+    // Guardar por las dudas antes de enviar
+    await api(`/api/admin/talleres/${materialTallerId}/materiales`, {
+      method: 'PUT',
+      body: JSON.stringify({ materiales: el('materialTexto').value || '' }),
+    });
+    const res = await api(`/api/admin/talleres/${materialTallerId}/materiales/enviar`, { method: 'POST' });
+    if (!res.ok) { mostrarMensaje(el('mensajeMaterialModal'), res.data.error || 'No se pudo enviar.', 'error'); return; }
+    const d = res.data || {};
+    if (d.simulado) {
+      mostrarMensaje(el('mensajeMaterialModal'), `SMTP no configurado: envío SIMULADO a ${d.validos} destinatario(s). Ver logs/emails.log.`, 'error');
+    } else {
+      const det = (d.fallidos && d.fallidos.length) ? ` · Fallaron: ${d.fallidos.map((f) => f.email).join(', ')}` : '';
+      mostrarMensaje(el('mensajeMaterialModal'), `Enviado a ${d.enviados}/${d.validos} (${d.sinEmail || 0} sin email válido omitidos)${det}.`, 'ok');
+    }
+    await cargarMateriales();
+  } catch (_) {
+    mostrarMensaje(el('mensajeMaterialModal'), 'No se pudo conectar con el servidor.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = `Enviar a inscriptos (${materialDestinatarios})`;
+  }
+});
