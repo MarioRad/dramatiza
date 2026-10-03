@@ -297,9 +297,33 @@ function buscarConflictoHorario(existentes, nuevos) {
   return null;
 }
 
+// Regla: el taller de 2 partes es el mismo taller dividido en 2, con los mismos
+// asistentes. Toda asignación (pública o del panel) incluye la pareja completa.
+async function expandirParejas(ids) {
+  const base = [...new Set((ids || []).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!base.length) return base;
+  const filas = await query(`SELECT id, pareja_id FROM talleres WHERE id IN (${base.map(() => '?').join(',')})`, base);
+  const set = new Set(base);
+  const mains = new Set();
+  for (const r of filas) {
+    if (r.pareja_id) {
+      set.add(Number(r.pareja_id));
+      mains.add(Number(r.pareja_id));
+    } else {
+      mains.add(Number(r.id));
+    }
+  }
+  if (mains.size) {
+    const hijos = await query(`SELECT id FROM talleres WHERE pareja_id IN (${[...mains].map(() => '?').join(',')})`, [...mains]);
+    for (const h of hijos) set.add(Number(h.id));
+  }
+  return [...set];
+}
+
 async function crearInscripcion({ nombre, apellido, dni, email, telefono = '', alimentacion = 'sin_restriccion', tallerIds = [], enEncuentro = false, estadoPago = 'no_pagado' }) {
-  const seleccionIds = Array.isArray(tallerIds) ? tallerIds.filter(n => Number.isInteger(n) && n > 0) : [];
-  if (seleccionIds.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+  const seleccionBase = Array.isArray(tallerIds) ? tallerIds.filter(n => Number.isInteger(n) && n > 0) : [];
+  if (seleccionBase.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+  const seleccionIds = await expandirParejas(seleccionBase);
 
   return transaction(async (run) => {
     const existentes = await run(
@@ -1033,24 +1057,31 @@ async function buscarAcreditacionPorDni(dni) {
 }
 
 async function cambiarTallerInscripcion(id, nuevoTallerId) {
-  const inscripcion = await queryOne('SELECT id, dni, nombre, apellido, taller_id FROM inscripciones WHERE id = ?', [id]);
+  const inscripcion = await queryOne('SELECT id, dni, nombre, apellido, email, telefono, alimentacion, en_encuentro, estado_pago, taller_id FROM inscripciones WHERE id = ?', [id]);
   if (!inscripcion) throw new HttpError(404, 'Inscripción no encontrada.');
-  if (Number(inscripcion.taller_id) === Number(nuevoTallerId)) {
+  const grupoNuevo = await expandirParejas([Number(nuevoTallerId)]);
+  if (!grupoNuevo.length) throw new HttpError(400, 'El taller seleccionado no existe.');
+  const grupoViejo = await expandirParejas([Number(inscripcion.taller_id)]);
+  if (grupoNuevo.some((g) => grupoViejo.includes(g))) {
     throw new HttpError(400, 'El participante ya está inscripto en ese taller.');
   }
-  const taller = await queryOne('SELECT id, nombre, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [nuevoTallerId]);
-  if (!taller) throw new HttpError(400, 'El taller seleccionado no existe.');
-  const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND id <> ?', [nuevoTallerId, id]);
-  if (Number(conteo[0].n) >= Number(taller.cupo)) {
-    throw new HttpError(409, `No hay más cupos disponibles para el taller "${taller.nombre}".`);
+  const talleresNuevos = [];
+  for (const gid of grupoNuevo) {
+    const t = await queryOne('SELECT id, nombre, cupo, fecha, hora, duracion_hs FROM talleres WHERE id = ?', [gid]);
+    if (!t) throw new HttpError(400, 'El taller seleccionado no existe.');
+    const conteo = await query('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ? AND dni <> ?', [gid, inscripcion.dni]);
+    if (Number(conteo[0].n) >= Number(t.cupo)) {
+      throw new HttpError(409, `No hay más cupos disponibles para el taller "${t.nombre}".`);
+    }
+    talleresNuevos.push(t);
   }
   const otros = await query(
     `SELECT i.taller_id, t.nombre, t.fecha, t.hora, t.duracion_hs
      FROM inscripciones i JOIN talleres t ON t.id = i.taller_id
-     WHERE i.dni = ? AND i.id <> ?`,
-    [inscripcion.dni, id]
+     WHERE i.dni = ? AND i.taller_id NOT IN (${grupoViejo.map(() => '?').join(',')})`,
+    [inscripcion.dni, ...grupoViejo]
   );
-  const conflicto = buscarConflictoHorario(otros, [taller]);
+  const conflicto = buscarConflictoHorario(otros, talleresNuevos);
   if (conflicto) {
     throw new HttpError(
       409,
@@ -1058,21 +1089,32 @@ async function cambiarTallerInscripcion(id, nuevoTallerId) {
     );
   }
   const anterior = await queryOne('SELECT nombre FROM talleres WHERE id = ?', [inscripcion.taller_id]);
-  await mutation('UPDATE inscripciones SET taller_id = ? WHERE id = ?', [nuevoTallerId, id]);
+  await transaction(async (run) => {
+    await run(`DELETE FROM inscripciones WHERE dni = ? AND taller_id IN (${grupoViejo.map(() => '?').join(',')})`, [inscripcion.dni, ...grupoViejo]);
+    for (const t of talleresNuevos) {
+      await run(
+        'INSERT INTO inscripciones (nombre, apellido, dni, email, telefono, alimentacion, taller_id, en_encuentro, estado_pago) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [inscripcion.nombre, inscripcion.apellido, inscripcion.dni, inscripcion.email, inscripcion.telefono, inscripcion.alimentacion, t.id, inscripcion.en_encuentro, inscripcion.estado_pago]
+      );
+    }
+  });
+  const pedido = talleresNuevos.find((t) => Number(t.id) === Number(nuevoTallerId)) || talleresNuevos[0];
   return {
     dni: inscripcion.dni,
     nombre: inscripcion.nombre,
     apellido: inscripcion.apellido,
     anterior: anterior ? anterior.nombre : 'desconocido',
-    nuevo: taller.nombre,
+    nuevo: pedido.nombre,
   };
 }
 
 async function reemplazarTalleresInscripcion(dni, ids) {
-  const seleccionIds = Array.isArray(ids)
+  const base = Array.isArray(ids)
     ? [...new Set(ids.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))]
     : [];
-  if (seleccionIds.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+  if (base.length === 0) throw new HttpError(400, 'Debés seleccionar al menos un taller.');
+  // Completar la pareja automáticamente: no se puede quedar una sola parte
+  const seleccionIds = await expandirParejas(base);
 
   let persona = await queryOne(
     'SELECT dni, nombre, apellido, email, telefono, alimentacion FROM inscripciones WHERE dni = ? ORDER BY id LIMIT 1',
@@ -2508,6 +2550,7 @@ module.exports = {
   crearCertificado,
   eliminarCertificado,
   verificarElegibilidadAsistente,
+  expandirParejas,
   obtenerFichaAsistente,
   listarAuspiciantes,
   crearAuspiciante,
