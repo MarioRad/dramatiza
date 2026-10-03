@@ -2347,14 +2347,21 @@ async function listarTalleresConMateriales() {
   const talleres = await listarTalleres();
   const mats = await query('SELECT taller_id, materiales, actualizado_en FROM taller_materiales');
   const porId = new Map(mats.map((m) => [Number(m.taller_id), m]));
+  // Inscriptos = DNI distintos en TODO el grupo (principal + partes).
+  // Hay casos con gente anotada en una sola parte, así que el MAX por parte subcuenta.
+  const unionPorGrupo = await query(
+    `SELECT COALESCE(t.pareja_id, t.id) AS grupo, COUNT(DISTINCT i.dni) AS n
+     FROM talleres t LEFT JOIN inscripciones i ON i.taller_id = t.id
+     GROUP BY COALESCE(t.pareja_id, t.id)`
+  );
+  const unionMap = new Map(unionPorGrupo.map((r) => [Number(r.grupo), Number(r.n) || 0]));
   // Agrupar por taller lógico (principal + partes)
   const grupos = new Map();
   for (const t of talleres) {
     const mainId = Number(t.pareja_id) || Number(t.id);
-    if (!grupos.has(mainId)) grupos.set(mainId, { mainId, partes: [], inscriptos: 0, materiales: '', actualizado_en: null });
+    if (!grupos.has(mainId)) grupos.set(mainId, { mainId, partes: [], materiales: '', actualizado_en: null });
     const g = grupos.get(mainId);
     g.partes.push(t);
-    g.inscriptos = Math.max(g.inscriptos, Number(t.inscriptos) || 0);
     const m = porId.get(mainId) || porId.get(Number(t.id));
     if (m && !g.materiales) { g.materiales = m.materiales || ''; g.actualizado_en = m.actualizado_en; }
   }
@@ -2368,7 +2375,8 @@ async function listarTalleresConMateriales() {
       lugar: principal.lugar || '',
       disertante: principal.disertante || '',
       partes: g.partes.length,
-      inscriptos: g.inscriptos,
+      cupo: Number(principal.cupo) || 0,
+      inscriptos: unionMap.get(g.mainId) || 0,
       tiene_materiales: Boolean(String(g.materiales || '').trim()),
       materiales: g.materiales || '',
       actualizado_en: g.actualizado_en,

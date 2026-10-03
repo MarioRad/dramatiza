@@ -1317,6 +1317,7 @@ body.dark .taller-partes-badge {
 }
 
 /* Acreditaciones: inscriptos por encima del cupo (llama la atención) */
+#tablaMateriales .sobre-cupo,
 #tablaAcreditacionesTalleres .sobre-cupo {
   background: #dc2626;
   color: #fff;

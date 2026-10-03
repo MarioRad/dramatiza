@@ -5301,8 +5301,18 @@ function renderMateriales() {
     tdFh.textContent = [t.fecha ? formatearFecha(t.fecha) : '', t.hora || ''].filter(Boolean).join(' · ') || '—';
     tdFh.style.whiteSpace = 'nowrap';
     const tdIns = document.createElement('td');
-    tdIns.textContent = String(t.inscriptos ?? 0);
     tdIns.style.textAlign = 'center';
+    const nIns = Number(t.inscriptos ?? 0);
+    const cupoT = Number(t.cupo ?? 0);
+    if (cupoT > 0 && nIns > cupoT) {
+      const b = document.createElement('span');
+      b.className = 'sobre-cupo';
+      b.textContent = `${nIns} (cupo ${cupoT})`;
+      b.title = 'Por arriba del cupo: se notifica a todos los inscriptos igual';
+      tdIns.appendChild(b);
+    } else {
+      tdIns.textContent = cupoT > 0 ? `${nIns}/${cupoT}` : String(nIns);
+    }
     const tdMat = document.createElement('td');
     if (t.tiene_materiales) {
       const b = document.createElement('span');
