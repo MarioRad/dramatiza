@@ -492,7 +492,13 @@ app.get('/api/ponentes', async (req, res, next) => {
 // IMPORTANTE: debe ir ANTES de /:dni para que "config" no sea interpretado como DNI
 app.get('/api/encuentro/config', async (req, res) => {
   const alias = String(process.env.ENCUENTRO_ALIAS || '').trim();
-  const leyenda = String(process.env.ENCUENTRO_ALIAS_LEYENDA || '').trim();
+  const AVISO_NO_REINTEGRO = 'En caso de no poder asistir, no se reintegrará el importe abonado bajo ningún concepto.';
+  let leyenda = String(process.env.ENCUENTRO_ALIAS_LEYENDA || '').trim();
+  if (!leyenda) {
+    leyenda = AVISO_NO_REINTEGRO;
+  } else if (!/no se reintegrar/i.test(leyenda)) {
+    leyenda = `${leyenda} — ${AVISO_NO_REINTEGRO}`;
+  }
   const titulo = String(process.env.ENCUENTRO_TRANSFERENCIA_TITULO || 'Datos para la transferencia').trim();
   const descripcion = String(process.env.ENCUENTRO_TRANSFERENCIA_DESCRIPCION || 'Realizá la transferencia al alias indicado y subí el comprobante (imagen o PDF, máx 8 MB).').trim();
   let opcionesPago = [];

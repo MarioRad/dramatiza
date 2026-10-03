@@ -232,7 +232,13 @@ async function cargarEncuentroConfig() {
     if (!res.ok) throw new Error();
     encuentroConfig = await res.json();
     if (encAliasValor) encAliasValor.textContent = encuentroConfig.alias || '—';
-    if (encAliasLeyenda) encAliasLeyenda.textContent = encuentroConfig.leyenda || '';
+    const AVISO_NO_REINTEGRO = 'En caso de no poder asistir, no se reintegrará el importe abonado bajo ningún concepto.';
+    if (encAliasLeyenda) {
+      let ley = (encuentroConfig.leyenda || '').trim();
+      if (!ley) ley = AVISO_NO_REINTEGRO;
+      else if (!/no se reintegrar/i.test(ley)) ley = `${ley} — ${AVISO_NO_REINTEGRO}`;
+      encAliasLeyenda.textContent = ley;
+    }
     if (encTransferenciaTitulo) encTransferenciaTitulo.textContent = encuentroConfig.titulo || 'Datos para la transferencia';
     if (encTransferenciaDesc) encTransferenciaDesc.textContent = encuentroConfig.descripcion || '';
     // opciones pago como radios estilo Google Forms
