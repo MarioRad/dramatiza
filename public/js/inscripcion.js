@@ -844,8 +844,8 @@ cargarTalleres();
         img.src = a.imagen;
         img.alt = a.nombre || 'Auspiciante';
         img.loading = 'lazy';
-        img.width = 300;
-        img.height = 250;
+        img.width = 150;
+        img.height = 125;
         item.appendChild(img);
         if (a.nombre) {
           const nom = document.createElement('div');

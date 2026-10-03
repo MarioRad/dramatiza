@@ -1695,8 +1695,8 @@ body.dark .modal-gforms .modal-cuerpo { background: #0f172a; }
 .auspiciantes-titulo { font-size: 1.15rem; margin: 0 0 0.9rem; color: var(--color-texto); }
 .auspiciantes-grid { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; align-items: center; }
 .auspiciante-item { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; }
-.auspiciante-item img { width: 300px; height: 250px; max-width: 100%; object-fit: contain; background: #fff; border: 1px solid var(--color-borde); border-radius: 10px; padding: 0.5rem; }
-.auspiciante-nombre { font-size: 0.85rem; color: var(--color-texto-suave); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auspiciante-item img { width: 150px; height: 125px; max-width: 100%; object-fit: contain; background: #fff; border: 1px solid var(--color-borde); border-radius: 10px; padding: 0.5rem; }
+.auspiciante-nombre { font-size: 0.85rem; color: var(--color-texto-suave); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {
-  .auspiciante-item img { width: 100%; max-width: 300px; height: 250px; }
+  .auspiciante-item img { width: 100%; max-width: 150px; height: 125px; }
 }

@@ -5108,7 +5108,7 @@ async function cargarAuspiciantes() {
       const img = document.createElement('img');
       img.src = a.imagen;
       img.alt = a.nombre || 'Auspiciante';
-      img.style.cssText = 'width:120px;height:100px;object-fit:contain;background:#fff;border:1px solid var(--color-borde);border-radius:8px;';
+      img.style.cssText = 'width:60px;height:50px;object-fit:contain;background:#fff;border:1px solid var(--color-borde);border-radius:8px;';
       tdImg.appendChild(img);
     } else tdImg.textContent = '—';
     const tdNom = document.createElement('td');
