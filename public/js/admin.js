@@ -5298,7 +5298,7 @@ function renderMateriales() {
     tdNom.textContent = t.nombre || '—';
     if (t.disertante) { const d = document.createElement('div'); d.style.fontSize = '0.78rem'; d.style.color = 'var(--color-texto-suave)'; d.textContent = t.disertante; tdNom.appendChild(d); }
     const tdFh = document.createElement('td');
-    tdFh.textContent = [t.fecha ? formatoFecha(t.fecha) : '', t.hora || ''].filter(Boolean).join(' · ') || '—';
+    tdFh.textContent = [t.fecha ? formatearFecha(t.fecha) : '', t.hora || ''].filter(Boolean).join(' · ') || '—';
     tdFh.style.whiteSpace = 'nowrap';
     const tdIns = document.createElement('td');
     tdIns.textContent = String(t.inscriptos ?? 0);
