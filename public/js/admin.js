@@ -2722,7 +2722,7 @@ function renderTablaPonentes() {
   cuerpo.innerHTML = '';
   const q = buscarPonente.value.trim().toLowerCase();
   const lista = ponentes.filter(
-    (p) => !q || String(p.nombre || '').toLowerCase().includes(q) || String(p.titulo || '').toLowerCase().includes(q)
+    (p) => !q || String(p.nombre || '').toLowerCase().includes(q) || String(p.titulo || '').toLowerCase().includes(q) || String(p.dni || '').includes(q)
   );
   if (lista.length === 0) {
     const tr = document.createElement('tr');
@@ -2751,7 +2751,7 @@ function renderTablaPonentes() {
       const nombres = co.map(c=> escapeHtml(c.nombre)).join(' • ');
       coHtml = `<div style="font-size:0.72rem;color:var(--color-texto-suave);margin-top:3px">Con: ${nombres}</div>`;
     }
-    tdNombre.innerHTML = `<strong>${escapeHtml(p.nombre)}</strong>${coHtml}`;
+    tdNombre.innerHTML = `<strong>${escapeHtml(p.nombre)}</strong>${p.dni ? `<div style="font-size:0.72rem;color:var(--color-texto-suave);margin-top:2px">DNI ${escapeHtml(String(p.dni))}</div>` : ''}${coHtml}`;
 
     const tdTipo = document.createElement('td');
     const badge = document.createElement('span');
@@ -2964,6 +2964,7 @@ async function abrirModalPonente(id) {
     if (p) {
       el('ponenteId').value = p.id;
       el('ponenteNombre').value = p.nombre;
+      el('ponenteDni').value = p.dni || '';
       el('ponenteTipo').value = p.tipo;
       el('ponenteCupo').value = p.cupo ?? 20;
       el('ponenteDia').value = p.dia ?? 1;
@@ -3098,9 +3099,15 @@ formPonente.addEventListener('submit', async (e) => {
     mostrarMensaje(mensajePonente, 'El nombre es obligatorio.', 'error');
     return;
   }
+  const dniPonente = el('ponenteDni').value.replace(/\D/g, '');
+  if (dniPonente && !/^\d{7,8}$/.test(dniPonente)) {
+    mostrarMensaje(mensajePonente, 'DNI inválido (7 u 8 dígitos). Dejalo vacío si no lo sabés.', 'error');
+    return;
+  }
   const esEdicion = !!ponenteEditandoId;
   const fd = new FormData();
   fd.append('nombre', nombre);
+  fd.append('dni', dniPonente);
   fd.append('tipo', el('ponenteTipo').value);
   fd.append('cupo', el('ponenteCupo').value);
   fd.append('dia', el('ponenteDia').value);

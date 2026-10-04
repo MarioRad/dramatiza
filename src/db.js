@@ -87,6 +87,8 @@ async function initPool() {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_auspiciantes_orden ON auspiciantes(orden, id)').catch(()=>{});
       // 011_taller_materiales: lista de materiales por taller (texto libre)
       await pool.query(`CREATE TABLE IF NOT EXISTS taller_materiales (taller_id INTEGER PRIMARY KEY REFERENCES talleres(id) ON DELETE CASCADE, materiales TEXT NOT NULL DEFAULT '', actualizado_por TEXT NOT NULL DEFAULT '', actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(()=>{});
+      // 012_ponentes_dni: DNI opcional en ponentes (solo para el certificado, no se publica)
+      await pool.query(`ALTER TABLE ponentes ADD COLUMN IF NOT EXISTS dni VARCHAR(20) NOT NULL DEFAULT ''`).catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -1311,22 +1313,26 @@ async function obtenerPonentePorNombre(nombre) {
   return queryOne('SELECT * FROM ponentes WHERE nombre = ?', [nombre]);
 }
 
-async function crearPonente({ nombre, tipo = 'ponencia', dia = 1, horario = '', dia2 = null, horario2 = '', titulo = '', descripcion = '', foto = null, fotoPos = '', cupo = 20, orden = 0 }) {
+async function crearPonente({ nombre, dni = '', tipo = 'ponencia', dia = 1, horario = '', dia2 = null, horario2 = '', titulo = '', descripcion = '', foto = null, fotoPos = '', cupo = 20, orden = 0 }) {
   const filasRes = await query(
-    'INSERT INTO ponentes (nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, foto_pos, cupo, orden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
-    [nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo, orden]
+    'INSERT INTO ponentes (nombre, dni, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, foto_pos, cupo, orden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    [nombre, String(dni || '').replace(/\D/g, '').slice(0, 20), tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo, orden]
   );
   return Number(filasRes[0].id);
 }
 
-async function actualizarPonente(id, { nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo = 20, orden }) {
+async function actualizarPonente(id, { nombre, dni, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo = 20, orden }) {
   if (orden === undefined) {
     const actual = await obtenerPonente(id);
     orden = actual?.orden ?? 0;
   }
+  if (dni === undefined) {
+    const actual = await obtenerPonente(id);
+    dni = actual?.dni ?? '';
+  }
   const res = await mutation(
-    `UPDATE ponentes SET nombre = ?, tipo = ?, dia = ?, horario = ?, dia2 = ?, horario2 = ?, titulo = ?, descripcion = ?, foto = ?, foto_pos = ?, cupo = ?, orden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [nombre, tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo, orden, id]
+    `UPDATE ponentes SET nombre = ?, dni = ?, tipo = ?, dia = ?, horario = ?, dia2 = ?, horario2 = ?, titulo = ?, descripcion = ?, foto = ?, foto_pos = ?, cupo = ?, orden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    [nombre, String(dni || '').replace(/\D/g, '').slice(0, 20), tipo, dia, horario, dia2, horario2, titulo, descripcion, foto, fotoPos, cupo, orden, id]
   );
   if (!res.filasAfectadas) throw new HttpError(404, 'Ponente no encontrado.');
   return true;

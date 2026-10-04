@@ -154,6 +154,12 @@ function validarEmail(email) {
 }
 
 const esIdValido = (valor) => /^\d+$/.test(String(valor || ''));
+function normalizarDniOpcional(valor) {
+  const d = String(valor ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  if (!/^\d{7,8}$/.test(d)) throw new db.HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+  return d;
+}
 function parseIds(valor) {
   return String(valor || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).map(Number).filter(n => n > 0);
 }
@@ -2916,6 +2922,7 @@ app.post('/api/admin/ponentes', requireAuth, uploadPonente.single('foto'), async
     }
     const id = await db.crearPonente({
       nombre,
+      dni: normalizarDniOpcional(body.dni),
       tipo: String(body.tipo || 'ponencia').trim(),
       dia,
       horario: String(body.horario || '').trim(),
@@ -2958,6 +2965,7 @@ app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), as
     }
     await db.actualizarPonente(id, {
       nombre,
+      dni: body.dni !== undefined ? normalizarDniOpcional(body.dni) : undefined,
       tipo: String(body.tipo ?? existente.tipo).trim(),
       dia: parseDiaValido(body.dia, existente.dia),
       horario: String(body.horario ?? existente.horario).trim(),
@@ -3854,6 +3862,9 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       if (partes.length>=2) { nombre = partes.slice(0,-1).join(' '); apellido = partes.slice(-1).join(' '); } else { nombre = pon.nombre; apellido=''; }
       email='';
       ponId = pid;
+      // DNI del ponente (opcional): si está cargado se imprime en el certificado
+      const dniPonente = String(pon.dni || '').replace(/\D/g, '');
+      if (/^\d{7,8}$/.test(dniPonente)) dniNorm = dniPonente;
       // Diferenciación automática taller/ponencia según tipo asociado a la persona
       const tipoReal = String(pon.tipo||'').toLowerCase();
       const esTaller = tipoReal==='taller';
