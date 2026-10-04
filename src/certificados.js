@@ -288,13 +288,15 @@ async function generarPdfCertificado(opts) {
   // ====== FIRMAS (dos firmas gráfica + electrónica) ======
   // Firmas gráficas por encima de los pies (pies están en y 630)
   // Firma1 cerca de pie izquierdo (x220), Firma2 cerca de pie derecho (x800)
+  // La base (abajo) de la imagen queda fija: al cambiar el tamaño crecen
+  // hacia arriba para no invadir el recuadro de avales.
   const firmaAncho = 180;
   const firmaAlto = 56;
   const firma1Cx = 220;
   const firma2Cx = 800;
-  const firmaYSvg = 560; // top de imagen firma
+  const firmaBaseYSvg = 504; // base de imagen firma (antes top 560 con alto 56)
 
-  async function drawFirma(firma, centerX) {
+  async function drawFirma(firma, centerX, escala = 1) {
     const imgPath = firma.imagenPath || resolverFirmaImagen(firma.num);
     if (imgPath && fs.existsSync(imgPath)) {
       try {
@@ -302,17 +304,17 @@ async function generarPdfCertificado(opts) {
         const isJpg = /\.jpe?g$/i.test(imgPath);
         const img = isJpg ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
         const dims = img.scale(1);
-        const ratio = Math.min(1, firmaAncho / dims.width, firmaAlto / dims.height);
+        const ratio = Math.min(1, (firmaAncho * escala) / dims.width, (firmaAlto * escala) / dims.height);
         const w = dims.width * ratio;
         const h = dims.height * ratio;
         const x = centerX - w/2;
-        const y = svgY(PAGE_H, firmaYSvg + h);
+        const y = svgY(PAGE_H, firmaBaseYSvg + h);
         page.drawImage(img, { x, y, width: w, height: h });
       } catch (_) {}
     }
   }
-  await drawFirma({ ...firma1, num: 1 }, firma1Cx);
-  await drawFirma({ ...firma2, num: 2 }, firma2Cx);
+  await drawFirma({ ...firma1, num: 1 }, firma1Cx, 1.2); // firma 1 un 20% más grande
+  await drawFirma({ ...firma2, num: 2 }, firma2Cx, 0.8); // firma 2 un 20% más chica
 
   // Pie Izquierdo 220,630 (actualizado: Nodo Salta)
   const pieY1Svg = 630;
