@@ -1607,6 +1607,60 @@ async function registrarAsistenciaComida(dni, bloqueId) {
   }
 }
 
+// ── Estado unificado de asistencias por DNI (módulo web Asistencias) ───
+// Talleres inscriptos con ingreso/egreso + servicios de comida con retiro.
+async function obtenerEstadoAsistencia(dni) {
+  const dniLimpio = String(dni || '').replace(/\D/g, '');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido.');
+  const inscripciones = await listarInscripcionesPorDni(dniLimpio);
+  let persona = null;
+  if (inscripciones.length > 0) {
+    const p = inscripciones[0];
+    persona = {
+      dni: dniLimpio,
+      nombre: p.nombre || '',
+      apellido: p.apellido || '',
+      email: p.email || '',
+      alimentacion: p.alimentacion || 'sin_restriccion',
+    };
+  } else {
+    const ac = await buscarAcreditacionPorDni(dniLimpio).catch(() => null);
+    if (ac) {
+      persona = { dni: dniLimpio, nombre: ac.nombre || '', apellido: ac.apellido || '', email: '', alimentacion: 'sin_restriccion' };
+    }
+  }
+  if (!persona) return { encontrado: false, dni: dniLimpio };
+  const [marcasTaller, bloques, marcasComida, acred, servicioActivo] = await Promise.all([
+    query('SELECT id, taller_id, tipo, usuario, registrado_en FROM taller_asistencias WHERE dni = ? ORDER BY registrado_en', [dniLimpio]).catch(() => []),
+    listarBloquesBreak().catch(() => []),
+    query('SELECT id, bloque_id, creado_en FROM comidas_asistencias WHERE dni = ?', [dniLimpio]).catch(() => []),
+    buscarAcreditacionPorDni(dniLimpio).catch(() => null),
+    obtenerServicioComidaActivo(60 * 60 * 1000).catch(() => null),
+  ]);
+  const marcaDe = (tallerId, tipo) => marcasTaller.find((m) => Number(m.taller_id) === Number(tallerId) && m.tipo === tipo) || null;
+  const talleres = inscripciones.map((i) => ({
+    taller_id: Number(i.taller_id),
+    taller: i.taller || '',
+    fecha: i.fecha || '',
+    hora: i.hora || '',
+    ingreso: marcaDe(i.taller_id, 'ingreso'),
+    egreso: marcaDe(i.taller_id, 'egreso'),
+  }));
+  const servicios = bloques.map((b) => {
+    const r = marcasComida.find((m) => Number(m.bloque_id) === Number(b.id)) || null;
+    return {
+      bloque_id: Number(b.id),
+      titulo: b.titulo || '',
+      dia: b.dia || '',
+      hora_inicio: b.hora_inicio || '',
+      hora_fin: b.hora_fin || '',
+      activo: servicioActivo ? Number(servicioActivo.id) === Number(b.id) : false,
+      retirado: r,
+    };
+  });
+  return { encontrado: true, persona, talleres, servicios, acreditado: Boolean(acred) };
+}
+
 async function resumenComidas() {
   const servicios = await query(
     `SELECT b.id AS bloque_id, b.dia, b.titulo, b.hora_inicio, b.hora_fin,
@@ -2519,6 +2573,7 @@ module.exports = {
   tieneAsistenciaComida,
   registrarAsistenciaComida,
   resumenComidas,
+  obtenerEstadoAsistencia,
   listarPlanesPago,
   crearPlanPago,
   actualizarPlanPago,

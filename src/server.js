@@ -2044,7 +2044,7 @@ app.post('/api/mobile/acreditar', async (req, res, next) => {
 
     let servicioComida = null;
     try {
-      const servicioActivo = await db.obtenerServicioComidaActivo();
+      const servicioActivo = await db.obtenerServicioComidaActivo(60 * 60 * 1000);
       if (servicioActivo) {
         const yaRetirado = await db.tieneAsistenciaComida(persona.dni, servicioActivo.id);
         if (!yaRetirado) {
@@ -2202,6 +2202,119 @@ app.get('/api/admin/comidas/resumen', requireAuth, requirePermiso('perm_acredita
         total: Number(p.total_servicios),
       })),
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── Módulo web Asistencias (solo admin o autorizado con perm_acreditacion) ─
+// Sin ventana horaria: el operador ve y decide. Marcar es idempotente.
+app.get('/api/admin/asistencias/estado', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const dni = String(req.query.dni || '').replace(/\D/g, '');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(await db.obtenerEstadoAsistencia(dni));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Buscador por DNI parcial / nombre / apellido (DNI únicos, máx 10)
+app.get('/api/admin/asistencias/buscar', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (q.length < 2) return res.json([]);
+    const like = `%${q.replace(/[%_]/g, '')}%`;
+    const filas = await db.query(
+      `SELECT dni, MIN(nombre) AS nombre, MIN(apellido) AS apellido
+         FROM inscripciones
+        WHERE dni LIKE ? OR LOWER(nombre) LIKE ? OR LOWER(apellido) LIKE ?
+        GROUP BY dni ORDER BY MIN(apellido), MIN(nombre) LIMIT 10`,
+      [like, like, like]
+    );
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(filas.map((f) => ({ dni: f.dni, nombre: f.nombre || '', apellido: f.apellido || '' })));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/asistencias/taller', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const dni = String(body.dni || '').replace(/\D/g, '');
+    const taller_id = Number(body.taller_id || body.tallerId);
+    const tipo = String(body.tipo || 'ingreso').toLowerCase() === 'egreso' ? 'egreso' : 'ingreso';
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    if (!Number.isInteger(taller_id) || taller_id <= 0) throw new db.HttpError(400, 'Taller inválido.');
+    const taller = await db.obtenerTaller(taller_id);
+    if (!taller) throw new db.HttpError(404, 'Taller no encontrado.');
+    await db.query(
+      'INSERT INTO taller_asistencias (dni, taller_id, tipo, usuario) VALUES (?,?,?,?) ON CONFLICT (dni, taller_id, COALESCE(bloque_id, -1), tipo) DO NOTHING',
+      [dni, taller_id, tipo, req.sesion.usuario]
+    ).catch(async () => {
+      // fallback si el índice único aún no existe en la DB
+      const ya = await db.queryOne('SELECT id FROM taller_asistencias WHERE dni=? AND taller_id=? AND tipo=? LIMIT 1', [dni, taller_id, tipo]);
+      if (!ya) await db.query('INSERT INTO taller_asistencias (dni, taller_id, tipo, usuario) VALUES (?,?,?,?)', [dni, taller_id, tipo, req.sesion.usuario]);
+    });
+    await db.registrarEvento('asistencia_taller_web', `${tipo} marcado web: DNI ${dni} taller "${taller.nombre}" por ${req.sesion.usuario}`, req.sesion.usuario).catch(() => {});
+    res.json({ ok: true, dni, taller_id, tipo });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/asistencias/taller', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const dni = String(req.query.dni || '').replace(/\D/g, '');
+    const taller_id = Number(req.query.taller_id || req.query.tallerId);
+    const tipo = String(req.query.tipo || 'ingreso').toLowerCase() === 'egreso' ? 'egreso' : 'ingreso';
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    if (!Number.isInteger(taller_id) || taller_id <= 0) throw new db.HttpError(400, 'Taller inválido.');
+    const r = await db.mutation('DELETE FROM taller_asistencias WHERE dni=? AND taller_id=? AND tipo=?', [dni, taller_id, tipo]);
+    if (r.filasAfectadas) {
+      await db.registrarEvento('asistencia_taller_anulada', `${tipo} anulado web: DNI ${dni} taller #${taller_id} por ${req.sesion.usuario}`, req.sesion.usuario).catch(() => {});
+    }
+    res.json({ ok: true, eliminados: Number(r.filasAfectadas || 0) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post('/api/admin/asistencias/menu', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const dni = String(body.dni || '').replace(/\D/g, '');
+    const bloque_id = Number(body.bloque_id || body.bloqueId);
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    if (!Number.isInteger(bloque_id) || bloque_id <= 0) throw new db.HttpError(400, 'Servicio inválido.');
+    const bloque = await db.queryOne("SELECT id, titulo FROM programa_bloques WHERE id=? AND tipo='break'", [bloque_id]);
+    if (!bloque) throw new db.HttpError(404, 'Servicio de comida no encontrado.');
+    await db.registrarAsistenciaComida(dni, bloque_id);
+    // Aviso informativo (no bloquea): ¿hay otro servicio activo ahora?
+    let fueraHorario = false;
+    try {
+      const activo = await db.obtenerServicioComidaActivo(60 * 60 * 1000);
+      fueraHorario = !activo || Number(activo.id) !== Number(bloque_id);
+    } catch (_) {}
+    await db.registrarEvento('menu_entregado_web', `Menú entregado web a DNI ${dni} servicio "${bloque.titulo}" por ${req.sesion.usuario}${fueraHorario ? ' (fuera de horario)' : ''}`, req.sesion.usuario).catch(() => {});
+    res.json({ ok: true, dni, bloque_id, fueraHorario });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete('/api/admin/asistencias/menu', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const dni = String(req.query.dni || '').replace(/\D/g, '');
+    const bloque_id = Number(req.query.bloque_id || req.query.bloqueId);
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    if (!Number.isInteger(bloque_id) || bloque_id <= 0) throw new db.HttpError(400, 'Servicio inválido.');
+    const r = await db.mutation('DELETE FROM comidas_asistencias WHERE dni=? AND bloque_id=?', [dni, bloque_id]);
+    if (r.filasAfectadas) {
+      await db.registrarEvento('menu_anulado', `Menú anulado web: DNI ${dni} servicio #${bloque_id} por ${req.sesion.usuario}`, req.sesion.usuario).catch(() => {});
+    }
+    res.json({ ok: true, eliminados: Number(r.filasAfectadas || 0) });
   } catch (e) {
     next(e);
   }
@@ -3452,8 +3565,8 @@ app.post('/api/mobile/menu/entregar', async (req, res, next) => {
     if (codigo) persona = await db.queryOne('SELECT dni, nombre, apellido, alimentacion, qr_code FROM inscripciones WHERE qr_code = ? LIMIT 1', [codigo]);
     if (!persona && dni && /^\d{7,8}$/.test(dni)) persona = await db.buscarAcreditacionPorDni(dni) || await db.queryOne('SELECT dni, nombre, apellido, alimentacion, qr_code FROM inscripciones WHERE dni=? LIMIT 1', [dni]);
     if (!persona) return res.status(404).json({ error: 'Asistente no encontrado.' });
-    const servicioActivo = await db.obtenerServicioComidaActivo(30*60*1000);
-    if (!servicioActivo) return res.status(400).json({ error: 'Fuera del horario de servicio (30min margen).' });
+    const servicioActivo = await db.obtenerServicioComidaActivo(60*60*1000);
+    if (!servicioActivo) return res.status(400).json({ error: 'Fuera del horario de servicio (60min margen).' });
     const yaRetirado = await db.tieneAsistenciaComida(persona.dni, servicioActivo.id);
     if (yaRetirado) return res.json({ ok: false, yaRetirado: true, mensaje: 'Ya retiró su porción de ' + servicioActivo.titulo });
     await db.registrarAsistenciaComida(persona.dni, servicioActivo.id);

@@ -37,6 +37,7 @@
         <button type="button" class="tab sidebar-link" data-vista="asignaciones"><span class="sidebar-icon">🔗</span><span>Asignaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="acreditaciones" hidden><span class="sidebar-icon">✅</span><span>Acreditaciones</span></button>
         <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="comidas" hidden><span class="sidebar-icon">🍽️</span><span>Gestión de Menús</span></button>
+        <button type="button" class="tab sidebar-link tab-acreditacion" data-vista="asistencias" hidden><span class="sidebar-icon">🧾</span><span>Asistencias</span></button>
         <button type="button" class="tab sidebar-link" data-vista="certificados"><span class="sidebar-icon">🎓</span><span>Certificados</span></button>
         <div class="sidebar-section-title">Sistema</div>
         <button type="button" class="tab sidebar-link tab-admin" data-vista="eventos" hidden><span class="sidebar-icon">📋</span><span>Eventos</span></button>
@@ -626,6 +627,23 @@
                 <tbody></tbody>
               </table>
             </div>
+          </div>
+
+          <div id="vistaAsistencias" class="tab-contenido" hidden>
+            <h3>Asistencias</h3>
+            <p class="ayuda">Marcá ingresos/egresos por taller y entregas de menú con un click, o corregí registros erróneos (se guarda quién anuló). Sin restricción de horario: si el servicio no está activo se avisa pero se permite igual.</p>
+            <div id="mensajeAsistencias" class="mensaje" role="alert"></div>
+            <div class="filtros-barra">
+              <div class="campo">
+                <label for="buscarAsistenciaDni">DNI / apellido y nombre</label>
+                <input type="text" id="buscarAsistenciaDni" placeholder="Ej: 30123456 o Pérez" autocomplete="off">
+              </div>
+              <div class="campo" style="align-self:flex-end;">
+                <button id="botonBuscarAsistencia" class="boton boton-chico" type="button">Buscar</button>
+              </div>
+            </div>
+            <div id="candidatosAsistencia" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1rem;"></div>
+            <div id="tarjetaAsistencia"></div>
           </div>
 
           <div id="vistaCertificados" class="tab-contenido" hidden>

@@ -45,6 +45,7 @@ const TITULOS_VISTA = {
   asignaciones: 'Asignaciones',
   acreditaciones: 'Acreditaciones',
   comidas: 'Gestión de Menús',
+  asistencias: 'Asistencias',
   certificados: 'Certificados',
   eventos: 'Registro de eventos',
   usuarios: 'Usuarios',
@@ -207,7 +208,7 @@ function mostrarPanel() {
   const esAdminOSuperior = miSesion && (miSesion.rol === 'admin' || miSesion.rol === 'superior');
   for (const tab of document.querySelectorAll('[data-vista="asignaciones"]')) tab.hidden = !esAdminOSuperior;
   const vistasSinPermiso = ['eventos', 'usuarios', 'permisos'];
-  if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas');
+  if (!puedeAcreditar) vistasSinPermiso.push('acreditaciones', 'comidas', 'asistencias');
   if (!esAdminOSuperior) vistasSinPermiso.push('asignaciones');
   // certificados visible para todos autenticados; control fino en backend por perm_certificados, pero no ocultamos aquí
   if (vistasSinPermiso.includes(vistaActiva)) {
@@ -284,6 +285,9 @@ function cambiarVista(vista) {
     intervaloComidas = setInterval(() => {
       if (vistaActiva === 'comidas' && !document.hidden) cargarComidas(true);
     }, 15000);
+  }
+  if (vista === 'asistencias') {
+    initVistaAsistencias();
   }
   if (vista === 'inscripciones') {
     cargarInscripciones();
@@ -2492,6 +2496,256 @@ async function cargarComidas(silencioso = false) {
 el('botonActualizarComidas').addEventListener('click', () => cargarComidas(false));
 el('filtroComidasDieta')?.addEventListener('change', renderTablaInscriptosConDieta);
 el('buscarComidasDietas')?.addEventListener('input', renderTablaInscriptosConDieta);
+
+/* ── Módulo Asistencias (web): marcar/anular ingreso-egreso y menú ── */
+let asistenciaActual = null;
+
+function initVistaAsistencias() {
+  const input = el('buscarAsistenciaDni');
+  if (input && !input.dataset.listo) {
+    input.dataset.listo = '1';
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarAsistencia(); });
+  }
+  mostrarMensaje(el('mensajeAsistencias'), '', '');
+  if (input) input.focus();
+}
+
+async function buscarAsistencia() {
+  const q = el('buscarAsistenciaDni').value.trim();
+  const cand = el('candidatosAsistencia');
+  mostrarMensaje(el('mensajeAsistencias'), '', '');
+  if (cand) cand.innerHTML = '';
+  if (!q) {
+    mostrarMensaje(el('mensajeAsistencias'), 'Ingresá un DNI o un nombre para buscar.', 'error');
+    return;
+  }
+  const dig = q.replace(/\D/g, '');
+  if (/^\d{7,8}$/.test(dig) && dig === q) {
+    await cargarEstadoAsistencia(dig);
+    return;
+  }
+  const r = await api(`/api/admin/asistencias/buscar?q=${encodeURIComponent(q)}`);
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo buscar.', 'error');
+    return;
+  }
+  const lista = r.data || [];
+  if (!lista.length) {
+    mostrarMensaje(el('mensajeAsistencias'), 'Sin resultados para esa búsqueda.', 'error');
+    return;
+  }
+  if (lista.length === 1) {
+    el('buscarAsistenciaDni').value = lista[0].dni;
+    await cargarEstadoAsistencia(lista[0].dni);
+    return;
+  }
+  for (const c of lista) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'boton boton-secundario boton-chico';
+    b.textContent = `${c.dni} — ${c.apellido}, ${c.nombre}`.replace(/^ — /, '');
+    b.addEventListener('click', () => {
+      el('buscarAsistenciaDni').value = c.dni;
+      if (cand) cand.innerHTML = '';
+      cargarEstadoAsistencia(c.dni);
+    });
+    cand.appendChild(b);
+  }
+}
+
+async function cargarEstadoAsistencia(dni) {
+  const cont = el('tarjetaAsistencia');
+  cont.innerHTML = '<p class="ayuda">Cargando…</p>';
+  const r = await api(`/api/admin/asistencias/estado?dni=${encodeURIComponent(dni)}`);
+  if (!r.ok) {
+    cont.innerHTML = '';
+    asistenciaActual = null;
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo cargar el estado.', 'error');
+    return;
+  }
+  if (!r.data || !r.data.encontrado) {
+    cont.innerHTML = '';
+    asistenciaActual = null;
+    mostrarMensaje(el('mensajeAsistencias'), `No se encontró a nadie con DNI ${dni}.`, 'error');
+    return;
+  }
+  asistenciaActual = r.data;
+  renderTarjetaAsistencia();
+}
+
+function bloqueMarcaAsistencia(titulo, marca, onMarcar, textoMarcar, textoAnular) {
+  const wrap = document.createElement('div');
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '8px';
+  wrap.style.flexWrap = 'wrap';
+  const lab = document.createElement('strong');
+  lab.textContent = titulo + ': ';
+  lab.style.minWidth = '70px';
+  wrap.appendChild(lab);
+  if (marca) {
+    const ok = document.createElement('span');
+    ok.className = 'badge badge-pago pago_completo';
+    ok.textContent = `✓ ${formatearFecha(marca.registrado_en || marca.creado_en)}`;
+    ok.title = marca.usuario ? `Marcado por ${marca.usuario}` : 'Registrado';
+    wrap.appendChild(ok);
+    if (marca.usuario) {
+      const quien = document.createElement('span');
+      quien.className = 'ayuda';
+      quien.style.fontSize = '0.75rem';
+      quien.textContent = `por ${marca.usuario}`;
+      wrap.appendChild(quien);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'boton boton-peligro boton-chico';
+    btn.textContent = textoAnular;
+    btn.addEventListener('click', onMarcar.anular);
+    wrap.appendChild(btn);
+  } else {
+    const no = document.createElement('span');
+    no.className = 'badge badge-pago no_pagado';
+    no.textContent = 'Pendiente';
+    wrap.appendChild(no);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'boton boton-chico';
+    btn.textContent = textoMarcar;
+    btn.addEventListener('click', onMarcar.marcar);
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+function renderTarjetaAsistencia() {
+  const cont = el('tarjetaAsistencia');
+  cont.innerHTML = '';
+  const est = asistenciaActual;
+  if (!est) return;
+  const p = est.persona;
+  const tarjeta = document.createElement('div');
+  tarjeta.className = 'tarjeta';
+  tarjeta.style.marginBottom = '1rem';
+  const h = document.createElement('h4');
+  h.style.margin = '0 0 4px 0';
+  h.textContent = `${p.apellido}, ${p.nombre}`.replace(/^,\s*/, '') || '—';
+  const sub = document.createElement('div');
+  sub.className = 'ayuda';
+  sub.textContent = `DNI ${p.dni}${est.acreditado ? ' · Acreditado' : ' · Sin acreditar'}`;
+  const badge = document.createElement('span');
+  badge.className = 'badge badge-sin';
+  badge.style.marginLeft = '8px';
+  badge.textContent = ETIQUETAS_ALIMENTACION[p.alimentacion] || p.alimentacion || '—';
+  sub.appendChild(badge);
+  tarjeta.appendChild(h);
+  tarjeta.appendChild(sub);
+  cont.appendChild(tarjeta);
+
+  const hT = document.createElement('h4');
+  hT.textContent = 'Talleres (ingreso / egreso)';
+  cont.appendChild(hT);
+  if (!est.talleres.length) {
+    const vacio = document.createElement('p');
+    vacio.className = 'ayuda';
+    vacio.textContent = 'Sin talleres inscriptos.';
+    cont.appendChild(vacio);
+  }
+  for (const t of est.talleres) {
+    const fila = document.createElement('div');
+    fila.className = 'tarjeta';
+    fila.style.marginBottom = '0.6rem';
+    const tit = document.createElement('div');
+    tit.innerHTML = `<strong>${escapeHtml(t.taller)}</strong> <span class="ayuda">${escapeHtml([t.fecha, t.hora].filter(Boolean).join(' · '))}</span>`;
+    tit.style.marginBottom = '6px';
+    fila.appendChild(tit);
+    fila.appendChild(bloqueMarcaAsistencia('Ingreso', t.ingreso, {
+      marcar: () => marcarTaller(p.dni, t.taller_id, 'ingreso'),
+      anular: () => anularTaller(p.dni, t.taller_id, 'ingreso', t.taller),
+    }, 'Marcar ingreso', 'Anular ingreso'));
+    fila.appendChild(document.createElement('div')).style.height = '6px';
+    fila.appendChild(bloqueMarcaAsistencia('Egreso', t.egreso, {
+      marcar: () => marcarTaller(p.dni, t.taller_id, 'egreso'),
+      anular: () => anularTaller(p.dni, t.taller_id, 'egreso', t.taller),
+    }, 'Marcar egreso', 'Anular egreso'));
+    cont.appendChild(fila);
+  }
+
+  const hM = document.createElement('h4');
+  hM.textContent = 'Menús';
+  cont.appendChild(hM);
+  if (!est.servicios.length) {
+    const vacio = document.createElement('p');
+    vacio.className = 'ayuda';
+    vacio.textContent = 'No hay servicios de comida cargados en el programa.';
+    cont.appendChild(vacio);
+  }
+  for (const s of est.servicios) {
+    const fila = document.createElement('div');
+    fila.className = 'tarjeta';
+    fila.style.marginBottom = '0.6rem';
+    const tit = document.createElement('div');
+    tit.style.marginBottom = '6px';
+    tit.innerHTML = `<strong>${escapeHtml(s.titulo)}</strong> <span class="ayuda">${escapeHtml([s.dia, s.hora_inicio && s.hora_fin ? `${s.hora_inicio}–${s.hora_fin}` : ''].filter(Boolean).join(' · '))}</span>`;
+    if (s.activo && !s.retirado) {
+      const b = document.createElement('span');
+      b.className = 'badge badge-pago pago_completo';
+      b.style.marginLeft = '8px';
+      b.textContent = 'ACTIVO AHORA';
+      tit.appendChild(b);
+    }
+    fila.appendChild(tit);
+    fila.appendChild(bloqueMarcaAsistencia('Retiro', s.retirado, {
+      marcar: () => entregarMenu(p.dni, s.bloque_id, s.titulo, s.activo),
+      anular: () => anularMenu(p.dni, s.bloque_id, s.titulo),
+    }, 'Entregar', 'Anular entrega'));
+    cont.appendChild(fila);
+  }
+}
+
+async function marcarTaller(dni, taller_id, tipo) {
+  const r = await api('/api/admin/asistencias/taller', { method: 'POST', body: JSON.stringify({ dni, taller_id, tipo }) });
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo registrar.', 'error');
+    return;
+  }
+  await cargarEstadoAsistencia(dni);
+  mostrarMensaje(el('mensajeAsistencias'), `${tipo === 'ingreso' ? 'Ingreso' : 'Egreso'} registrado ✓`, 'ok');
+}
+
+async function anularTaller(dni, taller_id, tipo, tallerNombre) {
+  if (!window.confirm(`¿Anular el ${tipo} de DNI ${dni} en "${tallerNombre || taller_id}"? Queda registrado en eventos.`)) return;
+  const r = await api(`/api/admin/asistencias/taller?dni=${encodeURIComponent(dni)}&taller_id=${taller_id}&tipo=${tipo}`, { method: 'DELETE' });
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo anular.', 'error');
+    return;
+  }
+  await cargarEstadoAsistencia(dni);
+  mostrarMensaje(el('mensajeAsistencias'), 'Registro anulado.', 'ok');
+}
+
+async function entregarMenu(dni, bloque_id, titulo, activo) {
+  if (!activo && !window.confirm(`"${titulo}" no está activo ahora (fuera de horario). ¿Entregar igual?`)) return;
+  const r = await api('/api/admin/asistencias/menu', { method: 'POST', body: JSON.stringify({ dni, bloque_id }) });
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo entregar.', 'error');
+    return;
+  }
+  await cargarEstadoAsistencia(dni);
+  mostrarMensaje(el('mensajeAsistencias'), r.data && r.data.fueraHorario ? 'Menú entregado ✓ (fuera de horario)' : 'Menú entregado ✓', 'ok');
+}
+
+async function anularMenu(dni, bloque_id, titulo) {
+  if (!window.confirm(`¿Anular la entrega de "${titulo}" a DNI ${dni}? Queda registrado en eventos.`)) return;
+  const r = await api(`/api/admin/asistencias/menu?dni=${encodeURIComponent(dni)}&bloque_id=${bloque_id}`, { method: 'DELETE' });
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo anular.', 'error');
+    return;
+  }
+  await cargarEstadoAsistencia(dni);
+  mostrarMensaje(el('mensajeAsistencias'), 'Entrega anulada.', 'ok');
+}
+
+el('botonBuscarAsistencia')?.addEventListener('click', buscarAsistencia);
 
 async function cargarDatos() {
   mostrarMensaje(mensajePanel, '', '');
