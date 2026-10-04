@@ -22,17 +22,26 @@ function construirQrPayload(codigo) {
     const normalized = baseUrl.startsWith('http') ? baseUrl : `http://${baseUrl}`;
     return `${normalized}/verificar.html?c=${codigo}`;
   }
-  return `http://192.168.100.20/verificar.html?c=${codigo}`;
+  return `https://dramatiza.vercel.app/verificar.html?c=${codigo}`;
 }
 async function generarQrPng(payload, size = 220) {
   return QRCode.toBuffer(payload, { type: 'png', width: size, margin: 1, errorCorrectionLevel: 'M' });
 }
-function resolverFondoCertificado() {
-  const candidatos = [
-    path.join(__dirname, '..', 'public', 'Certificado.png'),
-    path.join(__dirname, '..', 'public', 'certificado.png'),
-  ];
-  for (const p of candidatos) if (fs.existsSync(p)) return p;
+function esModeloPonente(tipo) {
+  const t = String(tipo || '').trim().toLowerCase();
+  return t === 'ponente' || t === 'tallerista';
+}
+function resolverFondoCertificado(tipo) {
+  // Dos modelos: asistente y ponente/tallerista. Si el fondo específico aún
+  // no existe, se usa el fondo único actual (compatibilidad hacia atrás).
+  const especificos = esModeloPonente(tipo)
+    ? ['Certificado_ponente.png', 'certificado_ponente.png']
+    : ['Certificado_asistente.png', 'certificado_asistente.png'];
+  const candidatos = [...especificos, 'Certificado.png', 'certificado.png'];
+  for (const n of candidatos) {
+    const p = path.join(__dirname, '..', 'public', n);
+    if (fs.existsSync(p)) return p;
+  }
   return null;
 }
 function resolverFirmaImagen(num) {
@@ -85,7 +94,7 @@ async function generarPdfCertificado(opts) {
     emitidoEn = new Date(),
     firma1 = { nombre: 'Referente Nacional Nodo Salta', cargo: 'Red Dramatiza Salta' },
     firma2 = { nombre: 'Referente Provincial Nodo Salta', cargo: 'Red Dramatiza Salta' },
-    avales = null, // array 4 líneas o null para usar defaults de esquema
+    avales = null, // array de hasta 4 textos (declaraciones/avales) o null/vacío para no dibujar recuadro
     hashFirma = '',
     qrPayloadOverride = null,
   } = opts;
@@ -102,8 +111,8 @@ async function generarPdfCertificado(opts) {
   const colNegro = rgb(0x11/255, 0x11/255, 0x11/255);
   const colSuave = rgb(0.35,0.35,0.35);
 
-  // Fondo
-  const fondoPath = resolverFondoCertificado();
+  // Fondo (un modelo por tipo: asistente o ponente/tallerista)
+  const fondoPath = resolverFondoCertificado(tipo);
   if (fondoPath) {
     try {
       const bytes = fs.readFileSync(fondoPath);
@@ -194,14 +203,11 @@ async function generarPdfCertificado(opts) {
   let offset = 0;
   if (yTallerSvg > 350) offset = yTallerSvg - 350;
   const yRealizado = 358 + offset;
-  const yDuracion = 391 + offset;
   // Asegurar no bajar demasiado (máx 420, sino quedaría encima de logo)
   const yRealizadoClamped = Math.min(yRealizado, 400);
   const yDuracionClamped = yRealizadoClamped + 33;
 
   textoCentrado('Realizado en la ciudad de Salta, los días 9,10 y 11 de octubre', 512, yRealizadoClamped, 20, font, colNegro);
-  const horas = String(detalle.horas || '—');
-  textoCentrado(`con ${horas} horas reloj de duración.`, 512, yDuracionClamped, 20, font, colNegro);
   // Emitido por Dramatiza Nodo Salta (siempre)
   const emitidoY = yDuracionClamped + 20;
   //if (emitidoY < 420) textoCentrado('Emitido por Dramatiza Nodo Salta', 512, emitidoY, 11, fontBold, colNegro);
@@ -243,28 +249,39 @@ async function generarPdfCertificado(opts) {
   page.drawRectangle({ x: qrX - 2, y: svgY(PAGE_H, qrYSvg + qrH) - 2, width: qrW + 4, height: qrH + 4, color: rgb(1,1,1) });
   page.drawImage(qrImg, { x: qrX, y: svgY(PAGE_H, qrYSvg + qrH), width: qrW, height: qrH });
 
-  // Avales Box 63,432 273x72 rx10 - solo si se rellenaron datos (recuadro por defecto eliminado)
-  const avalesDefaults = ['', 'Resolución Nº XXX/XXX', 'de ----', 'Resolución: XXX / XXX'];
-  const avalesTextosRaw = Array.isArray(avales) && avales.length ? avales.map((v,i)=> String(v||'').trim()).slice(0,4) : [];
-  // usar config o defaults solo si hay algún dato cargado; si todo vacío, no dibujar recuadro
-  const tieneAvales = avalesTextosRaw.some(t=> t.length>0);
-  if (tieneAvales) {
-    const avalesTextos = avalesTextosRaw.map((v,i)=> v || avalesDefaults[i] || '');
-    // filtrar vacíos centrales pero mantener estructura: si primera vacía y resto con dato, igual mostrar
-    const avalesX = 63, avalesYSvg = 432, avalesW = 273, avalesH = 72;
-    const avalesY = svgY(PAGE_H, avalesYSvg + avalesH);
-    page.drawRectangle({ x: avalesX, y: avalesY, width: avalesW, height: avalesH, color: rgb(1,1,1), borderColor: colNegro, borderWidth: 1.8, opacity: 0.95 });
-    let aySvg = 449;
-    for (const t of avalesTextos) {
-      if (!t.trim()) { aySvg += 13; continue; }
-      textoCentrado(t, 199, aySvg, 11, font, colNegro);
-      aySvg += 13;
+  // Avales Box - declaraciones de interés / resoluciones (textos largos).
+  // Se envuelven dentro del recuadro, la letra se achica hasta entrar y el
+  // recuadro crece en alto según haga falta (sin invadir las firmas).
+  const avalesTextosRaw = Array.isArray(avales) && avales.length
+    ? avales.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  if (avalesTextosRaw.length > 0) {
+    const avalesX = 63, avalesYSvg = 432, avalesW = 273;
+    const avalesCx = avalesX + avalesW / 2;
+    const padX = 10, padY = 8;
+    const maxAnchoTexto = avalesW - padX * 2;
+    const maxAlto = 113; // hasta ySvg 545, antes de las firmas
+    let tam = 10;
+    let lineas = [];
+    while (tam >= 7) {
+      lineas = [];
+      for (const t of avalesTextosRaw) {
+        lineas.push(...dividirTextoEnLineas(t, font, tam, maxAnchoTexto));
+        lineas.push(''); // separador entre avales
+      }
+      if (lineas.length && lineas[lineas.length - 1] === '') lineas.pop();
+      if (lineas.length * (tam + 3) + padY * 2 <= maxAlto) break;
+      tam -= 0.5;
     }
-  } else if (Array.isArray(avales)) {
-    // si avales vino como array vacío explícito, tampoco dibujar nada (comportamiento pedido: sin datos no hay recuadro)
-  } else {
-    // fallback para compatibilidad: si avales es null y no hay config, no dibujar por defecto (antes se dibujaba placeholder)
-    // mantener vacío
+    const interlineado = tam + 3;
+    const altoCaja = Math.min(maxAlto, lineas.length * interlineado + padY * 2);
+    const avalesY = svgY(PAGE_H, avalesYSvg + altoCaja);
+    page.drawRectangle({ x: avalesX, y: avalesY, width: avalesW, height: altoCaja, color: rgb(1,1,1), borderColor: colNegro, borderWidth: 1.8, opacity: 0.95 });
+    let aySvg = avalesYSvg + padY + tam;
+    for (const l of lineas) {
+      if (l) textoCentrado(l, avalesCx, aySvg, tam, font, colNegro);
+      aySvg += interlineado;
+    }
   }
 
   // ====== FIRMAS (dos firmas gráfica + electrónica) ======
@@ -324,8 +341,8 @@ async function generarPdfCertificado(opts) {
     const hx = qrX + qrW/2 - hw/2;
     const hy = svgY(PAGE_H, qrYSvg + qrH + 14);
     page.drawText(hashTexto, { x: hx, y: hy, size: hs, font, color: colSuave });
-    // pequeño "Verificar en http://192.168.100.20/verificar.html?c=CODIGO" debajo (temporal)
-    const verif = `Verificar: http://192.168.100.20/verificar.html?c=${codigo}`;
+    // pequeño "Verificar en https://dramatiza.vercel.app/verificar.html?c=CODIGO" debajo (temporal)
+    const verif = `Verificar: https://dramatiza.vercel.app/verificar.html?c=${codigo}`;
     const vs = 5;
     const vw = font.widthOfTextAtSize(verif, vs);
     page.drawText(verif, { x: qrX + qrW/2 - vw/2, y: hy - 9, size: vs, font, color: colSuave });
@@ -367,11 +384,6 @@ function generarXmlCertificado(opts){
         <documento tipo="DNI"><numero>${escapeXml(dni)}</numero></documento>
         <rol>${escapeXml(rol)}</rol>
     </participante>
-    <actividad>
-        <tipo>${escapeXml(tipoActividad)}</tipo>
-        <titulo>${escapeXml(tituloActividad)}</titulo>
-        <cargaHoraria unidad="horas reloj">${escapeXml(cargaHoraria)}</cargaHoraria>
-    </actividad>
     <emision>
         <lugarEmision>Salta</lugarEmision>
         <fechaEmision>${escapeXml(fechaStr)}</fechaEmision>

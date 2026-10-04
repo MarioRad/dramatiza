@@ -630,7 +630,7 @@
 
           <div id="vistaCertificados" class="tab-contenido" hidden>
             <h3>Certificados 🎓</h3>
-            <p class="ayuda">Generá certificados con el fondo <code>public/Certificado.png</code>, código QR de verificación y dos firmas (gráfica y electrónica). Para <strong>asistentes</strong> se exige control de ingreso+egreso por taller; para <strong>ponentes/talleristas</strong> por selección.</p>
+            <p class="ayuda">Generá certificados con código QR de verificación y dos firmas (gráfica y electrónica). Fondos: <code>public/Certificado_asistente.png</code> (asistentes, con listado de talleres) y <code>public/Certificado_ponente.png</code> (ponentes/talleristas, sin listado). Para <strong>asistentes</strong> se exige control de ingreso+egreso por taller; para <strong>ponentes/talleristas</strong> por selección.</p>
             <div id="mensajeCertificados" class="mensaje" role="alert"></div>
 
             <div class="certificados-config" style="border:1px solid var(--color-borde);border-radius:10px;padding:1rem;margin-bottom:1rem;background:var(--color-fondo-card);">
@@ -656,7 +656,7 @@
                 <button id="botonGuardarCertConfig" class="boton boton-secundario boton-chico" type="button">Guardar firmas</button>
                 <span class="ayuda" id="certConfigEstado"></span>
                 <span style="flex:1"></span>
-                <span class="ayuda">Fondo: <code>Certificado.png</code> (1491×1055) · QR verifica en <code>/verificar.html?c=CODIGO</code></span>
+                <span class="ayuda">Fondos: <code>Certificado_asistente.png</code> / <code>Certificado_ponente.png</code> · QR verifica en <code>/verificar.html?c=CODIGO</code></span>
               </div>
             </div>
 
