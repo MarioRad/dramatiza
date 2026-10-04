@@ -288,13 +288,13 @@ async function generarPdfCertificado(opts) {
   // ====== FIRMAS (dos firmas gráfica + electrónica) ======
   // Firmas gráficas por encima de los pies (pies están en y 630)
   // Firma1 cerca de pie izquierdo (x220), Firma2 cerca de pie derecho (x800)
-  // La base (abajo) de la imagen queda fija: al cambiar el tamaño crecen
-  // hacia arriba para no invadir el recuadro de avales.
+  // La base (abajo) de la imagen queda fija sobre la línea de firma (y 620):
+  // al cambiar el tamaño crecen hacia arriba para no invadir el recuadro de avales.
   const firmaAncho = 180;
   const firmaAlto = 56;
   const firma1Cx = 220;
   const firma2Cx = 800;
-  const firmaBaseYSvg = 504; // base de imagen firma (antes top 560 con alto 56)
+  const firmaPieYSvg = 600; // borde inferior de la imagen, 20 arriba de la línea
 
   async function drawFirma(firma, centerX, escala = 1) {
     const imgPath = firma.imagenPath || resolverFirmaImagen(firma.num);
@@ -308,7 +308,7 @@ async function generarPdfCertificado(opts) {
         const w = dims.width * ratio;
         const h = dims.height * ratio;
         const x = centerX - w/2;
-        const y = svgY(PAGE_H, firmaBaseYSvg + h);
+        const y = svgY(PAGE_H, firmaPieYSvg);
         page.drawImage(img, { x, y, width: w, height: h });
       } catch (_) {}
     }
