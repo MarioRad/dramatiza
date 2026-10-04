@@ -135,7 +135,7 @@ async function generarPdfCertificado(opts) {
   // titulo bajado 0,5 cm (14 pt) -> y 62 -> 76
   textoCentrado('26° Encuentro Nacional de Profesores de Teatro Dramatiza Salta 2026', 512, 76, 28, fontBold, colNegro);
   // subtitulo (modificado en esquema_cert.xml)
-  textoCentrado('El Nodo Salta, perteneciente a la Red de Profesores de Teatro hace constar que', 512, 95, 20, font, colNegro);
+  textoCentrado('El Nodo Salta, perteneciente a la Red de Profesores de Teatro hace constar que', 512, 105, 20, font, colNegro);
 
   // NOMBRE (no estaba en xml, lo insertamos entre subtitulo y DNI para que destaque)
   const nombreCompleto = `${nombre} ${apellido}`.trim() || '—';
@@ -208,7 +208,7 @@ async function generarPdfCertificado(opts) {
   const yRealizadoClamped = Math.min(yRealizado, 400);
   const yDuracionClamped = yRealizadoClamped + 33;
 
-  textoCentrado('Realizado en la ciudad de Salta, los días 9,10 y 11 de octubre', 512, yRealizadoClamped, 20, font, colNegro);
+  textoCentrado('Realizado en la ciudad de Salta, del 9 al 11 de octubre', 512, yRealizadoClamped, 20, font, colNegro);
   // Emitido por Dramatiza Nodo Salta (siempre)
   const emitidoY = yDuracionClamped + 20;
   //if (emitidoY < 420) textoCentrado('Emitido por Dramatiza Nodo Salta', 512, emitidoY, 11, fontBold, colNegro);
@@ -274,7 +274,7 @@ async function generarPdfCertificado(opts) {
       if (lineas.length * (tam + 3) + padY * 2 <= maxAlto) break;
       tam -= 0.5;
     }
-    const interlineado = tam + 3;
+    const interlineado = tam + 1;
     const altoCaja = Math.min(maxAlto, lineas.length * interlineado + padY * 2);
     const avalesY = svgY(PAGE_H, avalesYSvg + altoCaja);
     page.drawRectangle({ x: avalesX, y: avalesY, width: avalesW, height: altoCaja, color: rgb(1,1,1), borderColor: colNegro, borderWidth: 1.8, opacity: 0.95 });
@@ -294,7 +294,7 @@ async function generarPdfCertificado(opts) {
   const firmaAlto = 56;
   const firma1Cx = 220;
   const firma2Cx = 800;
-  const firmaPieYSvg = 600; // borde inferior de la imagen, 20 arriba de la línea
+  const firmaPieYSvg = 610; // borde inferior de la imagen, 10 arriba de la línea
 
   async function drawFirma(firma, centerX, escala = 1) {
     const imgPath = firma.imagenPath || resolverFirmaImagen(firma.num);
