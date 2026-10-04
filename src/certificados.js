@@ -48,6 +48,7 @@ function resolverFirmaImagen(num) {
   const nombres = [
     `firma${num}.png`, `Firma${num}.png`, `firma${num}.jpg`, `Firma${num}.jpg`,
     `firma_fondo${num}.png`, `firma_${num}.png`,
+    `Firma_${num}.png`, `Firma_${num}.jpg`,
   ];
   for (const n of nombres) {
     const p = path.join(__dirname, '..', 'public', n);
