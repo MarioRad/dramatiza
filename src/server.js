@@ -1480,6 +1480,69 @@ app.delete('/api/admin/asistentes/:dni', requireAuth, requirePermiso('perm_inscr
   } catch (e) { next(e); }
 });
 
+// ── Liberar cupo(s) sin eliminar al participante (baja de talleres) ────
+// Borra la(s) inscripción(es) a talleres (libera cupo automáticamente) pero
+// conserva a la persona: sigue figurando en Encuentro / Asistentes como
+// "sin talleres" y queda registro en el historial (tipo cupo_liberado).
+app.post('/api/admin/asistentes/:dni/liberar-talleres', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const dni = String(req.params.dni || '').replace(/\D/g, '');
+    if (!/^\d{7,8}$/.test(dni)) throw new db.HttpError(400, 'DNI inválido.');
+    const body = req.body || {};
+    const motivo = String(body.motivo || '').trim().slice(0, 280);
+
+    const actuales = await db.listarInscripcionesPorDni(dni);
+    if (!actuales.length) {
+      const enc = await db.queryOne('SELECT nombre, apellido FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1', [dni]);
+      if (enc) throw new db.HttpError(409, 'La persona ya está sin talleres (solo figura en el encuentro). No hay cupos que liberar.');
+      throw new db.HttpError(404, 'No se encontraron inscripciones a talleres para este DNI.');
+    }
+
+    let objetivo = actuales.map((i) => Number(i.taller_id));
+    const pedidoRaw = body.taller_id ?? body.tallerId ?? body.taller_ids ?? body.tallerIds ?? body.talleres;
+    if (pedidoRaw !== undefined && pedidoRaw !== null && String(pedidoRaw).trim() !== '') {
+      const pedido = Array.isArray(pedidoRaw)
+        ? pedidoRaw.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+        : parseIds(pedidoRaw);
+      if (!pedido.length) throw new db.HttpError(400, 'Taller inválido.');
+      const expandido = await db.expandirParejas(pedido);
+      objetivo = [...new Set(expandido)].filter((id) => actuales.some((a) => Number(a.taller_id) === id));
+      if (!objetivo.length) throw new db.HttpError(404, 'La persona no está inscripta en ese taller.');
+    } else {
+      // Liberar todo: incluir la pareja completa por si hay partes hermanas
+      objetivo = await db.expandirParejas(objetivo);
+      objetivo = [...new Set(objetivo)].filter((id) => actuales.some((a) => Number(a.taller_id) === id));
+    }
+
+    const aLiberar = actuales.filter((a) => objetivo.includes(Number(a.taller_id)));
+    const nombres = aLiberar.map((a) => a.taller);
+    const persona = `${actuales[0].nombre} ${actuales[0].apellido}`;
+
+    await db.transaction(async (run) => {
+      for (const id of objetivo) {
+        await run('DELETE FROM inscripciones WHERE dni = ? AND taller_id = ?', [dni, id]);
+      }
+    });
+    await regenerarAcreditacion(dni);
+
+    const restantes = await db.listarInscripcionesPorDni(dni);
+    const enEncuentro = await db.esAsistenteEncuentro(dni);
+    await db.registrarEvento(
+      'cupo_liberado',
+      `Cupo liberado (baja de taller, participante conservado): ${persona} (DNI ${dni}) — liberado: ${nombres.join(', ') || objetivo.join(', ')}${restantes.length ? ` — conserva: ${restantes.map((r) => r.taller).join(', ')}` : ' — quedó sin talleres'}${enEncuentro ? ' — sigue en encuentro' : ' — ATENCIÓN: no figura en encuentro'}${motivo ? ` — motivo: ${motivo}` : ''}`,
+      req.sesion.usuario
+    );
+    res.json({
+      ok: true,
+      liberados: aLiberar.length,
+      liberadosNombres: nombres,
+      restantes: restantes.length,
+      quedaSinTalleres: restantes.length === 0,
+      sigueEnEncuentro: enEncuentro,
+    });
+  } catch (e) { next(e); }
+});
+
 app.get('/api/admin/eventos', requireAdmin, async (req, res, next) => {
   try {
     const pageRaw = req.query.page;

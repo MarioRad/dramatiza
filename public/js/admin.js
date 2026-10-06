@@ -1453,7 +1453,7 @@ el('botonFichaCopiarLink')?.addEventListener('click', async()=>{
 el('botonFichaEliminar')?.addEventListener('click', async()=>{
   if(!fichaDniActual) return;
   const dni = fichaDniActual;
-  if(!window.confirm(`¿Eliminar asistente DNI ${dni} y todas sus inscripciones?`)) return;
+  if(!window.confirm(`¿Eliminar asistente DNI ${dni} y todas sus inscripciones?\n\nSi solo querés liberarle el cupo (baja de talleres) CONSERVANDO a la persona, usá "Liberar todos los cupos" en la sección Talleres.`)) return;
   const res = await api(`/api/admin/asistentes/${encodeURIComponent(dni)}`,{method:'DELETE'});
   if(!res.ok){ mostrarMensaje(fichaError, res.data.error||'No se pudo eliminar.','error'); fichaError.hidden=false; } else { mostrarMensaje(mensajePanel,'Asistente eliminado.','ok'); cerrarFichaAsistente(); await cargarDatos(); await cargarAsistentes(); }
 });
@@ -1509,15 +1509,41 @@ async function renderFicha(f){
   const ft = el('fichaTalleres');
   const talleresIdsActuales = new Set((f.talleres||[]).map(t=> Number(t.id)));
   const renderFichaTalleresLectura = ()=>{
-    if(!f.talleres || !f.talleres.length) return '<span class="ayuda">Sin talleres</span>';
-    return '<div class="lista-talleres-inscripcion">'+ f.talleres.map(t=> `<div class="chip-taller" title="${esc(t.fecha)} ${esc(t.hora)}">${esc(t.taller)}<span style="font-size:0.75rem; color:var(--color-texto-suave); margin-left:6px;">${esc(t.fecha||'')} ${esc(t.hora||'')} ${esc(t.lugar||'')}</span></div>`).join('') + '</div>';
+    if(!f.talleres || !f.talleres.length) return '<span class="ayuda">Sin talleres — cupos ya liberados (la persona se conserva)</span>';
+    return '<div class="lista-talleres-inscripcion">'+ f.talleres.map(t=> `<div class="chip-taller" title="${esc(t.fecha)} ${esc(t.hora)}"><span>${esc(t.taller)}<span style="font-size:0.75rem; color:var(--color-texto-suave); margin-left:6px;">${esc(t.fecha||'')} ${esc(t.hora||'')} ${esc(t.lugar||'')}</span></span><button type="button" class="boton boton-secundario boton-chico btn-ficha-liberar-uno" data-taller="${Number(t.id)}" title="Liberar este cupo (la persona se conserva)">Liberar</button></div>`).join('') + '</div>';
   };
   let fichaEditTalleres = false;
+  const liberarCuposFicha = async(tallerId)=>{
+    const esUno = Number.isInteger(Number(tallerId)) && Number(tallerId) > 0;
+    const nombreTaller = esUno ? ((f.talleres||[]).find(t=> Number(t.id)===Number(tallerId))?.taller || `taller #${tallerId}`) : '';
+    const msgConfirm = esUno
+      ? `¿Liberar el cupo de "${nombreTaller}"? (Si es taller de 2 partes, se liberan ambas juntas)\n\nLa persona SE CONSERVA (queda en Encuentro/Asistentes como "sin taller" si no le quedan más). El cupo queda libre y se registra en el historial.`
+      : (f.encuentro
+        ? `¿Dar de baja a ${f.apellido}, ${f.nombre} de TODOS los talleres?\n\nSe liberan los cupos pero la persona SE CONSERVA (queda como inscripta al encuentro, "sin talleres"). Queda registro en el historial.`
+        : `¿Dar de baja a ${f.apellido}, ${f.nombre} de TODOS los talleres?\n\nATENCIÓN: no figura en el encuentro, por lo que desaparecerá del listado de asistentes (se conserva el historial). ¿Continuar?`);
+    if(!window.confirm(msgConfirm)) return;
+    const msgEl = document.getElementById('fichaTalleresMsg');
+    try{
+      const res = await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/liberar-talleres`, { method:'POST', body: JSON.stringify(esUno ? { taller_id: Number(tallerId) } : {}) });
+      if(!res.ok) throw new Error(res.data.error || 'No se pudo liberar el cupo.');
+      const d = res.data || {};
+      if(msgEl){ msgEl.textContent = esUno ? `Cupo liberado: ${nombreTaller}.` : `Baja de talleres registrada (${d.liberados||0} cupo(s) liberados). La persona se conserva${d.quedaSinTalleres ? ' — quedó sin talleres' : ''}.`; msgEl.className='mensaje visible ok'; }
+      const nueva = await api(`/api/admin/asistentes/${encodeURIComponent(f.dni)}/ficha`);
+      if(nueva.ok){ Object.assign(f, nueva.data); await renderFicha(f); }
+      await cargarAsistentes();
+      if(typeof cargarDatos === 'function') await cargarDatos();
+    }catch(e){
+      if(msgEl){ msgEl.textContent = e.message || String(e); msgEl.className='mensaje visible error'; }
+    }
+  };
   const dibujarFichaTalleres = ()=>{
     if(!fichaEditTalleres){
-      ft.innerHTML = renderFichaTalleresLectura() + `<div style="margin-top:8px;"><button type="button" class="boton boton-secundario boton-chico" id="btnFichaEditarTalleres">Editar talleres</button></div><div id="fichaTalleresConflicto" class="aviso-conflicto" hidden></div><div id="fichaTalleresMsg" class="mensaje" style="margin-top:6px;"></div>`;
+      ft.innerHTML = renderFichaTalleresLectura() + `<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button type="button" class="boton boton-secundario boton-chico" id="btnFichaEditarTalleres">Editar talleres</button>${(f.talleres && f.talleres.length) ? '<button type="button" class="boton boton-secundario boton-chico" id="btnFichaLiberarTodos" title="Da de baja todos los talleres, libera los cupos y conserva a la persona">Liberar todos los cupos</button>' : ''}</div><div id="fichaTalleresConflicto" class="aviso-conflicto" hidden></div><div id="fichaTalleresMsg" class="mensaje" style="margin-top:6px;"></div>`;
       const btn = document.getElementById('btnFichaEditarTalleres');
       if(btn) btn.addEventListener('click', ()=>{ fichaEditTalleres=true; dibujarFichaTalleres(); });
+      const btnLib = document.getElementById('btnFichaLiberarTodos');
+      if(btnLib) btnLib.addEventListener('click', ()=> liberarCuposFicha(null));
+      ft.querySelectorAll('.btn-ficha-liberar-uno').forEach(b=> b.addEventListener('click', ()=> liberarCuposFicha(Number(b.dataset.taller))));
       return;
     }
     // modo edición

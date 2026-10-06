@@ -665,6 +665,10 @@ body.dark .modal-contenido-asistente .modal-acciones { background: var(--color-t
   white-space: nowrap;
 }
 .chip-taller-mas { opacity: 0.75; font-style: italic; }
+/* Ficha: chips con botón "Liberar" (baja de taller conservando a la persona) */
+#fichaTalleres .lista-talleres-inscripcion { justify-content: flex-start; }
+#fichaTalleres .chip-taller { display: inline-flex; align-items: center; gap: 8px; white-space: normal; }
+#fichaTalleres .btn-ficha-liberar-uno { padding: 0.1rem 0.55rem; font-size: 0.75rem; }
 .talleres-multiple {
   display: flex;
   flex-direction: column;
