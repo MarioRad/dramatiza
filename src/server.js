@@ -3939,6 +3939,12 @@ async function obtenerFirmasConfig() {
   }
 }
 
+// ── Certificados ─────────────────────────────────────────────────────
+// CERT_REQUIERE_ASISTENCIA=true vuelve a exigir ingreso+egreso por taller
+// para los certificados de asistente. Por defecto (encuentro sin registro
+// sistemático de asistencias) la elegibilidad es por inscripción.
+const CERT_REQUIERE_ASISTENCIA = String(process.env.CERT_REQUIERE_ASISTENCIA || '').toLowerCase() === 'true';
+
 app.get('/api/admin/certificados', requireAuth, async (req, res, next) => {
   try {
     const lista = await db.listarCertificados();
@@ -3950,6 +3956,23 @@ app.get('/api/admin/certificados', requireAuth, async (req, res, next) => {
 app.get('/api/admin/certificados/elegibles', requireAuth, async (req, res, next) => {
   try {
     const asistentes = await db.listarAsistentes();
+    // El encuentro terminó sin registro sistemático de asistencias (ingreso/egreso):
+    // la elegibilidad es por inscripción a talleres. Para volver a exigir el
+    // control de asistencia, poner CERT_REQUIERE_ASISTENCIA=true en el entorno.
+    if (!CERT_REQUIERE_ASISTENCIA) {
+      return res.json(asistentes.map((a) => ({
+        dni: a.dni,
+        nombre: a.nombre,
+        apellido: a.apellido,
+        email: a.email,
+        talleres_nombres: a.talleres_nombres,
+        talleres_ids: a.talleres_ids,
+        cantidad_talleres: Number(a.cantidad_talleres),
+        elegible: Number(a.cantidad_talleres) > 0,
+        asistencias: [],
+        motivo: Number(a.cantidad_talleres) > 0 ? '' : 'Sin inscripciones a talleres',
+      })));
+    }
     const out = [];
     for (const a of asistentes) {
       try {
@@ -4064,13 +4087,21 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
     } else if (tipoNorm==='asistente' || tipoNorm==='tallerista') {
       dniNorm = String(dni||'').replace(/\D/g,'');
       if (!/^\d{7,8}$/.test(dniNorm)) return res.status(400).json({error:'DNI inválido'});
-      const ver = await db.verificarElegibilidadAsistente(dniNorm);
       const inscripciones = await db.listarInscripcionesPorDni(dniNorm);
       if (inscripciones.length===0) return res.status(404).json({error:'No se encontraron inscripciones para ese DNI'});
       nombre = inscripciones[0].nombre; apellido = inscripciones[0].apellido; email = inscripciones[0].email;
-      if (tipoNorm==='asistente' && !ver.elegible && !forzar) {
-        const falt = ver.asistencias.filter(a=>!a.completo).map(a=>a.taller).join(', ');
-        return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
+      let talleresParaCert;
+      if (CERT_REQUIERE_ASISTENCIA) {
+        const ver = await db.verificarElegibilidadAsistente(dniNorm);
+        if (tipoNorm==='asistente' && !ver.elegible && !forzar) {
+          const falt = ver.asistencias.filter(a=>!a.completo).map(a=>a.taller).join(', ');
+          return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
+        }
+        const talleresCompletos = ver.asistencias.filter(a=>a.completo);
+        talleresParaCert = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
+      } else {
+        // Sin control de asistencia: el certificado incluye todos los talleres inscriptos
+        talleresParaCert = inscripciones.map(i => ({ taller: i.taller, fecha: i.fecha||'', hora: i.hora||'', taller_id: Number(i.taller_id), completo: true }));
       }
       if (tipoNorm==='tallerista') {
         try {
@@ -4078,8 +4109,6 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
           detalle.esTalleristaFlag = Boolean(ap);
         } catch(_){}
       }
-      const talleresCompletos = ver.asistencias.filter(a=>a.completo);
-      const talleresParaCert = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
       detalle = { talleres: talleresParaCert, tipo: tipoNorm, horas: String(firmasCfg.horas) };
       talleresIds = talleresParaCert.map(t=>String(t.taller_id||'')).filter(Boolean).join(',');
     } else {

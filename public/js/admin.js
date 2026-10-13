@@ -5244,7 +5244,7 @@ function renderCertAsistentes() {
     return true;
   });
   const resumen = el('resumenCertAsistentes');
-  if (resumen) resumen.textContent = `Asistentes: ${visibles.length} de ${certElegibles.length} · Elegibles (ingreso+egreso en todos sus talleres): ${certElegibles.filter(a=>a.elegible).length}`;
+  if (resumen) resumen.textContent = `Asistentes: ${visibles.length} de ${certElegibles.length} · Elegibles (inscriptos a talleres, sin control de asistencia): ${certElegibles.filter(a=>a.elegible).length}`;
   if (visibles.length===0) {
     const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=6;td.textContent=q||filtro?'Sin resultados para el filtro.':'No hay asistentes.';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return;
   }
@@ -5255,7 +5255,7 @@ function renderCertAsistentes() {
     const tdTalleres=document.createElement('td');tdTalleres.textContent=a.talleres_nombres||'—'; tdTalleres.title=a.talleres_nombres||''; tdTalleres.style.fontSize='0.82rem';
     const tdAsist=document.createElement('td'); tdAsist.style.fontSize='0.78rem';
     const asist = a.asistencias||[];
-    if (!asist.length) tdAsist.textContent='Sin talleres';
+    if (!asist.length) tdAsist.textContent = a.elegible ? 'Control de asistencia omitido' : 'Sin talleres';
     else {
       const ul=document.createElement('div');
       for (const t of asist) {
@@ -5271,7 +5271,7 @@ function renderCertAsistentes() {
     const tdAcc=document.createElement('td');
     const btn=document.createElement('button'); btn.type='button'; btn.className='boton boton-chico'; btn.textContent='Generar certificado';
     btn.disabled = !a.elegible;
-    btn.title = a.elegible? 'Generar certificado de asistencia' : 'Debe registrar ingreso y egreso en todos sus talleres';
+    btn.title = a.elegible? 'Generar certificado de asistencia' : 'Sin inscripciones a talleres';
     btn.addEventListener('click', async ()=>{
       btn.disabled=true;
       const r = await api('/api/admin/certificados/generar',{method:'POST', body: JSON.stringify({ tipo:'asistente', dni: a.dni })});
@@ -5322,7 +5322,7 @@ function renderCertPonentes() {
       btn.disabled=true;
       const r=await api('/api/admin/certificados/generar',{method:'POST', body: JSON.stringify({ tipo: tipoAuto, ponenteId: p.id })});
       if(!r.ok) mostrarMensaje(el('mensajeCertificados'), r.data.error||'No se pudo generar','error');
-      else { mostrarMensaje(el('mensajeCertificados'), `Certificado ${r.data.codigo} (${tipoSel}) para ${p.nombre}`,'ok'); await cargarCertEmitidos(); }
+      else { mostrarMensaje(el('mensajeCertificados'), `Certificado ${r.data.codigo} (${tipoAuto}) para ${p.nombre}`,'ok'); await cargarCertEmitidos(); }
       btn.disabled=false;
     });tdAcc.appendChild(btn);
     tr.append(tdNombre,tdTipo,tdTitulo,tdDia,tdAcc);tbody.appendChild(tr);
