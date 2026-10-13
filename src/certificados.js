@@ -150,7 +150,7 @@ async function generarPdfCertificado(opts) {
   textoCentrado(dniTexto, 512, 185, 22, fontBold, colNegro);
 
   // Participación según tipo (esquema 2026-05 actualizado: "PARTICIPÓ en calidad de x" sin "del")
-  let participacionTexto = 'PARTICIPÓ en calidad de ASISTENTE en';
+  let participacionTexto = 'PARTICIPÓ en calidad de ASISTENTE';
   if (tipo === 'ponente') participacionTexto = 'PARTICIPÓ en calidad de PONENTE presentando';
   else if (tipo === 'tallerista') participacionTexto = 'PARTICIPÓ en calidad de TALLERISTA, presentando';
   textoCentrado(participacionTexto, 512, 235, 24, fontBold, colNegro);
