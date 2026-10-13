@@ -69,7 +69,7 @@ async function verificar(codigo){
       ${detalleHtml}
       <p><strong>Emitido:</strong> ${emitidoHtml}</p>
       <p class="verify-hash"><strong>Firma electrónica:</strong> ${d.hash_firma}<br><span style="color:${d.firmaValida?'#1a9e4a':'#c0392b'};">${d.firmaValida?'✓ Firma electrónica válida':'✕ Firma electrónica inválida'}</span></p>
-      <p style="margin-top:0.8rem;"><a href="/api/admin/certificados/${encodeURIComponent(d.codigo)}/pdf" target="_blank" class="boton boton-chico">Ver PDF</a> <span class="ayuda"> (requiere sesión admin)</span></p>
+      <p style="margin-top:0.8rem;"><a href="/api/certificados/${encodeURIComponent(d.codigo)}/pdf" target="_blank" class="boton boton-chico">Ver / descargar PDF</a></p>
       <p class="ayuda" style="margin-top:0.6rem;">QR verifica en: <code>${d.qr_data||''}</code></p>
     </div>`;
   }catch(e){

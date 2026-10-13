@@ -4144,33 +4144,39 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
   } catch(e){ next(e); }
 });
 
+async function construirPdfCertificadoPorCodigo(codigo) {
+  const cert = await db.buscarCertificadoPorCodigo(codigo);
+  if (!cert) return null;
+  const detalle = typeof cert.detalle==='string' ? JSON.parse(cert.detalle||'{}') : (cert.detalle||{});
+  const firmasCfg = await obtenerFirmasConfig();
+  // resolver imagen firmas si existe archivo
+  const firma1Path = path.join(__dirname,'..','public','firma1.png');
+  const firma2Path = path.join(__dirname,'..','public','firma2.png');
+  const pdf = await certificados.generarPdfCertificado({
+    codigo: cert.codigo,
+    tipo: cert.tipo,
+    nombre: cert.nombre,
+    apellido: cert.apellido,
+    dni: cert.dni||'',
+    detalle,
+    emitidoEn: cert.creado_en,
+    hashFirma: cert.hash_firma,
+    avales: [firmasCfg.aval1, firmasCfg.aval2, firmasCfg.aval3, firmasCfg.aval4],
+    firma1: { nombre: firmasCfg.firma1_nombre, cargo: firmasCfg.firma1_cargo, imagenPath: fs.existsSync(firma1Path)?firma1Path:null },
+    firma2: { nombre: firmasCfg.firma2_nombre, cargo: firmasCfg.firma2_cargo, imagenPath: fs.existsSync(firma2Path)?firma2Path:null },
+  });
+  return { codigo: cert.codigo, pdf };
+}
+
 app.get('/api/admin/certificados/:codigo/pdf', requireAuth, async (req, res, next) => {
   try {
     const codigo = String(req.params.codigo||'').trim().toUpperCase();
-    const cert = await db.buscarCertificadoPorCodigo(codigo);
-    if (!cert) return res.status(404).json({error:'Certificado no encontrado'});
-    const detalle = typeof cert.detalle==='string' ? JSON.parse(cert.detalle||'{}') : (cert.detalle||{});
-    const firmasCfg = await obtenerFirmasConfig();
-    // resolver imagen firmas si existe archivo
-    const firma1Path = path.join(__dirname,'..','public','firma1.png');
-    const firma2Path = path.join(__dirname,'..','public','firma2.png');
-    const pdf = await certificados.generarPdfCertificado({
-      codigo: cert.codigo,
-      tipo: cert.tipo,
-      nombre: cert.nombre,
-      apellido: cert.apellido,
-      dni: cert.dni||'',
-      detalle,
-      emitidoEn: cert.creado_en,
-      hashFirma: cert.hash_firma,
-      avales: [firmasCfg.aval1, firmasCfg.aval2, firmasCfg.aval3, firmasCfg.aval4],
-      firma1: { nombre: firmasCfg.firma1_nombre, cargo: firmasCfg.firma1_cargo, imagenPath: fs.existsSync(firma1Path)?firma1Path:null },
-      firma2: { nombre: firmasCfg.firma2_nombre, cargo: firmasCfg.firma2_cargo, imagenPath: fs.existsSync(firma2Path)?firma2Path:null },
-    });
+    const doc = await construirPdfCertificadoPorCodigo(codigo);
+    if (!doc) return res.status(404).json({error:'Certificado no encontrado'});
     res.set('Content-Type','application/pdf');
-    res.set('Content-Disposition', `inline; filename="${codigo}.pdf"`);
+    res.set('Content-Disposition', `inline; filename="${doc.codigo}.pdf"`);
     res.set('Cache-Control','no-store');
-    res.send(pdf);
+    res.send(doc.pdf);
   } catch(e){ next(e); }
 });
 
@@ -4198,6 +4204,17 @@ app.delete('/api/admin/certificados/:id', requireAuth, async (req, res, next) =>
 });
 
 // Verificación pública (sin auth)
+app.get('/api/certificados/:codigo/pdf', async (req, res, next) => {
+  try {
+    const codigo = String(req.params.codigo||'').trim().toUpperCase();
+    const doc = await construirPdfCertificadoPorCodigo(codigo);
+    if (!doc) return res.status(404).json({error:'Certificado no encontrado'});
+    res.set('Content-Type','application/pdf');
+    res.set('Content-Disposition', `inline; filename="${doc.codigo}.pdf"`);
+    res.set('Cache-Control','no-store');
+    res.send(doc.pdf);
+  } catch(e){ next(e); }
+});
 app.get('/api/certificados/verificar/:codigo', async (req, res, next) => {
   try {
     const codigo = String(req.params.codigo||'').trim().toUpperCase();
