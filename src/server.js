@@ -3945,6 +3945,37 @@ async function obtenerFirmasConfig() {
 // sistemático de asistencias) la elegibilidad es por inscripción.
 const CERT_REQUIERE_ASISTENCIA = String(process.env.CERT_REQUIERE_ASISTENCIA || '').toLowerCase() === 'true';
 
+// Agrupa partes de un mismo taller lógico (principal + 2° parte vía pareja_id)
+// en una sola entrada para el certificado, usando el nombre del principal
+// (los nombres de 2° parte pueden estar truncados por el largo de columna).
+// items: [{ taller, fecha, hora, taller_id, completo }]
+async function agruparTalleresCertificado(items) {
+  const lista = Array.isArray(items) ? items : [];
+  if (lista.length === 0) return [];
+  let mapa = new Map();
+  try {
+    const filas = await db.query('SELECT id, pareja_id, nombre FROM talleres');
+    for (const f of filas) mapa.set(Number(f.id), { mainId: Number(f.pareja_id) || Number(f.id), nombre: f.nombre || '' });
+  } catch (_) { /* sin mapa: agrupar por nombre base */ }
+  const grupos = new Map();
+  for (const it of lista) {
+    const tid = Number(it.taller_id) || 0;
+    const ref = mapa.get(tid);
+    const mainId = ref ? ref.mainId : tid;
+    let nombre = (ref && ref.nombre) ? ref.nombre : String(it.taller || it.nombre || '');
+    if (!ref || !ref.nombre) nombre = nombre.replace(/\s*\(2°[^)]*(\)|$)/i, '').trim();
+    if (!grupos.has(mainId)) {
+      grupos.set(mainId, { taller: nombre, nombre, fecha: it.fecha || '', hora: it.hora || '', taller_id: mainId || tid, completo: true, partes: 0 });
+    }
+    const g = grupos.get(mainId);
+    g.partes += 1;
+    if (!it.completo) g.completo = false;
+    // conservar la fecha/hora más temprana (parte principal)
+    if ((it.fecha || '') && (!g.fecha || String(it.fecha) < String(g.fecha))) { g.fecha = it.fecha; g.hora = it.hora || g.hora; }
+  }
+  return [...grupos.values()];
+}
+
 app.get('/api/admin/certificados', requireAuth, async (req, res, next) => {
   try {
     const lista = await db.listarCertificados();
@@ -4098,10 +4129,13 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
           return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
         }
         const talleresCompletos = ver.asistencias.filter(a=>a.completo);
-        talleresParaCert = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
+        const crudos = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
+        talleresParaCert = await agruparTalleresCertificado(crudos);
       } else {
         // Sin control de asistencia: el certificado incluye todos los talleres inscriptos
-        talleresParaCert = inscripciones.map(i => ({ taller: i.taller, fecha: i.fecha||'', hora: i.hora||'', taller_id: Number(i.taller_id), completo: true }));
+        // (principal + 2° parte colapsados en una sola entrada con el nombre completo)
+        const crudos = inscripciones.map(i => ({ taller: i.taller, fecha: i.fecha||'', hora: i.hora||'', taller_id: Number(i.taller_id), completo: true }));
+        talleresParaCert = await agruparTalleresCertificado(crudos);
       }
       if (tipoNorm==='tallerista') {
         try {
@@ -4373,3 +4407,5 @@ if (!EN_VERCEL) {
 }
 
 module.exports = app;
+// Helper expuesto para pruebas (no afecta a la app)
+module.exports.agruparTalleresCertificado = agruparTalleresCertificado;
