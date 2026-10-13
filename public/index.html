@@ -3,269 +3,109 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Encuentro Nacional Dramatiza Salta 2026</title>
+  <title>Encuentro Nacional Dramatiza Salta 2026 — ¡Gracias!</title>
   <link rel="stylesheet" href="/css/estilos.css">
   <link rel="stylesheet" href="/programa.css">
+  <style>
+    .cartel-gracias {
+      max-width: 900px;
+      margin: 0 auto;
+      text-align: center;
+      padding: 2.5rem 2rem;
+      background: var(--color-tarjeta);
+      border: 1px solid var(--color-borde);
+      border-radius: 16px;
+      box-shadow: 0 4px 16px rgba(15,23,42,0.10);
+      position: relative;
+      overflow: hidden;
+    }
+    .cartel-gracias::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 8px;
+      background: linear-gradient(90deg, #5A9B43, #a16812, #145d77);
+    }
+    .cartel-gracias .gracias-emoji { font-size: 3.2rem; line-height: 1; margin-bottom: 0.5rem; }
+    .cartel-gracias h2 { font-size: 2.4rem; margin: 0.25rem 0 0.5rem; color: var(--color-primario-oscuro); }
+    body.dark .cartel-gracias h2 { color: #4ade80; }
+    .cartel-gracias .gracias-fecha {
+      display: inline-block;
+      font-weight: 700;
+      font-size: 1rem;
+      background: rgba(90,155,67,0.10);
+      border: 1px solid rgba(90,155,67,0.25);
+      border-radius: 999px;
+      padding: 0.3rem 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .cartel-gracias p { font-size: 1.05rem; color: var(--color-texto); max-width: 680px; margin: 0.75rem auto; line-height: 1.6; }
+    .cartel-gracias p.suave { color: var(--color-texto-suave); font-size: 0.98rem; }
+    .gracias-lista {
+      display: grid;
+      gap: 0.6rem;
+      margin: 1.5rem auto 0.5rem;
+      max-width: 640px;
+      text-align: left;
+    }
+    @media (min-width: 640px) { .gracias-lista { grid-template-columns: 1fr 1fr; } }
+    .gracias-item {
+      background: var(--color-fondo);
+      border: 1px solid var(--color-borde);
+      border-radius: 10px;
+      padding: 0.7rem 0.9rem;
+      font-size: 0.94rem;
+    }
+    .gracias-item strong { display: block; font-size: 0.95rem; margin-bottom: 0.15rem; }
+    .gracias-acciones { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-top: 1.5rem; }
+    .gracias-acciones .boton { width: auto; margin-top: 0; padding: 0.65rem 1.4rem; }
+  </style>
 </head>
 <body>
   <header class="encabezado">
     <img src="/logo.png" alt="Logo" class="logo">
     <div class="encabezado-texto">
-      <h1 style="color: #fff; font-weight: bold; border-color: #1b1a1a;" >Encuentro Nacional Dramatiza Salta 2026</h1>
-      <h2>Inscripción a Talleres</h2>
-      <p class="subtitulo">9 - 10 - 11 Octubre </p>
-      <p class="subtitulo">Talleres con cupos limitados</p>
+      <h1 style="color: #fff; font-weight: bold; border-color: #1b1a1a;">Encuentro Nacional Dramatiza Salta 2026</h1>
+      <h2>¡Gracias por ser parte!</h2>
+      <p class="subtitulo">9 - 10 - 11 Octubre · El encuentro ya finalizó</p>
     </div>
-    <img src="/personaje.png" alt="Personaje" class="personaje"> 
+    <img src="/personaje.png" alt="Personaje" class="personaje">
     <button type="button" class="dark-toggle" id="darkToggle"></button>
   </header>
 
   <nav class="programa-public-tabs">
-    <button class="programa-public-tab active" data-vista="inscripcion">Inscripción a Talleres</button>
+    <button class="programa-public-tab active" data-vista="gracias">Agradecimiento</button>
     <button class="programa-public-tab" data-vista="programa">Programa del Encuentro</button>
     <button class="programa-public-tab" data-vista="disertantes">Disertantes y Talleristas</button>
   </nav>
 
-  <div id="vistaInscripcion">
-  <main class="contenedor">
-    <section class="tarjeta">
-      <h2>Formulario de inscripción a talleres</h2>
-      <p class="ayuda">Por favor, para continuar ingresa tu DNI, chequea tus datos y elegí los talleres en los que participar </p>
-
-      <div id="mensaje" class="mensaje" role="alert"></div>
-
-      <form id="formInscripcion" novalidate>
-        <div id="pasoDni">
-          <div class="campo">
-            <label for="dni">Número de documento sin puntos</label>
-            <input type="text" id="dni" name="dni" required inputmode="numeric" pattern="\d{7,8}" maxlength="8" placeholder="12345678" autocomplete="off">
-            <p class="ayuda-campo">Primero ingresá tu DNI para verificar si estás inscripto al encuentro.</p>
-          </div>
-          <button type="button" class="boton" id="botonContinuar">Continuar</button>
+  <div id="vistaGracias">
+    <main class="contenedor" style="margin-top:1.5rem">
+      <section class="cartel-gracias">
+        <div class="gracias-emoji">🎭💛</div>
+        <h2>¡Gracias!</h2>
+        <span class="gracias-fecha">26º Encuentro Nacional · Salta 2026 · 9, 10 y 11 de octubre</span>
+        <p><strong>El encuentro terminó, pero lo vivido queda con nosotros.</strong></p>
+        <p>Queremos agradecer de corazón a todas las personas que participaron e hicieron posible estos tres días de teatro, aprendizaje y encuentro:</p>
+        <div class="gracias-lista">
+          <div class="gracias-item"><strong>🎟️ Participantes</strong>Docentes, estudiantes y colegas de todo el país que llenaron cada espacio.</div>
+          <div class="gracias-item"><strong>🎤 Talleristas y disertantes</strong>Por compartir su saber, su tiempo y su pasión en cada taller, ponencia y conversatorio.</div>
+          <div class="gracias-item"><strong>🤝 Equipo organizador</strong>Dramatiza Salta y quienes sostuvieron cada detalle antes, durante y después.</div>
+          <div class="gracias-item"><strong>🙌 Voluntarios y acreditación</strong>Por recibir, acompañar y cuidar a cada asistente.</div>
         </div>
-
-        <div id="pasoDatos" hidden>
-          <div id="datosParticipante" class="datos-participante" hidden>
-            <div class="datos-participante-titulo">Tus datos</div>
-            <p class="ayuda">Verificá que tus datos sean correctos. Podés modificarlos si es necesario.</p>
-            <div class="datos-participante-campos">
-              <div class="campo">
-                <label for="dpNombre">Nombre</label>
-                <input type="text" id="dpNombre" required minlength="2" maxlength="100" autocomplete="given-name">
-              </div>
-              <div class="campo">
-                <label for="dpApellido">Apellido</label>
-                <input type="text" id="dpApellido" required minlength="2" maxlength="100" autocomplete="family-name">
-              </div>
-              <div class="campo">
-                <label for="dpDni">DNI</label>
-                <input type="text" id="dpDni" readonly class="campo-readonly">
-              </div>
-              <div class="campo">
-                <label for="dpEmail">Correo electrónico</label>
-                <input type="email" id="dpEmail" required maxlength="255" autocomplete="email">
-              </div>
-              <div class="campo">
-                <label for="dpTelefono">Teléfono <span class="campo-opcional">(opcional)</span></label>
-                <input type="tel" id="dpTelefono" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="351 1234567">
-              </div>
-              <div class="campo">
-                <label for="dpAlimentacion">Tipo de alimentación</label>
-                <select id="dpAlimentacion">
-                  <option value="sin_restriccion" selected>Sin restricción</option>
-                  <option value="vegano">Vegano</option>
-                  <option value="sin_tacc">Sin TACC</option>
-                  <option value="sin_lactosa">Sin lactosa</option>
-                  <option value="otro">Otro</option>
-                </select>
-                <p class="ayuda-campo">ATENCION: Indicá si tenés algún tipo de restricción en tu alimentación !!!.</p>
-              </div>
-            </div>
-            <div class="datos-participante-acciones">
-              <button type="button" class="boton boton-secundario" id="botonCancelarDatos">Cancelar</button>
-              <button type="button" class="boton" id="botonAceptarDatos">Aceptar</button>
-            </div>
-          </div>
-
-          <div id="seleccionTaller" class="programa-seleccion" hidden>
-            <h3>Elegí los el o los talleres que querés cursar</h3>
-            <p class="ayuda">Hacé clic en "Inscribirme" del taller que te interese. Si tiene 2 partes, se seleccionan automáticamente ambas.</p>
-            <div id="seleccionPrograma" class="seleccion-programa">
-              <p class="cargando">Cargando programa…</p>
-            </div>
-            <div class="seleccion-taller-acciones">
-              <button type="button" class="boton boton-secundario" id="botonCancelarTaller">Limpiar selección</button>
-            </div>
-          </div>
-
-          <input type="hidden" id="tallerIds" name="tallerIds" value="">
-
-          <div id="accionesInscripcion" class="acciones-inscripcion" hidden>
-            <button type="button" class="boton boton-secundario" id="botonCancelarInscripcion">Cancelar</button>
-            <button type="button" class="boton" id="botonConfirmarInscripcion">Confirmar inscripción</button>
-          </div>
+        <p class="suave">Las inscripciones ya se encuentran cerradas. Podés revivir lo compartido recorriendo el programa y la galería de disertantes y talleristas.</p>
+        <p class="suave" style="font-weight:700">¡Nos reencontramos en el próximo Dramatiza!</p>
+        <div class="gracias-acciones">
+          <button type="button" class="boton" data-ir="programa">Ver programa</button>
+          <button type="button" class="boton boton-secundario" data-ir="disertantes">Ver disertantes</button>
         </div>
-      </form>
-    </section>
-  </main>
+      </section>
+    </main>
   </div>
 
   <div id="vistaPrograma" class="programa-container" hidden></div>
 
   <div id="vistaDisertantes" class="programa-container" hidden></div>
-
-  <div id="modalEncuentro" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-contenido-amplio modal-contenido-asistente modal-gforms" role="dialog" aria-modal="true" aria-labelledby="modalEncuentroTitulo">
-      <div class="modal-cuerpo">
-        <!-- Header estilo Google Forms -->
-        <div class="gforms-header">
-          <div class="gforms-header-bar"></div>
-          <div class="gforms-header-body">
-            <h3 id="modalEncuentroTitulo">Inscripción al Encuentro Nacional Dramatiza Salta 2026</h3>
-            <p class="gforms-header-desc">Completá este formulario para inscribirte al encuentro. Una vez registrado podrás elegir tus talleres. Los campos marcados con <span class="gforms-req">*</span> son obligatorios.</p>
-            <p id="encuentroDniInfo" class="ayuda" style="font-weight:600;margin-top:0.5rem"></p>
-          </div>
-        </div>
-
-        <form id="formEncuentro" novalidate>
-          <div id="encuentroMensaje" class="mensaje" role="alert" style="display:none"></div>
-
-          <!-- Sección 1: Datos personales (como Google Forms) -->
-          <div class="gforms-card">
-            <div class="gforms-card-titulo">Datos personales</div>
-            <div class="gforms-grid">
-              <div class="campo">
-                <label for="encDni">DNI <span class="gforms-req">*</span></label>
-                <input type="text" id="encDni" readonly class="campo-readonly" inputmode="numeric" maxlength="8">
-                <p class="ayuda-campo">Sin puntos, 7 u 8 dígitos.</p>
-              </div>
-              <div class="campo">
-                <label for="encFechaNacimiento">Fecha de nacimiento</label>
-                <input type="text" id="encFechaNacimiento" placeholder="DD/MM/AAAA" maxlength="10">
-              </div>
-              <div class="campo">
-                <label for="encApellido">Apellido <span class="gforms-req">*</span></label>
-                <input type="text" id="encApellido" required minlength="2" maxlength="100" autocomplete="family-name" placeholder="Tu apellido">
-              </div>
-              <div class="campo">
-                <label for="encNombre">Nombre <span class="gforms-req">*</span></label>
-                <input type="text" id="encNombre" required minlength="2" maxlength="100" autocomplete="given-name" placeholder="Tu nombre">
-              </div>
-              <div class="campo">
-                <label for="encEmail">Correo electrónico <span class="gforms-req">*</span></label>
-                <input type="email" id="encEmail" required maxlength="255" autocomplete="email" placeholder="ejemplo@correo.com">
-              </div>
-              <div class="campo">
-                <label for="encTelefono">Teléfono / Celular <span class="gforms-req">*</span></label>
-                <input type="tel" id="encTelefono" required inputmode="tel" maxlength="20" autocomplete="tel" placeholder="351 1234567">
-              </div>
-              <div class="campo">
-                <label for="encProvincia">Provincia</label>
-                <input type="text" id="encProvincia" maxlength="100" placeholder="Salta">
-              </div>
-              <div class="campo">
-                <label for="encCiudad">Ciudad / Localidad</label>
-                <input type="text" id="encCiudad" maxlength="100" placeholder="Salta Capital">
-              </div>
-              <div class="campo" style="grid-column:1/-1">
-                <label for="encOcupacion">Ocupación <span class="gforms-req">*</span></label>
-                <select id="encOcupacion" required>
-                  <option value="">Seleccionar...</option>
-                  <option value="Docente">Docente</option>
-                  <option value="Estudiante">Estudiante</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <!-- Sección 2: Pago (alias + opciones) -->
-          <div class="gforms-card gforms-card--accent">
-            <div class="gforms-card-titulo" id="encTransferenciaTitulo">Datos para la transferencia</div>
-            <p class="ayuda" id="encTransferenciaDesc" style="margin-top:0">Realizá la transferencia al alias indicado y subí el comprobante.</p>
-            <div class="gforms-alias-box" id="encAliasBox">
-              <div class="gforms-alias-label">Alias</div>
-              <div class="gforms-alias-valor" id="encAliasValor">—</div>
-              <button type="button" class="boton boton-chico boton-secundario" id="btnCopiarAlias" title="Copiar alias">Copiar</button>
-            </div>
-            <p class="ayuda-campo" id="encAliasLeyenda" style="margin-top:0.4rem"></p>
-
-            <div class="campo" style="margin-top:1rem">
-              <label>Opción de pago en cuotas <span class="gforms-req">*</span></label>
-              <div id="encOpcionesPagoLista" class="gforms-radio-group">
-                <!-- se rellena por JS desde /api/encuentro/config -->
-                <p class="cargando">Cargando opciones...</p>
-              </div>
-              <input type="hidden" id="encOpcionPago" value="">
-            </div>
-          </div>
-
-          <!-- Sección 3: Comprobante -->
-          <div class="gforms-card">
-            <div class="gforms-card-titulo">Comprobante de transferencia <span class="campo-opcional">(opcional pero recomendado)</span></div>
-            <p class="ayuda" style="margin-top:0">Subí una imagen (JPG/PNG) o PDF del comprobante. Máx 8 MB.</p>
-            <div class="campo">
-              <input type="file" id="encComprobante" accept="image/*,application/pdf" style="padding:0.4rem">
-              <p class="ayuda-campo" id="encComprobanteInfo"></p>
-            </div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-acciones gforms-acciones">
-        <button type="button" class="boton boton-secundario boton-modal" id="botonCancelarEncuentro">Cancelar</button>
-        <button type="button" class="boton boton-modal" id="botonEnviarEncuentro">Enviar inscripción</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalYaInscripto" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-contenido-amplio" role="dialog" aria-modal="true" aria-labelledby="modalYaInscriptoTitulo">
-      <div class="modal-cuerpo">
-        <h3 id="modalYaInscriptoTitulo">Ya estás inscripto a los talleres</h3>
-        <div id="yaInscriptoContenido"></div>
-      </div>
-      <div class="modal-acciones">
-        <button type="button" class="boton boton-secundario boton-modal" id="botonReenviarConstancia">Reenviar Constancia</button>
-        <button type="button" class="boton boton-modal" id="botonYaInscripto">Aceptar</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalInscripcionPrevia" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalInscripcionPreviaTitulo">
-      <div class="modal-cuerpo">
-        <h3 id="modalInscripcionPreviaTitulo">Tenés una inscripción previa</h3>
-        <div id="inscripcionPreviaContenido"></div>
-      </div>
-      <div class="modal-acciones">
-        <button type="button" class="boton boton-modal" id="botonInscripcionPreviaContinuar">Continuar</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalConfirmacion" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido modal-contenido-amplio" role="dialog" aria-modal="true" aria-labelledby="modalConfirmacionTitulo">
-      <div class="modal-cuerpo">
-        <h3 id="modalConfirmacionTitulo">Por favor chequear que corresponde a tu selección de talleres. No se pueden cambiar una vez finalizada la inscripción.</h3>
-        <div id="confirmacionContenido"></div>
-      </div>
-      <div class="modal-acciones">
-        <button type="button" class="boton boton-secundario boton-modal" id="botonAnularInscripcion">Anular Inscripción</button>
-        <button type="button" class="boton boton-modal" id="botonConfirmacion">Finalizar</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalSolapamiento" class="modal" hidden aria-hidden="true">
-    <div class="modal-contenido" role="dialog" aria-modal="true" aria-labelledby="modalSolapamientoTitulo">
-      <div class="modal-cuerpo">
-        <h3 id="modalSolapamientoTitulo">Existen Horarios o talleres que están superpuestos</h3>
-        <div id="solapamientoContenido"></div>
-      </div>
-      <div class="modal-acciones">
-        <button type="button" class="boton boton-modal" id="botonSolapamiento">Entendido</button>
-      </div>
-    </div>
-  </div>
 
   <section id="seccionAuspiciantes" class="auspiciantes" hidden>
     <h2 class="auspiciantes-titulo">Nos Acompañan:</h2>
@@ -280,6 +120,67 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/inscripcion.js"></script>
+  <script>
+    (function () {
+      var vistaGracias = document.getElementById('vistaGracias');
+      var vistaPrograma = document.getElementById('vistaPrograma');
+      var vistaDisertantes = document.getElementById('vistaDisertantes');
+      var tabs = document.querySelectorAll('.programa-public-tab');
+      var programaCargado = false;
+
+      function cambiarVista(vista) {
+        tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.vista === vista); });
+        vistaGracias.hidden = vista !== 'gracias';
+        vistaPrograma.hidden = vista !== 'programa';
+        vistaDisertantes.hidden = vista !== 'disertantes';
+        if ((vista === 'programa' || vista === 'disertantes') && !programaCargado) {
+          try {
+            ProgramaUI.init({ container: '#vistaPrograma', disertantesContainer: '#vistaDisertantes', mode: 'public' });
+            ProgramaUI.cargar().then(function () { ProgramaUI.render(); programaCargado = true; });
+          } catch (e) { /* noop */ }
+        }
+      }
+
+      tabs.forEach(function (t) { t.addEventListener('click', function () { cambiarVista(t.dataset.vista); }); });
+      document.querySelectorAll('[data-ir]').forEach(function (b) {
+        b.addEventListener('click', function () { cambiarVista(b.getAttribute('data-ir')); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      });
+    })();
+
+    /* Auspiciantes ("Nos Acompañan") */
+    (function () {
+      var seccion = document.getElementById('seccionAuspiciantes');
+      var grid = document.getElementById('auspiciantesGrid');
+      if (!seccion || !grid) return;
+      fetch('/api/auspiciantes', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (filas) {
+          if (!Array.isArray(filas) || !filas.length) return;
+          grid.innerHTML = '';
+          for (var i = 0; i < filas.length; i++) {
+            var a = filas[i];
+            if (!a.imagen) continue;
+            var item = document.createElement('div');
+            item.className = 'auspiciante-item';
+            var img = document.createElement('img');
+            img.src = a.imagen;
+            img.alt = a.nombre || 'Auspiciante';
+            img.loading = 'lazy';
+            img.width = 150;
+            img.height = 125;
+            item.appendChild(img);
+            if (a.nombre) {
+              var nom = document.createElement('div');
+              nom.className = 'auspiciante-nombre';
+              nom.textContent = a.nombre;
+              item.appendChild(nom);
+            }
+            grid.appendChild(item);
+          }
+          if (grid.children.length) seccion.hidden = false;
+        })
+        .catch(function () {});
+    })();
+  </script>
 </body>
 </html>
