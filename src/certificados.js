@@ -337,8 +337,8 @@ async function generarPdfCertificado(opts) {
       } catch (_) {}
     }
   }
-  await drawFirma(page1, { ...firma1, num: 1 }, f1Cx, 1.25);
-  await drawFirma(page1, { ...firma2, num: 2 }, f2Cx, 1);
+  await drawFirma(page1, { ...firma1, num: 1 }, f1Cx, 1.45);
+  await drawFirma(page1, { ...firma2, num: 2 }, f2Cx, 0.9);
   page1.drawLine({ start: { x: f1Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f1Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
   page1.drawLine({ start: { x: f2Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f2Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
   textoC1(firma1.nombre || 'Referente Nacional Nodo Salta', f1Cx, 518, 11, font, colNegro);
