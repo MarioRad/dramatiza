@@ -287,10 +287,11 @@ async function generarPdfCertificado(opts) {
   const segLinea2 = [
     { t: 'en el' },
     { t: '“XXVI Encuentro Nacional de Profesores de Teatro - Dramatiza 2026”', bold: true },
-    { t: ', bajo el lema' },
+    { t: ', bajo el lema:' },
     { t: '“Ser Teatro”', bold: true },
+    { t: ', de modalidad presencial.' }
   ];
-  const segLinea3 = [{ t: 'de modalidad presencial.' }];
+  const segLinea3 = [];
   const segLinea4 = [
     { t: 'Con una carga horaria de' },
     { t: String(horasTotal), bold: true },
@@ -321,7 +322,7 @@ async function generarPdfCertificado(opts) {
 
   // Firmas: líneas + nombres/cargos + imágenes configuradas
   const lineaY = 490, f1Cx = 180, f2Cx = 610, fAncho = 190;
-  async function drawFirma(pagina, firma, centerX) {
+  async function drawFirma(pagina, firma, centerX, escala = 1) {
     const imgPath = firma.imagenPath || resolverFirmaImagen(firma.num);
     if (imgPath && fs.existsSync(imgPath)) {
       try {
@@ -329,15 +330,15 @@ async function generarPdfCertificado(opts) {
         const isJpg = /\.jpe?g$/i.test(imgPath);
         const img = isJpg ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
         const dims = img.scale(1);
-        const ratio = Math.min(1, 130 / dims.width, 42 / dims.height);
+        const ratio = Math.min(1, (130 * escala) / dims.width, (42 * escala) / dims.height);
         const w = dims.width * ratio, h = dims.height * ratio;
         // Base de la imagen apenas por encima de la línea de firma
         pagina.drawImage(img, { x: centerX - w / 2, y: topY(PAGE_H, lineaY) + 4, width: w, height: h });
       } catch (_) {}
     }
   }
-  await drawFirma(page1, { ...firma1, num: 1 }, f1Cx);
-  await drawFirma(page1, { ...firma2, num: 2 }, f2Cx);
+  await drawFirma(page1, { ...firma1, num: 1 }, f1Cx, 1.25);
+  await drawFirma(page1, { ...firma2, num: 2 }, f2Cx, 1);
   page1.drawLine({ start: { x: f1Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f1Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
   page1.drawLine({ start: { x: f2Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f2Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
   textoC1(firma1.nombre || 'Referente Nacional Nodo Salta', f1Cx, 518, 11, font, colNegro);
