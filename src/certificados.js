@@ -415,6 +415,13 @@ async function generarPdfCertificado(opts) {
   }
   // Fila inferior: carga horaria total
   textoC2(`Carga horaria total: ${horasTotal} horas reloj`, (tX0 + tX1) / 2, 261, 11, fontBold, colNegro);
+  // Marca de agua al pie: mismos apellido/nombre/DNI de la página 1
+  {
+    const marca = `${apellidoNombre} · DNI N° ${dniFmt}`;
+    const tam = 14;
+    const w = fontBold.widthOfTextAtSize(marca, tam);
+    page2.drawText(marca, { x: PAGE_W / 2 - w / 2, y: topY(PAGE_H, 498), size: tam, font: fontBold, color: rgb(0.6, 0.58, 0.55), opacity: 0.55 });
+  }
   // Código de verificación al pie de la página 2
   textoC2(`${codigo} · Verificar: https://dramatiza.vercel.app/verificar.html?c=${codigo}`, PAGE_W / 2, 560, 6, font, colSuave);
 
