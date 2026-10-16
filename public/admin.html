@@ -648,7 +648,7 @@
 
           <div id="vistaCertificados" class="tab-contenido" hidden>
             <h3>Certificados 🎓</h3>
-            <p class="ayuda">Generá certificados con código QR de verificación y dos firmas (gráfica y electrónica). Fondos: <code>public/Certificado_asistente.png</code> (asistentes, con listado de talleres) y <code>public/Certificado_ponente.png</code> (ponentes/talleristas, sin listado). Para <strong>asistentes</strong> se exige control de ingreso+egreso por taller; para <strong>ponentes/talleristas</strong> por selección.</p>
+            <p class="ayuda">Generá certificados con código QR de verificación y dos firmas (gráfica y electrónica). Modelo de 2 páginas (<code>public/certifica/base_cert.pdf</code>): página 1 con datos del participante, modalidad (asistente/ponente/tallerista) y carga horaria; página 2 con cuadro “Contenido” detallando los talleres. La carga horaria del asistente se calcula como cantidad de talleres × horas por taller.</p>
             <div id="mensajeCertificados" class="mensaje" role="alert"></div>
 
             <div class="certificados-config" style="border:1px solid var(--color-borde);border-radius:10px;padding:1rem;margin-bottom:1rem;background:var(--color-fondo-card);">
@@ -1316,6 +1316,8 @@
       </div>
       <div class="modal-acciones">
         <a id="qrPdfLink" class="boton boton-modal" target="_blank" rel="noopener" href="#">Descargar PDF</a>
+        <a id="qrPulseraPngLink" class="boton boton-secundario boton-modal" target="_blank" rel="noopener" href="#">QR pulsera (DNI)</a>
+        <a id="qrPulseraPdfLink" class="boton boton-secundario boton-modal" target="_blank" rel="noopener" href="#">PDF pulsera (plantilla)</a>
         <button type="button" class="boton boton-modal" id="botonReenviarQr">Reenviar email</button>
         <button type="button" class="boton boton-secundario boton-modal" id="botonCerrarQr">Cerrar</button>
       </div>
