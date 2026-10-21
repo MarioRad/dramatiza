@@ -1990,6 +1990,74 @@ app.get('/api/admin/acreditacion/:dni/pdf', requireAuth, requirePermiso('perm_ac
   }
 });
 
+// ── QR PULSERA Tyvek (2cm x 25cm, QR 1,8x1,8) ──────────────────────────
+// QR NUEVO solo con DNI. NO reemplaza al QR del email (JSON completo).
+// La app móvil (/api/mobile/acreditar) ya acepta DNI puro: extraerDatosQr
+// detecta 7-8 dígitos y busca por DNI.
+async function resolverPersonaPulsera(dni) {
+  const inscripciones = await db.listarInscripcionesPorDni(dni);
+  if (inscripciones.length > 0) {
+    return {
+      dni,
+      nombre: inscripciones[0].nombre || '',
+      apellido: inscripciones[0].apellido || '',
+    };
+  }
+  if (typeof db.buscarEncuentroPorDni === 'function') {
+    const enc = await db.buscarEncuentroPorDni(dni);
+    if (enc) return { dni, nombre: enc.nombre || '', apellido: enc.apellido || '' };
+  }
+  return null;
+}
+
+app.get('/api/admin/acreditacion/:dni/pulsera/png', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const dni = dniParamValidado(req, res);
+    if (!dni) return;
+    const persona = await resolverPersonaPulsera(dni);
+    if (!persona) throw new db.HttpError(404, 'No se encontró a la persona para ese DNI.');
+    const png = await acreditacion.generarPngPulsera(dni, { size: 600 });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-store');
+    res.send(png);
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get('/api/admin/acreditacion/:dni/pulsera/pdf', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const dni = dniParamValidado(req, res);
+    if (!dni) return;
+    const persona = await resolverPersonaPulsera(dni);
+    if (!persona) throw new db.HttpError(404, 'No se encontró a la persona para ese DNI.');
+    const pdf = await acreditacion.rellenarPulserasPlantilla([persona], { slots: 1 });
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="pulsera-${dni}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Tanda masiva: plantilla de 10 pulseras por hoja, en orden alfabético
+// (listarAsistentes ya ordena por apellido, nombre).
+app.get('/api/admin/pulseras/pdf', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const asistentes = await db.listarAsistentes();
+    const personas = (asistentes || [])
+      .map((a) => ({ dni: String(a.dni || '').replace(/\D/g, ''), nombre: a.nombre || '', apellido: a.apellido || '' }))
+      .filter((a) => /^\d{7,8}$/.test(a.dni));
+    if (personas.length === 0) throw new db.HttpError(404, 'No hay asistentes para generar pulseras.');
+    const pdf = await acreditacion.rellenarPulserasPlantilla(personas);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', 'attachment; filename="pulseras.pdf"');
+    res.send(pdf);
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post('/api/admin/acreditacion/:dni/reenviar', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     const dni = dniParamValidado(req, res);
@@ -3954,8 +4022,8 @@ async function agruparTalleresCertificado(items) {
   if (lista.length === 0) return [];
   let mapa = new Map();
   try {
-    const filas = await db.query('SELECT id, pareja_id, nombre FROM talleres');
-    for (const f of filas) mapa.set(Number(f.id), { mainId: Number(f.pareja_id) || Number(f.id), nombre: f.nombre || '' });
+    const filas = await db.query('SELECT id, pareja_id, nombre, duracion_hs FROM talleres');
+    for (const f of filas) mapa.set(Number(f.id), { mainId: Number(f.pareja_id) || Number(f.id), nombre: f.nombre || '', duracion_hs: Number(f.duracion_hs) || 3 });
   } catch (_) { /* sin mapa: agrupar por nombre base */ }
   const grupos = new Map();
   for (const it of lista) {
@@ -3964,8 +4032,9 @@ async function agruparTalleresCertificado(items) {
     const mainId = ref ? ref.mainId : tid;
     let nombre = (ref && ref.nombre) ? ref.nombre : String(it.taller || it.nombre || '');
     if (!ref || !ref.nombre) nombre = nombre.replace(/\s*\(2°[^)]*(\)|$)/i, '').trim();
+    const durHs = ref ? ref.duracion_hs : (Number(it.duracion_hs) || 3);
     if (!grupos.has(mainId)) {
-      grupos.set(mainId, { taller: nombre, nombre, fecha: it.fecha || '', hora: it.hora || '', taller_id: mainId || tid, completo: true, partes: 0 });
+      grupos.set(mainId, { taller: nombre, nombre, fecha: it.fecha || '', hora: it.hora || '', taller_id: mainId || tid, completo: true, partes: 0, horas: durHs, duracion_hs: durHs });
     }
     const g = grupos.get(mainId);
     g.partes += 1;
@@ -4100,8 +4169,27 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       const esTaller = tipoReal==='taller';
       // Si el tipo solicitado es tallerista pero la persona es ponencia, o viceversa, se corrige automáticamente
       const tipoEfectivo = esTaller ? 'tallerista' : 'ponente';
+      // Obtener ponencias y conversatorios (para todos los asistentes)
+      let ponenciasConv = { ponencias: [], conversatorios: [] };
+      try { ponenciasConv = await db.listarPonenciasConversatorios(); } catch(_){}
+      // Si es tallerista, incluir su taller en la lista de talleres del certificado
+      const talleresPonente = [];
+      if (esTaller && pon.titulo) {
+        talleresPonente.push({
+          taller: pon.titulo, nombre: pon.titulo,
+          fecha: pon.dia || '', hora: pon.horario || '',
+          taller_id: 0, completo: true, horas: Number(firmasCfg.horas) || 3,
+        });
+      }
       // Guardar tipo efectivo en detalle para el PDF
-      detalle = { titulo: pon.titulo||'', descripcion: pon.descripcion||'', tipoPonencia: pon.tipo, dia: pon.dia, horario: pon.horario, esTaller, horas: String(firmasCfg.horas), tipoEfectivo };
+      detalle = {
+        titulo: pon.titulo||'', descripcion: pon.descripcion||'', tipoPonencia: pon.tipo,
+        dia: pon.dia, horario: pon.horario, esTaller,
+        horas: String(firmasCfg.horas), tipoEfectivo,
+        talleres: talleresPonente,
+        ponencias: ponenciasConv.ponencias,
+        conversatorios: ponenciasConv.conversatorios,
+      };
       // Sobrescribir tipoNorm al efectivo para que el PDF diga "presentando el taller/ponencia" correctamente
       // Mantener tipoNorm original para registro, pero detalle.tipoEfectivo manda
       if (tipoNorm !== tipoEfectivo) {
@@ -4143,7 +4231,16 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
           detalle.esTalleristaFlag = Boolean(ap);
         } catch(_){}
       }
-      detalle = { talleres: talleresParaCert, tipo: tipoNorm, horas: String(firmasCfg.horas) };
+      // Obtener ponencias y conversatorios (para todos los asistentes)
+      let ponenciasConv = { ponencias: [], conversatorios: [] };
+      try { ponenciasConv = await db.listarPonenciasConversatorios(); } catch(_){}
+      detalle = {
+        talleres: talleresParaCert,
+        tipo: tipoNorm,
+        horas: String(firmasCfg.horas),
+        ponencias: ponenciasConv.ponencias,
+        conversatorios: ponenciasConv.conversatorios,
+      };
       talleresIds = talleresParaCert.map(t=>String(t.taller_id||'')).filter(Boolean).join(',');
     } else {
       return res.status(400).json({error:'Tipo inválido o datos faltantes (requiere DNI para asistente/tallerista o ponenteId para ponente/taller)'});
@@ -4227,8 +4324,59 @@ app.get('/api/admin/certificados/:codigo/qr.png', requireAuth, async (req, res, 
   } catch(e){ next(e); }
 });
 
-app.delete('/api/admin/certificados/:id', requireAuth, async (req, res, next) => {
+// Enviar certificado emitido por email (PDF adjunto) + WhatsApp si hay teléfono
+app.post('/api/admin/certificados/:codigo/enviar', requireAuth, async (req, res, next) => {
   try {
+    const sesion = req.sesion;
+    if (sesion.rol !== 'admin') {
+      const u = await db.buscarUsuario(sesion.usuario);
+      if (!u || !u.perm_certificados) return res.status(403).json({ error: 'Sin permiso de certificados' });
+    }
+    const codigo = String(req.params.codigo || '').trim().toUpperCase();
+    const cert = await db.buscarCertificadoPorCodigo(codigo);
+    if (!cert) return res.status(404).json({ error: 'Certificado no encontrado' });
+    const detalle = typeof cert.detalle === 'string' ? JSON.parse(cert.detalle || '{}') : (cert.detalle || {});
+    const body = req.body || {};
+    let email = String(body.email || cert.email || '').trim();
+    let telefono = String(body.telefono || '').replace(/\D/g, '');
+    // Si no se indicó teléfono, buscarlo por DNI en inscripciones/encuentro
+    if (!telefono && cert.dni) {
+      try {
+        const insc = await db.listarInscripcionesPorDni(String(cert.dni).replace(/\D/g, ''));
+        if (insc.length && insc[0].telefono) telefono = String(insc[0].telefono).replace(/\D/g, '');
+      } catch (_) {}
+      if (!telefono && typeof db.buscarEncuentroPorDni === 'function') {
+        try {
+          const enc = await db.buscarEncuentroPorDni(String(cert.dni).replace(/\D/g, ''));
+          if (enc && enc.telefono) telefono = String(enc.telefono).replace(/\D/g, '');
+        } catch (_) {}
+      }
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'El certificado no tiene un email válido. Indicá uno en el envío.' });
+    }
+    const doc = await construirPdfCertificadoPorCodigo(codigo);
+    if (!doc) return res.status(404).json({ error: 'Certificado no encontrado' });
+    let verificarUrl = '';
+    if (process.env.BASE_URL || process.env.APP_URL) {
+      verificarUrl = `${String(process.env.BASE_URL || process.env.APP_URL).replace(/\/$/, '')}/verificar.html?c=${codigo}`;
+    } else {
+      try {
+        const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.get('host') || '';
+        if (host) verificarUrl = `${proto}://${host}/verificar.html?c=${codigo}`;
+      } catch (_) {}
+    }
+    const envio = await notificaciones.enviarCertificado({
+      codigo: cert.codigo, tipo: cert.tipo, nombre: cert.nombre, apellido: cert.apellido,
+      email, telefono, detalle, pdfBuffer: doc.pdf, verificarUrl,
+    });
+    await db.registrarEvento('certificado_enviado', `Certificado ${codigo} enviado a ${email}${telefono ? ` (WhatsApp ${telefono})` : ''} por ${sesion.usuario}${envio.simulado ? ' [SIMULADO: SMTP no configurado]' : ''}`, sesion.usuario).catch(() => {});
+    res.json({ ok: true, codigo, email, telefono: telefono || '', ...envio });
+  } catch (e) { next(e); }
+});
+
+app.delete('/api/admin/certificados/:id', requireAuth, async (req, res, next) => {  try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({error:'ID inválido'});
     await db.eliminarCertificado(id);

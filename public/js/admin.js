@@ -97,6 +97,8 @@ const modalQr = el('modalQr');
 const qrInfo = el('qrInfo');
 const qrImagen = el('qrImagen');
 const qrPdfLink = el('qrPdfLink');
+const qrPulseraPngLink = el('qrPulseraPngLink');
+const qrPulseraPdfLink = el('qrPulseraPdfLink');
 const botonReenviarQr = el('botonReenviarQr');
 const botonCerrarQr = el('botonCerrarQr');
 const buscarDni = el('buscarDni');
@@ -1503,7 +1505,7 @@ async function renderFicha(f){
   est.innerHTML = `${badgePago} ${badgeEnc} ${eleg}<div style="margin-top:6px;">QR: ${f.qr_code ? `<code>${esc(f.qr_code)}</code>` : '— (sin acreditar)'}</div>`;
   const qrPrev = el('fichaQrPreview');
   if(f.qr_code){
-    qrPrev.innerHTML = `<img src="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/png" alt="QR" style="width:140px;height:140px; border:1px solid var(--color-borde); border-radius:8px; object-fit:contain; background:#fff;"><div style="margin-top:4px;"><a href="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/pdf" target="_blank" class="ayuda">Descargar PDF</a></div>`;
+    qrPrev.innerHTML = `<img src="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/png" alt="QR" style="width:140px;height:140px; border:1px solid var(--color-borde); border-radius:8px; object-fit:contain; background:#fff;"><div style="margin-top:4px;"><a href="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/pdf" target="_blank" class="ayuda">Descargar PDF</a></div><div style="margin-top:4px; padding-top:4px; border-top:1px dashed var(--color-borde);"><span class="ayuda">Pulsera Tyvek (QR solo DNI 1,8cm):</span><br><a href="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/pulsera/png" target="_blank" class="ayuda">QR pulsera</a> · <a href="/api/admin/acreditacion/${encodeURIComponent(f.dni)}/pulsera/pdf" target="_blank" class="ayuda">PDF plantilla</a></div>`;
   } else { qrPrev.innerHTML = '<span class="ayuda">Sin QR — Finalizá la inscripción</span>'; }
   // Talleres — lectura + edición directa en ficha
   const ft = el('fichaTalleres');
@@ -2042,6 +2044,8 @@ async function abrirModalQr(dni) {
   modalQr.setAttribute('aria-hidden', 'false');
   qrImagen.src = `/api/admin/acreditacion/${encodeURIComponent(dni)}/png?t=${Date.now()}`;
   qrPdfLink.href = `/api/admin/acreditacion/${encodeURIComponent(dni)}/pdf`;
+  if (qrPulseraPngLink) qrPulseraPngLink.href = `/api/admin/acreditacion/${encodeURIComponent(dni)}/pulsera/png`;
+  if (qrPulseraPdfLink) qrPulseraPdfLink.href = `/api/admin/acreditacion/${encodeURIComponent(dni)}/pulsera/pdf`;
   qrInfo.textContent = `DNI ${dni} · Cargando acreditación…`;
   try {
     const res = await api(`/api/admin/acreditacion/${encodeURIComponent(dni)}`);
@@ -2062,6 +2066,8 @@ function cerrarModalQr() {
   modalQr.setAttribute('aria-hidden', 'true');
   qrImagen.src = '';
   qrPdfLink.href = '#';
+  if (qrPulseraPngLink) qrPulseraPngLink.href = '#';
+  if (qrPulseraPdfLink) qrPulseraPdfLink.href = '#';
   dniQrActual = null;
 }
 
@@ -5369,7 +5375,25 @@ async function cargarCertEmitidos(){
       else { mostrarMensaje(el('mensajeCertificados'), 'Eliminado','ok'); await cargarCertEmitidos(); }
       btnDel.disabled=false;
     });
-    cont.append(aPdf, btnVerif, btnDel); tdAcc.appendChild(cont);
+    const btnEnviar=document.createElement('button');btnEnviar.type='button';btnEnviar.className='boton boton-chico';btnEnviar.textContent='Enviar';btnEnviar.title='Enviar por email (PDF adjunto) y WhatsApp si hay teléfono';
+    btnEnviar.addEventListener('click', async()=>{
+      const emailSugerido = c.email || '';
+      const email = window.prompt(`Email para enviar el certificado ${c.codigo} (${c.apellido}, ${c.nombre}):`, emailSugerido);
+      if (email === null) return;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email||'').trim())) { mostrarMensaje(el('mensajeCertificados'), 'Ingresá un email válido para enviar el certificado.', 'error'); return; }
+      btnEnviar.disabled=true;
+      const rr=await api(`/api/admin/certificados/${encodeURIComponent(c.codigo)}/enviar`,{method:'POST', body: JSON.stringify({ email: String(email).trim() })});
+      if(!rr.ok) mostrarMensaje(el('mensajeCertificados'), rr.data.error||'No se pudo enviar','error');
+      else {
+        const partes=[];
+        if (rr.data.emailEnviado) partes.push(`email a ${rr.data.email}`);
+        if (rr.data.whatsappEnviado) partes.push('WhatsApp');
+        if (rr.data.simulado) partes.push('[SIMULADO: SMTP no configurado, registrado en log]');
+        mostrarMensaje(el('mensajeCertificados'), `Certificado ${c.codigo} enviado${partes.length ? ': ' + partes.join(' + ') : ''}`, 'ok');
+      }
+      btnEnviar.disabled=false;
+    });
+    cont.append(aPdf, btnVerif, btnEnviar, btnDel); tdAcc.appendChild(cont);
     tr.append(tdCodigo,tdTipo,tdNombre,tdDni,tdDetalle,tdQR,tdHash,tdEmitido,tdAcc); tbody.appendChild(tr);
   }
 }

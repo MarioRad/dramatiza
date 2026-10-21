@@ -100,11 +100,26 @@ function calcularHorasTotales(tipo, detalle = {}) {
     if (Number.isFinite(n) && n > 0) return n;
   }
   const porTaller = parseInt(detalle.horas, 10) || 3;
-  if (String(tipo || '').toLowerCase() === 'asistente') {
-    const n = resolverTalleresDetalle(detalle).length || 1;
-    return n * porTaller;
+  // Suma en MINUTOS: talleres + ponencias + conversatorios (para todos)
+  let totalMin = 0;
+  const minsDe = (it, fallbackMin) => {
+    if (it.minutos != null && Number(it.minutos) > 0) return Number(it.minutos);
+    const h = Number(it.horas || it.duracion || 0);
+    if (h > 0) return h * 60;
+    return fallbackMin;
+  };
+  const talleres = Array.isArray(detalle.talleres) ? detalle.talleres : [];
+  for (const t of talleres) totalMin += minsDe(t, porTaller * 60);
+  const ponencias = Array.isArray(detalle.ponencias) ? detalle.ponencias : [];
+  for (const p of ponencias) totalMin += minsDe(p, 15);
+  const convs = Array.isArray(detalle.conversatorios) ? detalle.conversatorios : [];
+  for (const c of convs) totalMin += minsDe(c, 60);
+  if (totalMin === 0) {
+    const n = talleres.length || 1;
+    return String(tipo || '').toLowerCase() === 'asistente' ? n * porTaller : porTaller;
   }
-  return porTaller;
+  // Devuelve horas (puede ser fraccional, ej: 12.5)
+  return Math.round((totalMin / 60) * 100) / 100;
 }
 // Troza segmentos [{t, bold}] en líneas que entran en maxWidth (greedy por palabras)
 // Sin espacio delante de signos de puntuación (",", ".", ".-", ")", "”", etc.)
@@ -168,14 +183,10 @@ async function generarPdfCertificado(opts) {
   const colSuave = rgb(0.35, 0.35, 0.35);
   const colLinea = rgb(0.45, 0.43, 0.43);
 
-  function fondoDraw(pagina, cual) {
-    const candidatos = [
-      path.join(__dirname, '..', 'public', 'certifica', `fondo_${cual}.jpg`),
-      path.join(__dirname, '..', 'public', 'certifica', `fondo_${cual}.png`),
-    ];
+  function fondoDraw(pagina, archivo) {
+    const fp = path.join(__dirname, '..', 'public', 'certifica', archivo);
     return (async () => {
-      for (const fp of candidatos) {
-        if (!fs.existsSync(fp)) continue;
+      if (fs.existsSync(fp)) {
         try {
           const bytes = fs.readFileSync(fp);
           const img = /\.png$/i.test(fp) ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
@@ -187,8 +198,8 @@ async function generarPdfCertificado(opts) {
       return false;
     })();
   }
-  await fondoDraw(page1, 'p1');
-  await fondoDraw(page2, 'p2');
+  await fondoDraw(page1, 'pag1.png');
+  await fondoDraw(page2, 'pag2.png');
 
   function textoC1(texto, xCenter, yTop, size, f, color) {
     const w = f.widthOfTextAtSize(texto, size);
@@ -224,78 +235,47 @@ async function generarPdfCertificado(opts) {
   const horasTotal = calcularHorasTotales(tipoNorm, detalle);
   const nombresTalleres = resolverTalleresDetalle(detalle);
   const tituloUnico = String(detalle.titulo || nombresTalleres[0] || '').trim();
+  // Datos de talleres con horas (para la tabla de la hoja 2)
+  const porTaller = parseInt(detalle.horas, 10) || 3;
+  const talleresDetalle = Array.isArray(detalle.talleres) ? detalle.talleres : [];
 
   // ===== PÁGINA 1 =====
-  // Logo Red (extraído del modelo)
-  try {
-    const logoPath = path.join(__dirname, '..', 'public', 'certifica', 'logo_red.png');
-    if (fs.existsSync(logoPath)) {
-      const img = await pdf.embedPng(fs.readFileSync(logoPath));
-      const w = 147, h = 60, x = 66.7, yTop = 39.7;
-      page1.drawImage(img, { x, y: topY(PAGE_H, yTop + h), width: w, height: h });
-    }
-  } catch (_) {}
+  // Logo, título "Certificado", avales, declaraciones de interés y firmas
+  // ya vienen impresos en pag1.png. Solo se dibuja el cuerpo de texto y el QR.
 
-  // Título
-  textoC1('Certificado', 421, 150, 48, fontBold, colNegro);
-
-  // Avales arriba-derecha (recuadro del modelo)
-  const avalesRaw = Array.isArray(avales) ? avales.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 4) : [];
-  if (avalesRaw.length > 0) {
-    const ax0 = 612, ax1 = 812, ayTop = 75;
-    const padX = 8, padY = 5;
-    const maxW = ax1 - ax0 - padX * 2;
-    let tam = 6.5, lineas = [];
-    while (tam >= 5) {
-      lineas = [];
-      for (const t of avalesRaw) {
-        lineas.push(...dividirTextoEnLineas(t, font, tam, maxW));
-        lineas.push('');
-      }
-      if (lineas.length && lineas[lineas.length - 1] === '') lineas.pop();
-      if (lineas.length * (tam + 1.5) + padY * 2 <= 66) break;
-      tam -= 0.5;
-    }
-    const inter = tam + 1.5;
-    const alto = Math.min(68, lineas.length * inter + padY * 2);
-    page1.drawRectangle({ x: ax0, y: topY(PAGE_H, ayTop + alto), width: ax1 - ax0, height: alto, color: rgb(1, 1, 1), borderColor: colLinea, borderWidth: 0.8 });
-    let ay = ayTop + padY + tam;
-    const cx = (ax0 + ax1) / 2;
-    for (const l of lineas) {
-      if (l) {
-        const w = font.widthOfTextAtSize(l, tam);
-        page1.drawText(l, { x: cx - w / 2, y: topY(PAGE_H, ay), size: tam, font, color: colNegro });
-      }
-      ay += inter;
-    }
-  }
-
-  // Cuerpo principal (igual redacción que el modelo, con datos reales)
+  // Cuerpo principal (redacción del leyenda.txt, con datos reales)
   // Anchos del modelo: líneas 1-2 hasta x=773; líneas 3-4 hasta x~623 (zona de la mascota)
   const cuerpoSize = 15.5;
   const cuerpoX = 83;
-  const cuerpoWFull = 690; // 83 -> 773
+  //const cuerpoWFull = 690; // 83 -> 773
+  const cuerpoWFull = 560; // 83 -> 773
   const cuerpoWcorto = 540; // 83 -> 623 (evita la mascota)
   const segLinea1 = [
     { t: 'Se certifica que' },
     { t: apellidoNombre, bold: true },
-    { t: ', DNI N°' },
+    { t: ', DNI N°: ' },
     { t: dniFmt, bold: true },
     { t: ', ha participado en calidad de' },
     { t: calidad, bold: true },
+    { t: ' en el' },
+    { t: ' “XXVI Encuentro Nacional de Profesores de Teatro - Dramatiza 2026”', bold: true },
+    { t: ', bajo el lema:' },
+    { t: ' “Ser Teatro”', bold: true },
+    { t: ', realizado en la ciudad de Salta capital los días 9,10 y 11 ' },
+    { t: 'de octubre de 2026.'},
+    { t: 'De '},
+    { t: 'modalidad presencial.', bold: true},
   ];
   const segLinea2 = [
-    { t: 'en el' },
-    { t: '“XXVI Encuentro Nacional de Profesores de Teatro - Dramatiza 2026”', bold: true },
-    { t: ', bajo el lema:' },
-    { t: '“Ser Teatro”', bold: true },
-    { t: ', de modalidad presencial.' }
-  ];
-  const segLinea3 = [];
-  const segLinea4 = [
-    { t: 'Con una carga horaria de' },
+    { t: 'Con una carga horaria total de ' },
     { t: String(horasTotal), bold: true },
-    { t: 'horas reloj, desde el 09/10/2026 hasta el 11/10/2026.-' },
+    { t: ' horas reloj.-' },
+  ];
+  const segLinea3 = [
+    
+  ];
+  const segLinea4 = [
+    
   ];
   let yCuerpo = 205;
   const interCuerpo = 24;
@@ -316,114 +296,113 @@ async function generarPdfCertificado(opts) {
 
   // "Se extiende el presente..." (centrado en zona libre izquierda por la mascota;
   // baja si el cuerpo ocupó más líneas por nombres largos)
-  const yExtiende = Math.max(340, yCuerpo + 8);
-  textoC1('Se extiende el presente en la ciudad de Salta', 385, yExtiende, 16, font, colNegro);
-  textoC1('a los once días del mes de octubre del año dos mil veintiseis.-', 385, yExtiende + 20, 16, font, colNegro);
+  // const yExtiende = Math.max(340, yCuerpo + 8);
+  // textoC1('Se extiende el presente en la ciudad de Salta', 385, yExtiende, 16, font, colNegro);
+  // textoC1('a los once días del mes de octubre del año dos mil veintiseis.-', 385, yExtiende + 20, 16, font, colNegro);
 
-  // Firmas: líneas + nombres/cargos + imágenes configuradas
-  const lineaY = 490, f1Cx = 180, f2Cx = 610, fAncho = 190;
-  async function drawFirma(pagina, firma, centerX, escala = 1) {
-    const imgPath = firma.imagenPath || resolverFirmaImagen(firma.num);
-    if (imgPath && fs.existsSync(imgPath)) {
-      try {
-        const bytes = fs.readFileSync(imgPath);
-        const isJpg = /\.jpe?g$/i.test(imgPath);
-        const img = isJpg ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
-        const dims = img.scale(1);
-        const ratio = Math.min(1, (130 * escala) / dims.width, (42 * escala) / dims.height);
-        const w = dims.width * ratio, h = dims.height * ratio;
-        // Base de la imagen apenas por encima de la línea de firma
-        pagina.drawImage(img, { x: centerX - w / 2, y: topY(PAGE_H, lineaY) + 4, width: w, height: h });
-      } catch (_) {}
-    }
-  }
-  await drawFirma(page1, { ...firma1, num: 1 }, f1Cx, 1.45);
-  await drawFirma(page1, { ...firma2, num: 2 }, f2Cx, 0.9);
-  page1.drawLine({ start: { x: f1Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f1Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
-  page1.drawLine({ start: { x: f2Cx - fAncho / 2, y: topY(PAGE_H, lineaY) }, end: { x: f2Cx + fAncho / 2, y: topY(PAGE_H, lineaY) }, thickness: 0.8, color: colNegro });
-  textoC1(firma1.nombre || 'Referente Nacional Nodo Salta', f1Cx, 518, 11, font, colNegro);
-  textoC1(firma1.cargo || 'Red Dramatiza Salta', f1Cx, 532, 10, font, colNegro);
-  textoC1(firma2.nombre || 'Referente Provincial Nodo Salta', f2Cx, 518, 11, font, colNegro);
-  textoC1(firma2.cargo || 'Red Dramatiza Salta', f2Cx, 532, 10, font, colNegro);
+  // Firmas, avales y declaraciones ya vienen impresos en pag1.png.
 
-  // QR + firma electrónica + verificación (igual que el modelo)
+  // QR dentro del recuadro de la esquina superior derecha de pag1.png
   const qrPayload = qrPayloadOverride || construirQrPayload(codigo);
   const qrBytes = await generarQrPng(qrPayload, 260);
   const qrImg = await pdf.embedPng(qrBytes);
-  const qrX = 329, qrTop = 415, qrS = 86;
-  page1.drawRectangle({ x: qrX - 3, y: topY(PAGE_H, qrTop + qrS) - 3, width: qrS + 6, height: qrS + 6, color: rgb(1, 1, 1) });
-  page1.drawImage(qrImg, { x: qrX, y: topY(PAGE_H, qrTop + qrS), width: qrS, height: qrS });
+  {
+    const sx = PAGE_W / 1124, sy = PAGE_H / 796;
+    const bx0 = 913 * sx, bx1 = 1068 * sx;
+    const by0 = 84 * sy, by1 = 202 * sy;
+    const qrS = Math.min(bx1 - bx0, by1 - by0) - 10;
+    const qrX = (bx0 + bx1) / 2 - qrS / 2;
+    const qrY = (by0 + by1) / 2 - qrS / 2;
+    page1.drawImage(qrImg, { x: qrX, y: PAGE_H - qrY - qrS, width: qrS, height: qrS });
+  }
+  // Firma electrónica discreta bajo el QR
   if (hashFirma) {
-    const hashTxt = `Firma electrónica: ${hashFirma.slice(0, 16)}-${hashFirma.slice(16)}`;
-    const hs = 4.7;
+    const hashTxt = `Firma: ${hashFirma.slice(0, 16)}-${hashFirma.slice(16)}`;
+    const hs = 5;
     const hw = font.widthOfTextAtSize(hashTxt, hs);
-    page1.drawText(hashTxt, { x: qrX + qrS / 2 - hw / 2, y: topY(PAGE_H, 516), size: hs, font, color: colNegro });
+    const cx = PAGE_W - 842 * (1 - 990 / 1124);
+    page1.drawText(hashTxt, { x: cx - hw / 2, y: topY(PAGE_H, 160), size: hs, font, color: colSuave });
     const verif = `Verificar: https://dramatiza.vercel.app/verificar.html?c=${codigo}`;
-    const vs = 4.7;
+    const vs = 5;
     const vw = font.widthOfTextAtSize(verif, vs);
-    page1.drawText(verif, { x: qrX + qrS / 2 - vw / 2, y: topY(PAGE_H, 524), size: vs, font, color: colNegro });
-  }
-  // Código discreto arriba-derecha (dentro del borde)
-  {
-    const s = 6.5;
-    const w = font.widthOfTextAtSize(codigo, s);
-    page1.drawText(codigo, { x: PAGE_W - w - 48, y: topY(PAGE_H, 42), size: s, font, color: colSuave });
+    page1.drawText(verif, { x: cx - vw / 2, y: topY(PAGE_H, 168), size: vs, font, color: colSuave });
   }
 
-  // ===== PÁGINA 2: cuadro "Contenido" con el detalle de talleres =====
-  const tX0 = 125, tX1 = 717, tTop = 82, tHead = 110, tFoot = 240, tBot = 268;
-  page2.drawRectangle({ x: tX0, y: topY(PAGE_H, tBot), width: tX1 - tX0, height: tBot - tTop, borderColor: colLinea, borderWidth: 0.75 });
-  for (const yy of [tHead, tFoot, tBot]) {
-    page2.drawLine({ start: { x: tX0, y: topY(PAGE_H, yy) }, end: { x: tX1, y: topY(PAGE_H, yy) }, thickness: yy === tHead ? 0.5 : 0.75, color: colLinea });
-  }
-  textoC2('Contenido', (tX0 + tX1) / 2, 102, 12, fontBold, colNegro);
+  // ===== PÁGINA 2: contenido dentro del recuadro de pag2.png =====
+  // Recuadro en imagen (1124x796): x=166..847, y=85..546 → PDF x≈124..635, topY≈64..410
+  // Separador encabezado y=140 → topY 105; separador pie y=498 → topY 373
 
-  // Entradas del contenido según modalidad
-  let entradas = [];
-  if (tipoNorm === 'asistente') {
-    entradas = nombresTalleres.map((n) => `• “${n}”`);
-  } else if (tituloUnico) {
-    const rotulo = tipoNorm === 'tallerista' || detalle.esTaller === true || String(detalle.tipoPonencia || '').toLowerCase() === 'taller'
-      ? 'Taller' : 'Ponencia';
-    entradas = [`• ${rotulo}: “${tituloUnico}”`];
-    if (nombresTalleres.length > 1) {
-      for (const n of nombresTalleres.slice(1)) entradas.push(`• “${n}”`);
+  // Formato de horas: si es < 1 hs mostrar minutos
+  const fmtHoras = (h) => {
+    const n = Number(h) || 0;
+    if (n <= 0) return '';
+    if (n < 1) return `(${Math.round(n * 60)} min)`;
+    return `(${n} hs)`;
+  };
+
+  // Valores junto a las etiquetas impresas en pag2.png ("Apellido y Nombre:" / "Código:")
+  page2.drawText(apellidoNombre, {
+    x: 142, y: topY(PAGE_H, 458), size: 10.5, font: fontBold, color: colSuave,
+  });
+  page2.drawText(codigo, {
+    x: 78, y: topY(PAGE_H, 485), size: 10.5, font: fontBold, color: colSuave,
+  });
+
+  // Contenido del recuadro: secciones con formato "Título. (X hs)" según leyenda
+  const colIzq = 138;    // margen izquierdo dentro del recuadro
+  const colHorasX = 575; // columna de horas dentro del recuadro
+  const filaH = 14;
+  let yCont = 118; // top-down: justo debajo del separador del encabezado (topY 105)
+
+  function drawLinea(txt, bold, x, y, size, color) {
+    page2.drawText(txt, { x, y: topY(PAGE_H, y), size, font: bold ? fontBold : font, color: color || colNegro });
+  }
+
+  function drawSeccion(titulo, items) {
+    drawLinea(titulo, true, colIzq, yCont, 10, colNegro);
+    yCont += filaH;
+    for (const it of items) {
+      const lineas = dividirTextoEnLineas(it.nombre, font, 8.5, colHorasX - colIzq - 10 - 55);
+      for (let i = 0; i < lineas.length; i++) {
+        drawLinea(lineas[i], false, colIzq + 10, yCont, 8.5, colNegro);
+        if (i === lineas.length - 1) {
+          const hTxt = fmtHoras(it.horas);
+          if (hTxt) drawLinea(hTxt, true, colHorasX, yCont, 8.5, colNegro);
+        }
+        yCont += filaH - 1;
+      }
     }
+    yCont += 3;
   }
-  if (!entradas.length) entradas = ['—'];
-  const bodyX = 140, bodyW = tX1 - bodyX - 15;
-  let tamBody = 11;
-  let lineasBody = [];
-  while (tamBody >= 8) {
-    lineasBody = [];
-    for (const e of entradas) {
-      lineasBody.push(...dividirTextoEnLineas(e, tamBody > 10 ? fontBold : font, tamBody, bodyW));
-    }
-    if (lineasBody.length * (tamBody + 4) <= (tFoot - tHead - 16)) break;
-    tamBody -= 1;
-  }
-  {
-    const inter = tamBody + 4;
-    const totalH = lineasBody.length * inter;
-    let yy = tHead + 10 + tamBody + Math.max(0, (tFoot - tHead - 16 - totalH) / 2 - 8);
-    const fBody = tamBody > 10 ? fontBold : font;
-    for (const l of lineasBody) {
-      page2.drawText(l, { x: bodyX, y: topY(PAGE_H, yy), size: tamBody, font: fBody, color: colNegro });
-      yy += inter;
-      if (yy > tFoot - 4) break;
-    }
-  }
-  // Fila inferior: carga horaria total
-  textoC2(`Carga horaria total: ${horasTotal} horas reloj`, (tX0 + tX1) / 2, 261, 11, fontBold, colNegro);
-  // Marca de agua al pie: mismos apellido/nombre/DNI de la página 1
-  {
-    const marca = `${apellidoNombre} · DNI N° ${dniFmt}`;
-    const tam = 14;
-    const w = fontBold.widthOfTextAtSize(marca, tam);
-    page2.drawText(marca, { x: PAGE_W / 2 - w / 2, y: topY(PAGE_H, 498), size: tam, font: fontBold, color: rgb(0.6, 0.58, 0.55), opacity: 0.55 });
-  }
-  // Código de verificación al pie de la página 2
-  textoC2(`${codigo} · Verificar: https://dramatiza.vercel.app/verificar.html?c=${codigo}`, PAGE_W / 2, 560, 6, font, colSuave);
+
+  const talleresSeccion = talleresDetalle.map((t) => ({
+    nombre: String(t.nombre || t.taller || '').trim(),
+    horas: Number(t.horas || t.duracion_hs || porTaller) || porTaller,
+  })).filter((t) => t.nombre);
+  // Ponencias/conversatorios pueden traer minutos en lugar de horas
+  const minutosAHoras = (o) => {
+    if (Number(o.horas)) return Number(o.horas);
+    if (Number(o.duracion)) return Number(o.duracion);
+    if (Number(o.minutos)) return Number(o.minutos) / 60;
+    return 0;
+  };
+  const ponenciasSeccion = (Array.isArray(detalle.ponencias) ? detalle.ponencias : []).map((p) => ({
+    nombre: String(p.titulo || p.nombre || '').trim(),
+    horas: minutosAHoras(p),
+  })).filter((p) => p.nombre);
+  const convsSeccion = (Array.isArray(detalle.conversatorios) ? detalle.conversatorios : []).map((c) => ({
+    nombre: String(c.titulo || c.nombre || '').trim(),
+    horas: minutosAHoras(c),
+  })).filter((c) => c.nombre);
+
+  drawSeccion('Ponencias', ponenciasSeccion);
+  drawSeccion('Conversatorio', convsSeccion);
+  drawSeccion('Talleres Optativos (según inscripción)', talleresSeccion);
+  
+
+  // Total en el pie del recuadro (zona topY 373..410)
+  const totalTxt = `TOTAL HORAS RELOJ: ${horasTotal >= 1 ? `(${horasTotal} hs)` : `(${Math.round(horasTotal * 60)} min)`}`;
+  drawLinea(totalTxt, true, colIzq, 392, 10.5, colNegro);
 
   const bytes = await pdf.save();
   return Buffer.from(bytes);

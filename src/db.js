@@ -2498,6 +2498,69 @@ async function listarDestinatariosMateriales(mainId) {
   return filas.map((r) => ({ dni: r.dni, nombre: r.nombre || '', apellido: r.apellido || '', email: String(r.email || '').trim() }));
 }
 
+// Ponencias y conversatorios del programa (para todos los certificados)
+// Las ponencias se expanden desde el JSON de datos de cada bloque (2 por bloque, 15 min c/u).
+// Los conversatorios se listan por sus temas (bullets de la descripción), 1 hs c/u.
+async function listarPonenciasConversatorios() {
+  const bloques = await query(
+    `SELECT id, dia, hora_inicio, hora_fin, tipo, titulo, descripcion, datos
+     FROM programa_bloques
+     WHERE tipo IN ('ponencia', 'conversatorio')
+     ORDER BY dia, hora_inicio`
+  );
+  const parseHora = (s) => {
+    const [h, m] = String(s || '0:0').split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const ponencias = [];
+  const convTemas = [];
+  let convMinTotal = 0;
+  let convBloques = 0;
+  for (const b of bloques) {
+    const tipo = String(b.tipo || '').toLowerCase();
+    const inicio = parseHora(b.hora_inicio);
+    const fin = parseHora(b.hora_fin);
+    const durMin = fin > inicio ? fin - inicio : 0;
+    if (tipo === 'ponencia') {
+      let items = [];
+      try { items = JSON.parse(b.datos || '[]'); } catch (_) { items = []; }
+      if (Array.isArray(items) && items.length) {
+        for (const it of items) {
+          const titulo = String(it.titulo || '').trim();
+          if (!titulo) continue;
+          // Duración individual desde "HH:MM a HH:MM", si no 15 min
+          let min = 0;
+          const hm = String(it.hora || '').match(/(\d{1,2}):(\d{2})\s*[aA]\s*(\d{1,2}):(\d{2})/);
+          if (hm) {
+            const i2 = (+hm[1]) * 60 + (+hm[2]);
+            const f2 = (+hm[3]) * 60 + (+hm[4]);
+            if (f2 > i2) min = f2 - i2;
+          }
+          if (!min) min = durMin ? Math.round(durMin / items.length) : 15;
+          ponencias.push({ titulo, minutos: min, dia: b.dia || '', hora: it.hora || '', bloque_id: b.id });
+        }
+      } else if (String(b.titulo || '').trim()) {
+        ponencias.push({ titulo: String(b.titulo).trim(), minutos: durMin || 15, dia: b.dia || '', hora: b.hora_inicio || '', bloque_id: b.id });
+      }
+    } else {
+      convBloques++;
+      convMinTotal += durMin;
+      const desc = String(b.descripcion || '');
+      for (const line of desc.split(/\n+/)) {
+        const m = line.match(/^\s*\*\s*(.+)$/);
+        if (m) {
+          const t = m[1].replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, '');
+          if (t && !convTemas.includes(t)) convTemas.push(t);
+        }
+      }
+    }
+  }
+  // Cada tema del conversatorio lleva 1 hs (2 temas × 1 hs = 2 hs, igual que los 2 bloques de 1 hs)
+  const convMin = convTemas.length ? Math.max(60, Math.round(convMinTotal / convTemas.length)) : 60;
+  const conversatorios = convTemas.map((t) => ({ titulo: t, minutos: convMin }));
+  return { ponencias, conversatorios };
+}
+
 module.exports = {
   HttpError,
   query,
@@ -2623,4 +2686,5 @@ module.exports = {
   guardarMaterialTaller,
   listarTalleresConMateriales,
   listarDestinatariosMateriales,
+  listarPonenciasConversatorios,
 };

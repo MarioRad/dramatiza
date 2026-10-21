@@ -455,11 +455,101 @@ async function enviarMaterialesTaller({ tallerNombre, materiales, destinatarios 
   return { enviado: true, simulado: false, total: lista.length, validos: validos.length, sinEmail, enviados, fallidos };
 }
 
+// ── Envío de certificado por email (PDF adjunto) + WhatsApp ──────────
+function construirTextoCertificado({ codigo, tipo, nombre, apellido, detalle, verificarUrl }) {
+  const det = detalle || {};
+  const lineas = [];
+  lineas.push(`Hola ${nombre} ${apellido}!`);
+  lineas.push('');
+  const rolTxt = tipo === 'ponente' ? 'ponente' : tipo === 'tallerista' ? 'tallerista' : 'asistente';
+  lineas.push(`Te enviamos tu certificado de participación como ${rolTxt} del Encuentro Nacional Dramatiza Salta 2026 (código ${codigo}).`);
+  const talleres = Array.isArray(det.talleres) ? det.talleres : [];
+  if (talleres.length) {
+    lineas.push('');
+    lineas.push('Talleres incluidos:');
+    for (const t of talleres) lineas.push(`• ${t.taller || t.nombre || ''}`);
+  } else if (det.titulo) {
+    lineas.push('');
+    lineas.push(`Actividad: ${det.titulo}`);
+  }
+  lineas.push('');
+  if (verificarUrl) lineas.push(`Podés verificar la validez del certificado aquí: ${verificarUrl}`);
+  lineas.push('');
+  lineas.push('¡Gracias por ser parte!');
+  lineas.push('Dramatiza Nodo Salta 2026');
+  return lineas.join('\n');
+}
+
+function construirHtmlCertificado({ codigo, tipo, nombre, apellido, detalle, verificarUrl }) {
+  const det = detalle || {};
+  const rolTxt = tipo === 'ponente' ? 'ponente' : tipo === 'tallerista' ? 'tallerista' : 'asistente';
+  const talleres = Array.isArray(det.talleres) ? det.talleres : [];
+  const listaHtml = talleres.length
+    ? `<ul>${talleres.map((t) => `<li>${escaparHtml(t.taller || t.nombre || '')}</li>`).join('')}</ul>`
+    : (det.titulo ? `<p><strong>Actividad:</strong> ${escaparHtml(det.titulo)}</p>` : '');
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head><body style="font-family:Arial,sans-serif;color:#0f172a;">
+  <p>Hola <strong>${escaparHtml(nombre)} ${escaparHtml(apellido)}</strong>,</p>
+  <p>Te enviamos tu certificado de participación como <strong>${escaparHtml(rolTxt)}</strong> del <strong>Encuentro Nacional Dramatiza Salta 2026</strong> (código <code>${escaparHtml(codigo)}</code>). Lo encontrarás adjunto en PDF.</p>
+  ${listaHtml}
+  ${verificarUrl ? `<p>Podés verificar su validez aquí: <a href="${escaparHtml(verificarUrl)}">${escaparHtml(verificarUrl)}</a></p>` : ''}
+  <p>¡Gracias por ser parte!<br>Dramatiza Nodo Salta 2026</p>
+</body></html>`;
+}
+
+// Envía un certificado ya emitido. Devuelve detalle de lo enviado.
+// Si no hay SMTP, se registra como simulado (no error).
+async function enviarCertificado({ codigo, tipo, nombre, apellido, email, telefono, detalle, pdfBuffer, verificarUrl }) {
+  const texto = construirTextoCertificado({ codigo, tipo, nombre, apellido, detalle, verificarUrl });
+  const destinoEmail = String(email || '').trim();
+  const resultado = { emailEnviado: false, whatsappEnviado: false, simulado: false, email: destinoEmail };
+  if (emailValido(destinoEmail) && pdfBuffer) {
+    if (smtpConfigurado()) {
+      try {
+        const html = construirHtmlCertificado({ codigo, tipo, nombre, apellido, detalle, verificarUrl });
+        const info = await obtenerTransporter().sendMail({
+          from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'inscripciones@localhost',
+          to: destinoEmail,
+          subject: `Tu certificado — Encuentro Dramatiza Salta 2026 (${codigo})`,
+          text: texto,
+          html,
+          attachments: [{ filename: `${codigo}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }],
+        });
+        resultado.emailEnviado = true;
+        resultado.messageId = info.messageId;
+        console.log(`[Mail] Certificado ${codigo} enviado a ${destinoEmail} (${info.messageId})`);
+      } catch (e) {
+        console.error(`[Mail] Error al enviar certificado ${codigo} a ${destinoEmail}:`, e.message);
+        resultado.errorEmail = e.message;
+      }
+    } else {
+      resultado.simulado = true;
+      registrarLog(`Para: ${destinoEmail}\nAsunto: Tu certificado — Encuentro Dramatiza Salta 2026 (${codigo})\n\n${texto}\n\n[PDF adjunto: ${codigo}.pdf (${pdfBuffer.length} bytes)]`);
+    }
+  } else if (!emailValido(destinoEmail)) {
+    resultado.errorEmail = 'El certificado no tiene un email válido.';
+  }
+  const tel = String(telefono || '').replace(/\D/g, '');
+  if (tel) {
+    try {
+      const textoWs = `${texto}`;
+      await whatsapp.enviarWhatsApp(tel, textoWs);
+      resultado.whatsappEnviado = true;
+    } catch (e) {
+      resultado.errorWhatsapp = e.message;
+    }
+  }
+  try {
+    logs.escribirLog('', 'emails.log', `\n--- ${new Date().toISOString()} ---\nCertificado ${codigo} a ${destinoEmail || 'sin email'}: email=${resultado.emailEnviado ? 'sí' : 'no'} whatsapp=${resultado.whatsappEnviado ? 'sí' : 'no'}${resultado.simulado ? ' [SIMULADO]' : ''}\n`);
+  } catch (_) { /* noop */ }
+  return resultado;
+}
+
 module.exports = {
   notificarInscripcion,
   notificarRecordatorioCuota,
   construirMensajeInscripcion,
   construirHtml,
   enviarMaterialesTaller,
+  enviarCertificado,
   ETIQUETAS_ALIMENTACION,
 };

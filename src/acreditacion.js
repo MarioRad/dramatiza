@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
-const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const { PDFDocument, StandardFonts, rgb, degrees } = require('pdf-lib');
 const logs = require('./logs');
 
 function generarCodigo() {
@@ -77,6 +77,214 @@ async function generarPng(payload, { size = 512 } = {}) {
     margin: 2,
     errorCorrectionLevel: 'M',
   });
+}
+
+// ── QR PULSERA (Tyvek 2cm x 25cm, QR 1,8x1,8cm) ─────────────────────────
+// Payload = SOLO DNI ("30123456"). En modo numérico ocupa QR Versión 1
+// (21x21 módulos) contra Versión 8-10 del QR JSON actual → módulos ~3x más
+// grandes y legibles a 1,8cm. No reemplaza al QR del email (se conserva).
+// EC 'H' (30%): misma densidad (sigue V1 con 7-8 dígitos) pero aguanta
+// agua/dobleces/desgaste de la pulsera.
+function normalizarDniPulsera(dni) {
+  const limpio = String(dni ?? '').replace(/\D/g, '');
+  if (!/^\d{7,8}$/.test(limpio)) throw new Error('DNI inválido para pulsera (7 u 8 dígitos).');
+  return limpio;
+}
+
+async function generarPngPulsera(dni, { size = 600 } = {}) {
+  const soloDni = normalizarDniPulsera(dni);
+  return QRCode.toBuffer(soloDni, {
+    type: 'png',
+    width: size,
+    margin: 2,
+    errorCorrectionLevel: 'H',
+  });
+}
+
+// PDF tira exacta 25cm x 2cm (1 página = 1 pulsera).
+// QR 1,8cm a la izquierda + Apellido Nombre y DNI a la derecha.
+// Medidas en puntos PDF (1cm = 28,3465pt).
+function cmApt(cm) {
+  return cm * 28.3465;
+}
+
+async function generarPdfPulsera({ dni, nombre = '', apellido = '' }) {
+  const soloDni = normalizarDniPulsera(dni);
+  const qrBuffer = await generarPngPulsera(soloDni, { size: 600 });
+
+  const ANCHO = cmApt(25);
+  const ALTO = cmApt(2);
+  const LADO_QR = cmApt(1.8);
+  const MARGEN = cmApt(0.1);
+
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const qrImg = await pdf.embedPng(qrBuffer);
+
+  const agregarPulsera = (dSolo, dNombre, dApellido) => {
+    const page = pdf.addPage([ANCHO, ALTO]);
+    // Fondo blanco (quiet zone + Tyvek)
+    page.drawRectangle({ x: 0, y: 0, width: ANCHO, height: ALTO, color: rgb(1, 1, 1) });
+    // QR 1,8x1,8 centrado vertical, margen izquierdo 0,1cm
+    const qrX = MARGEN;
+    const qrY = (ALTO - LADO_QR) / 2;
+    page.drawImage(qrImg, { x: qrX, y: qrY, width: LADO_QR, height: LADO_QR });
+    // Texto a la derecha del QR
+    const textoX = qrX + LADO_QR + cmApt(0.3);
+    const nombreCompleto = `${dApellido || ''} ${dNombre || ''}`.trim().slice(0, 60);
+    if (nombreCompleto) {
+      page.drawText(nombreCompleto, {
+        x: textoX, y: ALTO / 2 + 4, size: 11, font: fontBold, color: rgb(0, 0, 0),
+      });
+    }
+    page.drawText(`DNI ${dSolo}`, {
+      x: textoX, y: ALTO / 2 - 10, size: 11, font, color: rgb(0, 0, 0),
+    });
+  };
+
+  agregarPulsera(soloDni, nombre, apellido);
+  return Buffer.from(await pdf.save());
+}
+
+// PDF masivo: 1 página (25x2cm) por asistente, para tanda de impresión.
+async function generarPdfPulserasMasivo(personas) {
+  if (!Array.isArray(personas) || personas.length === 0) {
+    throw new Error('Sin personas para generar pulseras.');
+  }
+  const ANCHO = cmApt(25);
+  const ALTO = cmApt(2);
+  const LADO_QR = cmApt(1.8);
+  const MARGEN = cmApt(0.1);
+
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  for (const p of personas) {
+    let soloDni;
+    try {
+      soloDni = normalizarDniPulsera(p.dni);
+    } catch (_) { continue; }
+    const qrBuffer = await generarPngPulsera(soloDni, { size: 600 });
+    const qrImg = await pdf.embedPng(qrBuffer);
+    const page = pdf.addPage([ANCHO, ALTO]);
+    page.drawRectangle({ x: 0, y: 0, width: ANCHO, height: ALTO, color: rgb(1, 1, 1) });
+    const qrX = MARGEN;
+    const qrY = (ALTO - LADO_QR) / 2;
+    page.drawImage(qrImg, { x: qrX, y: qrY, width: LADO_QR, height: LADO_QR });
+    const textoX = qrX + LADO_QR + cmApt(0.3);
+    const nombreCompleto = `${p.apellido || ''} ${p.nombre || ''}`.trim().slice(0, 60);
+    if (nombreCompleto) {
+      page.drawText(nombreCompleto, {
+        x: textoX, y: ALTO / 2 + 4, size: 11, font: fontBold, color: rgb(0, 0, 0),
+      });
+    }
+    page.drawText(`DNI ${soloDni}`, {
+      x: textoX, y: ALTO / 2 - 10, size: 11, font, color: rgb(0, 0, 0),
+    });
+  }
+  return Buffer.from(await pdf.save());
+}
+
+// ── RELLENO PLANTILLA PULSERAS x10 (Tyvek) ─────────────────────────────
+// Plantilla: 1 hoja con 10 pulseras en columnas (texto rotado, lectura de
+// arriba hacia abajo). Se copia la hoja por cada grupo de 10 personas.
+// El QR se centra en la columna (no en el marco impreso, que en algunas
+// plantillas viene 1-2mm corrido y pisa la línea de corte) con un fondo
+// blanco que tapa el marcador "QR". La franja de etiquetas "DNI:" /
+// "Apellido y Nombre:" también se tapa (la plantilla trae duplicados y
+// desalineaciones) y se reescribe en tipografía uniforme:
+//   - "DNI: xxxxxxxx" (clave para el escáner, payload = solo DNI)
+//   - "Apellido, Nombre" (truncado a 24 caracteres por el ancho útil)
+// Coordenadas medidas sobre la plantilla Inkscape (origen arriba-izquierda).
+// Columnas regulares de 53,94pt desde x=0,80. En pdf-lib (origen
+// abajo-izquierda) se convierten con y = H - yMedido.
+const PULSERA_COL_X0 = [0.80, 54.74, 108.68, 162.61, 216.55, 270.49, 324.43, 378.37, 432.30, 486.24];
+const PULSERA_COL_W = 53.94;
+const PULSERA_QR_Y0 = 101.91; // medido arriba-izquierda
+const PULSERA_QR_COVER_W = 51;
+const PULSERA_QR_COVER_H = 50;
+const PULSERA_QR_LADO = 45.5;
+const PULSERA_ETIQ_Y0 = 148; // franja de etiquetas (medido arriba-izq.)
+const PULSERA_ETIQ_H = 92;
+const PULSERA_TEXTO_Y0 = 160; // origen de los textos (medido arriba-izq.)
+const PULSERA_ROT = () => degrees(270);
+
+function rutaPlantillaPulsera() {
+  return resolverImagen('PULSERA_TEMPLATE_PDF', 'public/pulseras_qr_10.pdf');
+}
+
+async function dibujarPulseraEnPagina(pdf, page, font, fontBold, slot, { dni, nombre, apellido }) {
+  const H = page.getHeight();
+  const soloDni = normalizarDniPulsera(dni);
+  const qrBuffer = await generarPngPulsera(soloDni, { size: 600 });
+  const qrImg = await pdf.embedPng(qrBuffer);
+  const colX = PULSERA_COL_X0[slot];
+
+  // 1) QR centrado en la columna (tapa marco impreso + marcador "QR")
+  const covX = colX + (PULSERA_COL_W - PULSERA_QR_COVER_W) / 2;
+  const covY = H - PULSERA_QR_Y0 - PULSERA_QR_COVER_H;
+  page.drawRectangle({ x: covX, y: covY, width: PULSERA_QR_COVER_W, height: PULSERA_QR_COVER_H, color: rgb(1, 1, 1) });
+  const imgX = colX + (PULSERA_COL_W - PULSERA_QR_LADO) / 2;
+  page.drawImage(qrImg, {
+    x: imgX,
+    y: covY + (PULSERA_QR_COVER_H - PULSERA_QR_LADO) / 2,
+    width: PULSERA_QR_LADO,
+    height: PULSERA_QR_LADO,
+  });
+
+  // 2) Franja de etiquetas: se tapa (plantilla con duplicados) y se reescribe
+  const etqY = H - PULSERA_ETIQ_Y0 - PULSERA_ETIQ_H;
+  page.drawRectangle({ x: colX + 1, y: etqY, width: PULSERA_COL_W - 2, height: PULSERA_ETIQ_H, color: rgb(1, 1, 1) });
+  const textoY = H - PULSERA_TEXTO_Y0;
+  page.drawText(`DNI: ${soloDni}`, {
+    x: colX + 5.5,
+    y: textoY,
+    size: 9,
+    font: fontBold,
+    color: rgb(0, 0, 0),
+    rotate: PULSERA_ROT(),
+  });
+  const nombreCompleto = `${apellido || ''}${apellido && nombre ? ', ' : ''}${nombre || ''}`.trim().slice(0, 24);
+  if (nombreCompleto) {
+    page.drawText(nombreCompleto, {
+      x: colX + 37,
+      y: textoY,
+      size: 8,
+      font,
+      color: rgb(0.15, 0.15, 0.15),
+      rotate: PULSERA_ROT(),
+    });
+  }
+}
+
+// Rellena la plantilla con N personas (10 por hoja, en el orden recibido).
+// Si `soloSlots` es un número, rellena solo esa cantidad de slots (p. ej.
+// pulsera individual = 1 slot en 1 hoja).
+async function rellenarPulserasPlantilla(personas, { porHoja = 10, slots = null } = {}) {
+  const lista = (Array.isArray(personas) ? personas : [])
+    .map((p) => ({ dni: String(p.dni || '').replace(/\D/g, ''), nombre: p.nombre || '', apellido: p.apellido || '' }))
+    .filter((p) => /^\d{7,8}$/.test(p.dni));
+  const recorte = slots ? lista.slice(0, slots) : lista;
+  if (recorte.length === 0) throw new Error('Sin personas con DNI válido para pulseras.');
+
+  const ruta = rutaPlantillaPulsera();
+  if (!ruta) throw new Error('No se encontró la plantilla de pulseras (public/pulseras_qr_10.pdf).');
+  const base = await PDFDocument.load(fs.readFileSync(ruta));
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  for (let i = 0; i < recorte.length; i += porHoja) {
+    const grupo = recorte.slice(i, i + porHoja);
+    const [pagina] = await pdf.copyPages(base, [0]);
+    pdf.addPage(pagina);
+    for (let s = 0; s < grupo.length; s++) {
+      await dibujarPulseraEnPagina(pdf, pagina, font, fontBold, s, grupo[s]);
+    }
+  }
+  return Buffer.from(await pdf.save());
 }
 
 const UMBRAL_ALIMENTACION = {
@@ -293,6 +501,12 @@ module.exports = {
   parsearPayload,
   generarPng,
   generarPdf,
+  generarPngPulsera,
+  generarPdfPulsera,
+  generarPdfPulserasMasivo,
+  rellenarPulserasPlantilla,
+  rutaPlantillaPulsera,
+  normalizarDniPulsera,
   resolverImagen,
   base64DeArchivo,
   tipoMime,
