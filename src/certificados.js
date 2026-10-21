@@ -397,7 +397,8 @@ async function generarPdfCertificado(opts) {
 
   drawSeccion('Ponencias', ponenciasSeccion);
   drawSeccion('Conversatorio', convsSeccion);
-  drawSeccion('Talleres Optativos (según inscripción)', talleresSeccion);
+  // Tallerista: figura el taller que dictó bajo el título "Taller Dictado"
+  drawSeccion(detalle.tallerDictado ? 'Taller Dictado' : 'Talleres Optativos (según inscripción)', talleresSeccion);
   
 
   // Total en el pie del recuadro (zona topY 373..410)

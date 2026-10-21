@@ -4016,28 +4016,45 @@ const CERT_REQUIERE_ASISTENCIA = String(process.env.CERT_REQUIERE_ASISTENCIA || 
 // Agrupa partes de un mismo taller lógico (principal + 2° parte vía pareja_id)
 // en una sola entrada para el certificado, usando el nombre del principal
 // (los nombres de 2° parte pueden estar truncados por el largo de columna).
+// Suma las horas de cada parte: 1 día = 3 hs, 2 días = 6 hs.
 // items: [{ taller, fecha, hora, taller_id, completo }]
 async function agruparTalleresCertificado(items) {
   const lista = Array.isArray(items) ? items : [];
   if (lista.length === 0) return [];
   let mapa = new Map();
+  let nombresMain = new Map();
   try {
     const filas = await db.query('SELECT id, pareja_id, nombre, duracion_hs FROM talleres');
-    for (const f of filas) mapa.set(Number(f.id), { mainId: Number(f.pareja_id) || Number(f.id), nombre: f.nombre || '', duracion_hs: Number(f.duracion_hs) || 3 });
+    for (const f of filas) {
+      const mainId = Number(f.pareja_id) || Number(f.id);
+      mapa.set(Number(f.id), { mainId, nombre: f.nombre || '', duracion_hs: Number(f.duracion_hs) || 3 });
+      if (Number(f.id) === mainId) nombresMain.set(mainId, String(f.nombre || '').replace(/\s*\(\d*°?\s*parte\)/gi, '').trim());
+    }
   } catch (_) { /* sin mapa: agrupar por nombre base */ }
   const grupos = new Map();
-  for (const it of lista) {
+  const vistas = new Map(); // mainId -> Set de partes ya sumadas
+  for (let idx = 0; idx < lista.length; idx++) {
+    const it = lista[idx];
     const tid = Number(it.taller_id) || 0;
+    const claveParte = tid || `#${idx}`;
     const ref = mapa.get(tid);
     const mainId = ref ? ref.mainId : tid;
     let nombre = (ref && ref.nombre) ? ref.nombre : String(it.taller || it.nombre || '');
-    if (!ref || !ref.nombre) nombre = nombre.replace(/\s*\(2°[^)]*(\)|$)/i, '').trim();
+    if (nombresMain.has(mainId)) nombre = nombresMain.get(mainId);
+    else if (!ref || !ref.nombre) nombre = nombre.replace(/\s*\(2°[^)]*(\)|$)/i, '').trim();
     const durHs = ref ? ref.duracion_hs : (Number(it.duracion_hs) || 3);
     if (!grupos.has(mainId)) {
-      grupos.set(mainId, { taller: nombre, nombre, fecha: it.fecha || '', hora: it.hora || '', taller_id: mainId || tid, completo: true, partes: 0, horas: durHs, duracion_hs: durHs });
+      grupos.set(mainId, { taller: nombre, nombre, fecha: it.fecha || '', hora: it.hora || '', taller_id: mainId || tid, completo: true, partes: 0, horas: 0, duracion_hs: 0 });
+      vistas.set(mainId, new Set());
     }
     const g = grupos.get(mainId);
-    g.partes += 1;
+    const vistasG = vistas.get(mainId);
+    if (!vistasG.has(claveParte)) {
+      vistasG.add(claveParte);
+      g.partes += 1;
+      g.horas += durHs;
+      g.duracion_hs = g.horas;
+    }
     if (!it.completo) g.completo = false;
     // conservar la fecha/hora más temprana (parte principal)
     if ((it.fecha || '') && (!g.fecha || String(it.fecha) < String(g.fecha))) { g.fecha = it.fecha; g.hora = it.hora || g.hora; }
@@ -4172,14 +4189,21 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       // Obtener ponencias y conversatorios (para todos los asistentes)
       let ponenciasConv = { ponencias: [], conversatorios: [] };
       try { ponenciasConv = await db.listarPonenciasConversatorios(); } catch(_){}
-      // Si es tallerista, incluir su taller en la lista de talleres del certificado
-      const talleresPonente = [];
-      if (esTaller && pon.titulo) {
-        talleresPonente.push({
-          taller: pon.titulo, nombre: pon.titulo,
-          fecha: pon.dia || '', hora: pon.horario || '',
-          taller_id: 0, completo: true, horas: Number(firmasCfg.horas) || 3,
-        });
+      // Si es tallerista, figura el taller que dictó (1 día = 3 hs, 2 días = 6 hs)
+      let talleresPonente = [];
+      let tallerDictado = false;
+      if (esTaller) {
+        try {
+          talleresPonente = await db.listarTalleresDictados({ ponenteId: pid, titulo: pon.titulo, dni: dniPonente });
+        } catch (_) { talleresPonente = []; }
+        if (talleresPonente.length === 0 && pon.titulo) {
+          talleresPonente = [{
+            taller: pon.titulo, nombre: pon.titulo,
+            fecha: pon.dia || '', hora: pon.horario || '',
+            taller_id: 0, completo: true, horas: Number(firmasCfg.horas) || 3,
+          }];
+        }
+        tallerDictado = talleresPonente.length > 0;
       }
       // Guardar tipo efectivo en detalle para el PDF
       detalle = {
@@ -4187,6 +4211,7 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
         dia: pon.dia, horario: pon.horario, esTaller,
         horas: String(firmasCfg.horas), tipoEfectivo,
         talleres: talleresPonente,
+        tallerDictado,
         ponencias: ponenciasConv.ponencias,
         conversatorios: ponenciasConv.conversatorios,
       };
@@ -4207,9 +4232,20 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       dniNorm = String(dni||'').replace(/\D/g,'');
       if (!/^\d{7,8}$/.test(dniNorm)) return res.status(400).json({error:'DNI inválido'});
       const inscripciones = await db.listarInscripcionesPorDni(dniNorm);
-      if (inscripciones.length===0) return res.status(404).json({error:'No se encontraron inscripciones para ese DNI'});
-      nombre = inscripciones[0].nombre; apellido = inscripciones[0].apellido; email = inscripciones[0].email;
+      if (inscripciones.length===0) {
+        // Tallerista sin inscripción: se identifica igual por el encuentro
+        if (tipoNorm!=='tallerista') return res.status(404).json({error:'No se encontraron inscripciones para ese DNI'});
+        try {
+          const enc = await db.queryOne('SELECT nombre, apellido, email FROM encuentro_inscripciones WHERE dni = ? LIMIT 1', [dniNorm]);
+          if (enc) { nombre = enc.nombre || ''; apellido = enc.apellido || ''; email = enc.email || ''; }
+        } catch(_){}
+        if (!String(nombre||'').trim() && !String(apellido||'').trim()) return res.status(404).json({error:'No se encontraron inscripciones para ese DNI'});
+      } else {
+        nombre = inscripciones[0].nombre; apellido = inscripciones[0].apellido; email = inscripciones[0].email;
+      }
       let talleresParaCert;
+      let tallerDictado = false;
+      let esTalleristaFlag = false;
       if (CERT_REQUIERE_ASISTENCIA) {
         const ver = await db.verificarElegibilidadAsistente(dniNorm);
         if (tipoNorm==='asistente' && !ver.elegible && !forzar) {
@@ -4226,9 +4262,15 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
         talleresParaCert = await agruparTalleresCertificado(crudos);
       }
       if (tipoNorm==='tallerista') {
+        // El certificado de tallerista figura con el taller que dictó
+        // (1 día = 3 hs, 2 días = 6 hs) bajo el título "Taller Dictado"
+        try {
+          const dictados = await db.listarTalleresDictados({ dni: dniNorm });
+          if (dictados.length) { talleresParaCert = dictados; tallerDictado = true; }
+        } catch(_){}
         try {
           const ap = await db.queryOne('SELECT es_tallerista FROM asistente_planes WHERE dni=? AND es_tallerista=TRUE LIMIT 1', [dniNorm]);
-          detalle.esTalleristaFlag = Boolean(ap);
+          esTalleristaFlag = Boolean(ap);
         } catch(_){}
       }
       // Obtener ponencias y conversatorios (para todos los asistentes)
@@ -4238,6 +4280,8 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
         talleres: talleresParaCert,
         tipo: tipoNorm,
         horas: String(firmasCfg.horas),
+        tallerDictado,
+        esTalleristaFlag,
         ponencias: ponenciasConv.ponencias,
         conversatorios: ponenciasConv.conversatorios,
       };
@@ -4451,7 +4495,7 @@ app.get('/api/certificados/verificar/:codigo/xml', async (req, res, next) => {
       nombre: cert.nombre, apellido: cert.apellido, dni: cert.dni||'',
       rol: rolMap[cert.tipo]||cert.tipo,
       tipoActividad, tituloActividad,
-      cargaHoraria: String(detalle.horas||cfg.horas||'3'),
+      cargaHoraria: String(certificados.calcularHorasTotales(cert.tipo, detalle) || detalle.horas || cfg.horas || '3'),
       fechaEmision: cert.creado_en,
       firmantes: [{nombre: cfg.firma1_nombre, cargo: cfg.firma1_cargo},{nombre: cfg.firma2_nombre, cargo: cfg.firma2_cargo}],
       firmaElectronica: cert.hash_firma

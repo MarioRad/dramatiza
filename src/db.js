@@ -2561,6 +2561,89 @@ async function listarPonenciasConversatorios() {
   return { ponencias, conversatorios };
 }
 
+// ── Taller(es) dictados por un tallerista ────────────────────────────────
+// Devuelve el taller lógico (principal + 2° parte) con HORAS TOTALES:
+// 1 día = 3 hs, 2 días = 6 hs. Se resuelve por ponenteId o por DNI
+// (ponentes.dni, y si no, por apellido/nombre del campo disertante).
+function normalizarTexto(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function listarTalleresDictados({ ponenteId = null, dni = '', titulo = '' } = {}) {
+  const filas = await query(
+    'SELECT id, pareja_id, nombre, disertante, ponente_id, duracion_hs, fecha, hora FROM talleres'
+  );
+  const ids = new Set();
+  const pid = Number(ponenteId) || 0;
+  if (pid) for (const f of filas) if (Number(f.ponente_id) === pid) ids.add(Number(f.id));
+
+  // Respaldo: por título del taller (mismo nombre que usa el ponente)
+  const objTitulo = normalizarTexto(titulo);
+  if (objTitulo.length >= 10 && ids.size === 0) {
+    for (const f of filas) {
+      const n = normalizarTexto(f.nombre);
+      if (n === objTitulo || n.startsWith(objTitulo) || objTitulo.startsWith(n)) ids.add(Number(f.id));
+    }
+  }
+
+  const dniNorm = String(dni || '').replace(/\D/g, '');
+  if (dniNorm && ids.size === 0) {
+    try {
+      const pons = await query('SELECT id FROM ponentes WHERE dni = ?', [dniNorm]);
+      const pids = new Set(pons.map((r) => Number(r.id)));
+      if (pids.size) for (const f of filas) if (pids.has(Number(f.ponente_id))) ids.add(Number(f.id));
+    } catch (_) { /* sin ponentes por DNI */ }
+    if (ids.size === 0) {
+      let nombre = ''; let apellido = '';
+      try {
+        const a = await queryOne('SELECT nombre, apellido FROM inscripciones WHERE dni = ? LIMIT 1', [dniNorm]);
+        if (a) { nombre = a.nombre || ''; apellido = a.apellido || ''; }
+      } catch (_) { /* sin inscripción */ }
+      if (!apellido) {
+        try {
+          const e = await queryOne('SELECT nombre, apellido FROM encuentro_inscripciones WHERE dni = ? LIMIT 1', [dniNorm]);
+          if (e) { nombre = e.nombre || ''; apellido = e.apellido || ''; }
+        } catch (_) { /* sin registro en el encuentro */ }
+      }
+      const ap = normalizarTexto(apellido);
+      const nombres = normalizarTexto(nombre).split(' ').filter((t) => t.length >= 3 && t !== ap);
+      if (ap.length >= 4) {
+        for (const f of filas) {
+          const dis = normalizarTexto(f.disertante);
+          if (dis.includes(ap) && nombres.some((t) => dis.includes(t))) ids.add(Number(f.id));
+        }
+      }
+    }
+  }
+  if (ids.size === 0) return [];
+
+  // Agrupa en taller lógico y suma las horas de todas sus partes (2 partes = 6 hs)
+  const grupos = new Map();
+  const mainIdDe = (f) => Number(f.pareja_id) || Number(f.id);
+  const principales = new Map(filas.map((f) => [Number(f.id), mainIdDe(f)]));
+  const mainIdsDetectados = new Set([...ids].map((id) => principales.get(id)).filter(Boolean));
+  for (const f of filas) {
+    const mainId = mainIdDe(f);
+    if (!mainIdsDetectados.has(mainId)) continue;
+    if (!grupos.has(mainId)) {
+      const principal = filas.find((g) => Number(g.id) === mainId) || f;
+      const nombrePrincipal = String(principal.nombre || f.nombre || '').replace(/\s*\(\d*°?\s*parte\)/gi, '').trim();
+      grupos.set(mainId, {
+        taller: nombrePrincipal, nombre: nombrePrincipal,
+        fecha: '', hora: '', taller_id: mainId, completo: true,
+        partes: 0, horas: 0, duracion_hs: 0,
+      });
+    }
+    const g = grupos.get(mainId);
+    g.partes += 1;
+    g.horas += Number(f.duracion_hs) || 3;
+    g.duracion_hs = g.horas;
+    if ((f.fecha || '') && (!g.fecha || String(f.fecha) < String(g.fecha))) { g.fecha = f.fecha; g.hora = f.hora || g.hora; }
+  }
+  return [...grupos.values()];
+}
+
 module.exports = {
   HttpError,
   query,
@@ -2687,4 +2770,5 @@ module.exports = {
   listarTalleresConMateriales,
   listarDestinatariosMateriales,
   listarPonenciasConversatorios,
+  listarTalleresDictados,
 };
