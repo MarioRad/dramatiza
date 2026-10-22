@@ -2465,6 +2465,43 @@ app.get('/api/admin/asistencias/planilla', requireAuth, requirePermiso('perm_acr
   }
 });
 
+// Resumen por taller: cuántos tienen asistencias marcadas y cuántos no, con conteos
+app.get('/api/admin/asistencias/resumen-talleres', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const filas = await db.query(
+      `SELECT t.id, t.nombre, t.fecha, t.hora, t.lugar,
+              (SELECT COUNT(DISTINCT i.dni) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos,
+              (SELECT COUNT(DISTINCT a.dni) FROM taller_asistencias a WHERE a.taller_id = t.id AND a.tipo = 'ingreso') AS ingresos,
+              (SELECT COUNT(DISTINCT a.dni) FROM taller_asistencias a WHERE a.taller_id = t.id AND a.tipo = 'egreso') AS egresos
+         FROM talleres t
+        ORDER BY COALESCE(t.fecha, ''), COALESCE(t.hora, ''), t.nombre`
+    );
+    const lista = filas.map((f) => ({
+      id: Number(f.id),
+      nombre: f.nombre || '',
+      fecha: f.fecha || '',
+      hora: f.hora || '',
+      lugar: f.lugar || '',
+      inscriptos: Number(f.inscriptos || 0),
+      ingresos: Number(f.ingresos || 0),
+      egresos: Number(f.egresos || 0),
+      tiene_asistencias: Number(f.ingresos || 0) > 0 || Number(f.egresos || 0) > 0,
+    }));
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({
+      talleres: lista,
+      totales: {
+        talleres: lista.length,
+        con_asistencias: lista.filter((t) => t.tiene_asistencias).length,
+        sin_asistencias: lista.filter((t) => !t.tiene_asistencias).length,
+        ingresos: lista.reduce((a, t) => a + t.ingresos, 0),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post('/api/admin/asistencias/taller', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     const body = req.body || {};

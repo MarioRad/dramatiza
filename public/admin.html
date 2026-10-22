@@ -635,6 +635,7 @@
             <div id="mensajeAsistencias" class="mensaje" role="alert"></div>
             <div class="sub-tabs" id="subTabsAsistencias">
               <button type="button" class="sub-tab activo" data-sub="planilla">📋 Planilla por taller</button>
+              <button type="button" class="sub-tab" data-sub="resumen">📊 Talleres y asistencias</button>
               <button type="button" class="sub-tab" data-sub="dni">🔍 Buscar por DNI</button>
             </div>
 
@@ -651,6 +652,11 @@
               </div>
               <div id="planillaResumen" class="ayuda" style="margin-bottom:0.6rem;"></div>
               <div id="planillaContenido"></div>
+            </div>
+
+            <div id="asistenciasSubResumen" hidden>
+              <p class="ayuda">Estado de las asistencias por taller: cuáles ya tienen ingresos/egresos marcados y cuáles todavía no. Conteos de DNIs distintos (tildar el ingreso de un mismo DNI dos veces no suma dos).</p>
+              <div id="resumenAsistenciasContenido"></div>
             </div>
 
             <div id="asistenciasSubDni" hidden>

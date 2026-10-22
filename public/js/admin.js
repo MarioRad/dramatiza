@@ -2545,14 +2545,7 @@ function initVistaAsistencias() {
   if (subTabs && !subTabs.dataset.listo) {
     subTabs.dataset.listo = '1';
     for (const btn of subTabs.querySelectorAll('.sub-tab')) {
-      btn.addEventListener('click', () => {
-        for (const b of subTabs.querySelectorAll('.sub-tab')) b.classList.toggle('activo', b === btn);
-        const sub = btn.dataset.sub;
-        el('asistenciasSubPlanilla').hidden = sub !== 'planilla';
-        el('asistenciasSubDni').hidden = sub !== 'dni';
-        if (sub === 'planilla' && !planillaCargada) initPlanillaAsistencia();
-        if (sub === 'dni') input?.focus();
-      });
+      btn.addEventListener('click', () => activarSubTabAsistencias(btn.dataset.sub));
     }
   }
   const sel = el('planillaTallerSelect');
@@ -2568,6 +2561,116 @@ function initVistaAsistencias() {
   mostrarMensaje(el('mensajeAsistencias'), '', '');
   if (!planillaCargada && el('asistenciasSubPlanilla') && !el('asistenciasSubPlanilla').hidden) initPlanillaAsistencia();
   else if (el('asistenciasSubDni') && !el('asistenciasSubDni').hidden && input) input.focus();
+}
+
+function activarSubTabAsistencias(sub) {
+  const subTabs = el('subTabsAsistencias');
+  if (subTabs) for (const b of subTabs.querySelectorAll('.sub-tab')) b.classList.toggle('activo', b.dataset.sub === sub);
+  el('asistenciasSubPlanilla').hidden = sub !== 'planilla';
+  el('asistenciasSubResumen').hidden = sub !== 'resumen';
+  el('asistenciasSubDni').hidden = sub !== 'dni';
+  if (sub === 'planilla' && !planillaCargada) initPlanillaAsistencia();
+  if (sub === 'resumen') cargarResumenAsistenciasTalleres();
+  if (sub === 'dni') el('buscarAsistenciaDni')?.focus();
+}
+
+/* ── Resumen por taller: cuáles tienen asistencias y conteos ── */
+async function cargarResumenAsistenciasTalleres() {
+  const cont = el('resumenAsistenciasContenido');
+  if (!cont) return;
+  cont.innerHTML = '<p class="ayuda">Cargando resumen…</p>';
+  const r = await api('/api/admin/asistencias/resumen-talleres');
+  if (!r.ok) {
+    cont.innerHTML = '';
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo cargar el resumen.', 'error');
+    return;
+  }
+  renderResumenAsistenciasTalleres(r.data || {});
+}
+
+function renderResumenAsistenciasTalleres(data) {
+  const cont = el('resumenAsistenciasContenido');
+  cont.innerHTML = '';
+  const talleres = Array.isArray(data.talleres) ? data.talleres : [];
+  const tot = data.totales || {};
+  const linea = document.createElement('p');
+  linea.className = 'ayuda';
+  linea.style.marginBottom = '0.6rem';
+  linea.textContent = `Talleres: ${tot.talleres ?? talleres.length} · Con asistencias: ${tot.con_asistencias ?? 0} · Sin asistencias: ${tot.sin_asistencias ?? 0} · Total ingresos marcados: ${tot.ingresos ?? 0}`;
+  cont.appendChild(linea);
+  if (!talleres.length) {
+    const vacio = document.createElement('p');
+    vacio.className = 'ayuda';
+    vacio.textContent = 'No hay talleres cargados.';
+    cont.appendChild(vacio);
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'tabla-envoltura';
+  const tabla = document.createElement('table');
+  tabla.id = 'tablaResumenAsistencias';
+  tabla.innerHTML = '<thead><tr><th style="width:2.6rem;">N°</th><th>Taller</th><th style="text-align:center;">Inscriptos</th><th style="text-align:center;">Ingresos</th><th style="text-align:center;">Egresos</th><th>Estado</th><th></th></tr></thead>';
+  const tbody = document.createElement('tbody');
+  talleres.forEach((t, i) => {
+    const fila = document.createElement('tr');
+    const tdN = document.createElement('td');
+    tdN.textContent = i + 1;
+    fila.appendChild(tdN);
+    const tdT = document.createElement('td');
+    const nom = document.createElement('div');
+    nom.textContent = t.nombre || '(sin nombre)';
+    nom.style.fontWeight = '600';
+    tdT.appendChild(nom);
+    const meta = document.createElement('div');
+    meta.className = 'ayuda';
+    meta.style.fontSize = '0.75rem';
+    meta.textContent = [t.fecha ? formatearFecha(t.fecha) : '', t.hora, t.lugar].filter(Boolean).join(' · ');
+    tdT.appendChild(meta);
+    fila.appendChild(tdT);
+    const celdas = [
+      [t.inscriptos, t.inscriptos === 0],
+      [t.ingresos, t.ingresos === 0],
+      [t.egresos, 0],
+    ];
+    for (const [valor, sinDato] of celdas) {
+      const td = document.createElement('td');
+      td.style.textAlign = 'center';
+      td.textContent = valor;
+      if (sinDato) { td.style.color = 'var(--color-texto-suave)'; td.style.fontWeight = '600'; }
+      fila.appendChild(td);
+    }
+    const tdEstado = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = t.tiene_asistencias ? 'badge badge-pago pago_completo' : 'badge badge-pago no_pagado';
+    badge.textContent = t.tiene_asistencias ? 'Con asistencias' : 'Sin asistencias';
+    tdEstado.appendChild(badge);
+    fila.appendChild(tdEstado);
+    const tdAccion = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'boton boton-secundario boton-chico';
+    btn.textContent = 'Ver planilla';
+    btn.addEventListener('click', () => abrirPlanillaDeTaller(t.id));
+    tdAccion.appendChild(btn);
+    fila.appendChild(tdAccion);
+    tbody.appendChild(fila);
+  });
+  tabla.appendChild(tbody);
+  wrap.appendChild(tabla);
+  cont.appendChild(wrap);
+}
+
+async function abrirPlanillaDeTaller(tallerId) {
+  const subTabs = el('subTabsAsistencias');
+  if (subTabs) for (const b of subTabs.querySelectorAll('.sub-tab')) b.classList.toggle('activo', b.dataset.sub === 'planilla');
+  el('asistenciasSubPlanilla').hidden = false;
+  el('asistenciasSubResumen').hidden = true;
+  el('asistenciasSubDni').hidden = true;
+  if (!planillaCargada) await initPlanillaAsistencia();
+  const sel = el('planillaTallerSelect');
+  if (!sel) return;
+  sel.value = String(tallerId);
+  await cargarPlanillaAsistencia();
 }
 
 /* ── Planilla por taller: checkboxes de ingreso/egreso por inscripto ── */
