@@ -395,10 +395,14 @@ async function generarPdfCertificado(opts) {
     horas: minutosAHoras(c),
   })).filter((c) => c.nombre);
 
-  drawSeccion('Ponencias', ponenciasSeccion);
-  drawSeccion('Conversatorio', convsSeccion);
+  // Solo se dibujan las secciones con contenido (evita títulos vacíos,
+  // p. ej. "Talleres Optativos" en el certificado de un ponente)
+  if (ponenciasSeccion.length) drawSeccion('Ponencias', ponenciasSeccion);
+  if (convsSeccion.length) drawSeccion('Conversatorio', convsSeccion);
   // Tallerista: figura el taller que dictó bajo el título "Taller Dictado"
-  drawSeccion(detalle.tallerDictado ? 'Taller Dictado' : 'Talleres Optativos (según inscripción)', talleresSeccion);
+  if (talleresSeccion.length) {
+    drawSeccion(detalle.tallerDictado ? 'Taller Dictado' : 'Talleres Optativos (según inscripción)', talleresSeccion);
+  }
   
 
   // Total en el pie del recuadro (zona topY 373..410)

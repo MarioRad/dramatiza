@@ -3249,7 +3249,14 @@ async function abrirModalPonente(id) {
     const p = ponentes.find((x) => Number(x.id) === Number(id));
     if (p) {
       el('ponenteId').value = p.id;
-      el('ponenteNombre').value = p.nombre;
+      // El backend guarda el nombre completo; para editar se separa el apellido cargado
+      const apellidoPon = (p.apellido || '').trim();
+      let nombrePon = p.nombre || '';
+      if (apellidoPon && nombrePon.length > apellidoPon.length && nombrePon.toLowerCase().endsWith(apellidoPon.toLowerCase())) {
+        nombrePon = nombrePon.slice(0, -apellidoPon.length).trim();
+      }
+      el('ponenteNombre').value = nombrePon;
+      el('ponenteApellido').value = apellidoPon;
       el('ponenteDni').value = p.dni || '';
       el('ponenteTipo').value = p.tipo;
       el('ponenteCupo').value = p.cupo ?? 20;
@@ -3393,6 +3400,7 @@ formPonente.addEventListener('submit', async (e) => {
   const esEdicion = !!ponenteEditandoId;
   const fd = new FormData();
   fd.append('nombre', nombre);
+  fd.append('apellido', el('ponenteApellido') ? el('ponenteApellido').value.trim() : '');
   fd.append('dni', dniPonente);
   fd.append('tipo', el('ponenteTipo').value);
   fd.append('cupo', el('ponenteCupo').value);

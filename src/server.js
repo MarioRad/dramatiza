@@ -3148,10 +3148,33 @@ app.get('/api/admin/ponentes', requireAuth, async (req, res, next) => {
   }
 });
 
+// Separa nombre y apellido de un ponente para el certificado ("Apellido, Nombre").
+// Se usa el apellido cargado aparte; si está vacío se deduce de "Nombre Apellido"
+// o del formato "Apellido, Nombre". Devuelve también el nombre completo para
+// listados, programa y talleres.
+function resolverNombreApellidoPonente(nombreRaw, apellidoRaw) {
+  let completo = String(nombreRaw || '').trim();
+  let apellido = String(apellidoRaw || '').trim();
+  if (!apellido && completo.includes(',')) {
+    const p = completo.split(',');
+    apellido = p[0].trim();
+    completo = p.slice(1).join(',').trim();
+  }
+  let nombres = completo;
+  if (apellido) {
+    if (nombres.toLowerCase().endsWith(apellido.toLowerCase())) nombres = nombres.slice(0, -apellido.length).trim();
+  } else {
+    const partes = completo.split(/\s+/).filter(Boolean);
+    if (partes.length >= 2) { nombres = partes.slice(0, -1).join(' '); apellido = partes[partes.length - 1]; }
+  }
+  const nombreCompleto = [nombres, apellido].filter(Boolean).join(' ').trim() || completo;
+  return { nombreCompleto, nombre: nombres || completo, apellido };
+}
+
 app.post('/api/admin/ponentes', requireAuth, uploadPonente.single('foto'), async (req, res, next) => {
   try {
     const body = req.body || {};
-    const nombre = String(body.nombre || '').trim();
+    const { nombreCompleto: nombre, apellido } = resolverNombreApellidoPonente(body.nombre, body.apellido);
     if (!nombre) {
       return res.status(400).json({ error: 'El nombre es obligatorio.' });
     }
@@ -3166,6 +3189,7 @@ app.post('/api/admin/ponentes', requireAuth, uploadPonente.single('foto'), async
     }
     const id = await db.crearPonente({
       nombre,
+      apellido,
       dni: normalizarDniOpcional(body.dni),
       tipo: String(body.tipo || 'ponencia').trim(),
       dia,
@@ -3197,7 +3221,10 @@ app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), as
     if (!existente) {
       return res.status(404).json({ error: 'Ponente no encontrado.' });
     }
-    const nombre = String(body.nombre ?? existente.nombre).trim();
+    const { nombreCompleto: nombre, apellido } = resolverNombreApellidoPonente(
+      body.nombre !== undefined ? body.nombre : existente.nombre,
+      body.apellido !== undefined ? body.apellido : existente.apellido
+    );
     const dia2Cleared = body.dia2 !== undefined && String(body.dia2).trim() === '';
     const dia2 = dia2Cleared ? null : parseDiaValido(body.dia2, existente.dia2);
     let nuevaFoto = existente.foto;
@@ -3209,6 +3236,7 @@ app.put('/api/admin/ponentes/:id', requireAuth, uploadPonente.single('foto'), as
     }
     await db.actualizarPonente(id, {
       nombre,
+      apellido,
       dni: body.dni !== undefined ? normalizarDniOpcional(body.dni) : undefined,
       tipo: String(body.tipo ?? existente.tipo).trim(),
       dia: parseDiaValido(body.dia, existente.dia),
@@ -4173,9 +4201,9 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       if (!pid) return res.status(400).json({error:'ponenteId requerido'});
       const pon = await db.obtenerPonente(pid);
       if (!pon) return res.status(404).json({error:'Ponente no encontrado'});
-      nombre = String(pon.nombre||'').split(' ')[0] || pon.nombre;
-      const partes = String(pon.nombre||'').trim().split(/\s+/);
-      if (partes.length>=2) { nombre = partes.slice(0,-1).join(' '); apellido = partes.slice(-1).join(' '); } else { nombre = pon.nombre; apellido=''; }
+      const sep = resolverNombreApellidoPonente(pon.nombre, pon.apellido);
+      nombre = sep.nombre;
+      apellido = sep.apellido;
       email='';
       ponId = pid;
       // DNI del ponente (opcional): si está cargado se imprime en el certificado
@@ -4601,3 +4629,4 @@ if (!EN_VERCEL) {
 module.exports = app;
 // Helper expuesto para pruebas (no afecta a la app)
 module.exports.agruparTalleresCertificado = agruparTalleresCertificado;
+module.exports.resolverNombreApellidoPonente = resolverNombreApellidoPonente;
