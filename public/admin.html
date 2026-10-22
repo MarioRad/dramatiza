@@ -631,19 +631,41 @@
 
           <div id="vistaAsistencias" class="tab-contenido" hidden>
             <h3>Asistencias</h3>
-            <p class="ayuda">Marcá ingresos/egresos por taller y entregas de menú con un click, o corregí registros erróneos (se guarda quién anuló). Sin restricción de horario: si el servicio no está activo se avisa pero se permite igual.</p>
+            <p class="ayuda">Marcá ingresos/egresos por taller y entregas de menú con un click, o corregí registros erróneos (se guarda quién anuló). Sin restricción de horario: si el servicio no está activo se avisa pero se permite igual. La planilla por taller permite tildar la asistencia de todos los inscriptos en una sola pantalla, ideal para controlar contra la planilla papel.</p>
             <div id="mensajeAsistencias" class="mensaje" role="alert"></div>
-            <div class="filtros-barra">
-              <div class="campo">
-                <label for="buscarAsistenciaDni">DNI / apellido y nombre</label>
-                <input type="text" id="buscarAsistenciaDni" placeholder="Ej: 30123456 o Pérez" autocomplete="off">
-              </div>
-              <div class="campo" style="align-self:flex-end;">
-                <button id="botonBuscarAsistencia" class="boton boton-chico" type="button">Buscar</button>
-              </div>
+            <div class="sub-tabs" id="subTabsAsistencias">
+              <button type="button" class="sub-tab activo" data-sub="planilla">📋 Planilla por taller</button>
+              <button type="button" class="sub-tab" data-sub="dni">🔍 Buscar por DNI</button>
             </div>
-            <div id="candidatosAsistencia" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1rem;"></div>
-            <div id="tarjetaAsistencia"></div>
+
+            <div id="asistenciasSubPlanilla">
+              <div class="filtros-barra">
+                <div class="campo">
+                  <label for="planillaTallerSelect">Taller</label>
+                  <select id="planillaTallerSelect"></select>
+                </div>
+                <div class="campo" style="align-self:flex-end;display:flex;gap:8px;">
+                  <button id="botonRecargarPlanilla" class="boton boton-secundario boton-chico" type="button">Actualizar</button>
+                  <button id="botonImprimirPlanilla" class="boton boton-secundario boton-chico" type="button">Imprimir</button>
+                </div>
+              </div>
+              <div id="planillaResumen" class="ayuda" style="margin-bottom:0.6rem;"></div>
+              <div id="planillaContenido"></div>
+            </div>
+
+            <div id="asistenciasSubDni" hidden>
+              <div class="filtros-barra">
+                <div class="campo">
+                  <label for="buscarAsistenciaDni">DNI / apellido y nombre</label>
+                  <input type="text" id="buscarAsistenciaDni" placeholder="Ej: 30123456 o Pérez" autocomplete="off">
+                </div>
+                <div class="campo" style="align-self:flex-end;">
+                  <button id="botonBuscarAsistencia" class="boton boton-chico" type="button">Buscar</button>
+                </div>
+              </div>
+              <div id="candidatosAsistencia" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1rem;"></div>
+              <div id="tarjetaAsistencia"></div>
+            </div>
           </div>
 
           <div id="vistaCertificados" class="tab-contenido" hidden>

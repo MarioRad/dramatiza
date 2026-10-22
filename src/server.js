@@ -2370,6 +2370,101 @@ app.get('/api/admin/asistencias/buscar', requireAuth, requirePermiso('perm_acred
   }
 });
 
+// Planilla por taller: lista de talleres para el selector (con conteo de inscriptos)
+app.get('/api/admin/asistencias/planilla/talleres', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const filas = await db.query(
+      `SELECT t.id, t.nombre, t.fecha, t.hora, t.lugar,
+              (SELECT COUNT(DISTINCT i.dni) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos
+         FROM talleres t
+        ORDER BY COALESCE(t.fecha, ''), COALESCE(t.hora, ''), t.nombre`
+    );
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(filas.map((f) => ({
+      id: Number(f.id),
+      nombre: f.nombre || '',
+      fecha: f.fecha || '',
+      hora: f.hora || '',
+      lugar: f.lugar || '',
+      inscriptos: Number(f.inscriptos || 0),
+    })));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Planilla de asistencia de un taller: inscriptos + marcas ingreso/egreso (vista tipo planilla papel)
+app.get('/api/admin/asistencias/planilla', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
+  try {
+    const taller_id = Number(req.query.taller_id);
+    if (!Number.isInteger(taller_id) || taller_id <= 0) throw new db.HttpError(400, 'Taller inválido.');
+    const taller = await db.obtenerTaller(taller_id);
+    if (!taller) throw new db.HttpError(404, 'Taller no encontrado.');
+    const [participantes, marcas] = await Promise.all([
+      db.query(
+        `SELECT dni, MIN(apellido) AS apellido, MIN(nombre) AS nombre, MIN(alimentacion) AS alimentacion
+           FROM inscripciones
+          WHERE taller_id = ?
+          GROUP BY dni
+          ORDER BY MIN(apellido), MIN(nombre)`,
+        [taller_id]
+      ),
+      db.query(
+        `SELECT dni, tipo, MAX(registrado_en) AS registrado_en, MAX(usuario) AS usuario
+           FROM taller_asistencias
+          WHERE taller_id = ?
+          GROUP BY dni, tipo`,
+        [taller_id]
+      ).catch(() => []),
+    ]);
+    const marcaDe = (dni, tipo) => marcas.find((m) => String(m.dni) === String(dni) && m.tipo === tipo) || null;
+    const filas = participantes.map((p, i) => ({
+      n: i + 1,
+      dni: String(p.dni || ''),
+      apellido: p.apellido || '',
+      nombre: p.nombre || '',
+      alimentacion: p.alimentacion || '',
+      ingreso: marcaDe(p.dni, 'ingreso'),
+      egreso: marcaDe(p.dni, 'egreso'),
+      no_inscripto: false,
+    }));
+    // Marcas de DNIs sin inscripción visible en el taller (p. ej. desde la app móvil)
+    for (const m of marcas) {
+      if (!filas.some((f) => f.dni === String(m.dni))) {
+        filas.push({
+          n: filas.length + 1,
+          dni: String(m.dni),
+          apellido: '',
+          nombre: '',
+          alimentacion: '',
+          ingreso: marcaDe(m.dni, 'ingreso'),
+          egreso: marcaDe(m.dni, 'egreso'),
+          no_inscripto: true,
+        });
+      }
+    }
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({
+      taller: {
+        id: Number(taller.id),
+        nombre: taller.nombre || '',
+        fecha: taller.fecha || '',
+        hora: taller.hora || '',
+        lugar: taller.lugar || '',
+        disertante: taller.disertante || '',
+      },
+      participantes: filas,
+      resumen: {
+        total: filas.length,
+        ingresos: filas.filter((f) => f.ingreso).length,
+        egresos: filas.filter((f) => f.egreso).length,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post('/api/admin/asistencias/taller', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     const body = req.body || {};

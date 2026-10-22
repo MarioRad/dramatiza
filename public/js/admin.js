@@ -2531,6 +2531,9 @@ el('buscarComidasDietas')?.addEventListener('input', renderTablaInscriptosConDie
 
 /* ── Módulo Asistencias (web): marcar/anular ingreso-egreso y menú ── */
 let asistenciaActual = null;
+let planillaTalleres = [];
+let planillaActual = null;
+let planillaCargada = false;
 
 function initVistaAsistencias() {
   const input = el('buscarAsistenciaDni');
@@ -2538,8 +2541,207 @@ function initVistaAsistencias() {
     input.dataset.listo = '1';
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarAsistencia(); });
   }
+  const subTabs = el('subTabsAsistencias');
+  if (subTabs && !subTabs.dataset.listo) {
+    subTabs.dataset.listo = '1';
+    for (const btn of subTabs.querySelectorAll('.sub-tab')) {
+      btn.addEventListener('click', () => {
+        for (const b of subTabs.querySelectorAll('.sub-tab')) b.classList.toggle('activo', b === btn);
+        const sub = btn.dataset.sub;
+        el('asistenciasSubPlanilla').hidden = sub !== 'planilla';
+        el('asistenciasSubDni').hidden = sub !== 'dni';
+        if (sub === 'planilla' && !planillaCargada) initPlanillaAsistencia();
+        if (sub === 'dni') input?.focus();
+      });
+    }
+  }
+  const sel = el('planillaTallerSelect');
+  if (sel && !sel.dataset.listo) {
+    sel.dataset.listo = '1';
+    sel.addEventListener('change', cargarPlanillaAsistencia);
+    el('botonRecargarPlanilla')?.addEventListener('click', async () => {
+      await cargarPlanillaTalleres();
+      await cargarPlanillaAsistencia();
+    });
+    el('botonImprimirPlanilla')?.addEventListener('click', () => window.print());
+  }
   mostrarMensaje(el('mensajeAsistencias'), '', '');
-  if (input) input.focus();
+  if (!planillaCargada && el('asistenciasSubPlanilla') && !el('asistenciasSubPlanilla').hidden) initPlanillaAsistencia();
+  else if (el('asistenciasSubDni') && !el('asistenciasSubDni').hidden && input) input.focus();
+}
+
+/* ── Planilla por taller: checkboxes de ingreso/egreso por inscripto ── */
+async function initPlanillaAsistencia() {
+  await cargarPlanillaTalleres();
+  planillaCargada = true;
+  const sel = el('planillaTallerSelect');
+  if (sel && sel.value) await cargarPlanillaAsistencia();
+}
+
+async function cargarPlanillaTalleres() {
+  const r = await api('/api/admin/asistencias/planilla/talleres');
+  if (!r.ok) {
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudieron cargar los talleres.', 'error');
+    return;
+  }
+  planillaTalleres = Array.isArray(r.data) ? r.data : [];
+  const sel = el('planillaTallerSelect');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = planillaTalleres.length ? 'Elegí un taller…' : 'No hay talleres cargados';
+  sel.appendChild(ph);
+  for (const t of planillaTalleres) {
+    const o = document.createElement('option');
+    o.value = t.id;
+    const meta = [t.fecha ? formatearFecha(t.fecha) : '', t.hora].filter(Boolean).join(' ');
+    o.textContent = [t.nombre, meta, typeof t.inscriptos === 'number' ? `(${t.inscriptos} inscriptos)` : ''].filter(Boolean).join(' · ');
+    sel.appendChild(o);
+  }
+  if (prev && planillaTalleres.some((t) => String(t.id) === prev)) sel.value = prev;
+}
+
+async function cargarPlanillaAsistencia() {
+  const sel = el('planillaTallerSelect');
+  const cont = el('planillaContenido');
+  const resumen = el('planillaResumen');
+  const tallerId = Number(sel && sel.value);
+  if (resumen) resumen.textContent = '';
+  if (!cont) return;
+  if (!tallerId) {
+    planillaActual = null;
+    cont.innerHTML = '<p class="ayuda">Elegí un taller para ver la planilla de inscriptos.</p>';
+    return;
+  }
+  cont.innerHTML = '<p class="ayuda">Cargando planilla…</p>';
+  const r = await api(`/api/admin/asistencias/planilla?taller_id=${tallerId}`);
+  if (!r.ok) {
+    cont.innerHTML = '';
+    planillaActual = null;
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo cargar la planilla.', 'error');
+    return;
+  }
+  planillaActual = r.data;
+  renderPlanillaAsistencia();
+}
+
+function nombreCompletoParticipante(p) {
+  const completo = `${p.apellido || ''}${p.apellido && p.nombre ? ', ' : ''}${p.nombre || ''}`.trim();
+  return completo || (p.no_inscripto ? `DNI ${p.dni} — sin inscripción` : '(sin datos)');
+}
+
+function actualizarResumenPlanilla() {
+  const resumen = el('planillaResumen');
+  if (!resumen) return;
+  const est = planillaActual;
+  if (!est || !Array.isArray(est.participantes)) { resumen.textContent = ''; return; }
+  const ingresos = est.participantes.filter((p) => p.ingreso).length;
+  const egresos = est.participantes.filter((p) => p.egreso).length;
+  resumen.textContent = `Inscriptos: ${est.participantes.length} · Ingresos: ${ingresos} · Egresos: ${egresos}`;
+}
+
+function renderPlanillaAsistencia() {
+  const cont = el('planillaContenido');
+  cont.innerHTML = '';
+  const est = planillaActual;
+  if (!est) return;
+  const t = est.taller || {};
+  const cab = document.createElement('div');
+  cab.className = 'tarjeta';
+  cab.style.marginBottom = '0.8rem';
+  const tit = document.createElement('strong');
+  tit.textContent = t.nombre || 'Taller';
+  cab.appendChild(tit);
+  const sub = document.createElement('div');
+  sub.className = 'ayuda';
+  sub.textContent = [t.fecha ? formatearFecha(t.fecha) : '', t.hora, t.lugar, t.disertante ? `Dis. ${t.disertante}` : ''].filter(Boolean).join(' · ');
+  cab.appendChild(sub);
+  cont.appendChild(cab);
+  actualizarResumenPlanilla();
+  if (!est.participantes.length) {
+    const vacio = document.createElement('p');
+    vacio.className = 'ayuda';
+    vacio.textContent = 'Este taller no tiene inscriptos.';
+    cont.appendChild(vacio);
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'tabla-envoltura';
+  const tabla = document.createElement('table');
+  tabla.id = 'tablaPlanillaAsistencia';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th style="width:2.6rem;">N°</th><th>Apellido y nombre</th><th>DNI</th><th style="width:5.2rem;text-align:center;">Ingreso</th><th style="width:5.2rem;text-align:center;">Egreso</th><th class="col-firma">Firma</th></tr>';
+  tabla.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const p of est.participantes) {
+    const fila = document.createElement('tr');
+    if (p.no_inscripto) fila.title = 'DNI con marca de asistencia sin inscripción en este taller';
+    const tdN = document.createElement('td');
+    tdN.textContent = p.n;
+    fila.appendChild(tdN);
+    const tdNom = document.createElement('td');
+    tdNom.textContent = nombreCompletoParticipante(p);
+    fila.appendChild(tdNom);
+    const tdDni = document.createElement('td');
+    tdDni.textContent = p.dni;
+    fila.appendChild(tdDni);
+    fila.appendChild(celdaCheckPlanilla(p, 'ingreso'));
+    fila.appendChild(celdaCheckPlanilla(p, 'egreso'));
+    const tdFirma = document.createElement('td');
+    tdFirma.className = 'col-firma';
+    fila.appendChild(tdFirma);
+    tbody.appendChild(fila);
+  }
+  tabla.appendChild(tbody);
+  wrap.appendChild(tabla);
+  cont.appendChild(wrap);
+}
+
+function celdaCheckPlanilla(p, tipo) {
+  const td = document.createElement('td');
+  td.style.textAlign = 'center';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'check-asistencia';
+  input.setAttribute('aria-label', `${tipo} DNI ${p.dni}`);
+  input.checked = Boolean(p[tipo]);
+  const marca = p[tipo];
+  if (marca) {
+    const partes = [marca.usuario ? `por ${marca.usuario}` : '', marca.registrado_en ? formatearFecha(marca.registrado_en) : ''].filter(Boolean);
+    if (partes.length) input.title = partes.join(' · ');
+  }
+  input.addEventListener('change', () => alternarMarcaPlanilla(p, tipo, input));
+  td.appendChild(input);
+  return td;
+}
+
+async function alternarMarcaPlanilla(p, tipo, input) {
+  const marcado = input.checked;
+  const tallerId = planillaActual && planillaActual.taller ? planillaActual.taller.id : 0;
+  input.disabled = true;
+  let r;
+  if (marcado) {
+    r = await api('/api/admin/asistencias/taller', { method: 'POST', body: JSON.stringify({ dni: p.dni, taller_id: tallerId, tipo }) });
+  } else {
+    if (!window.confirm(`¿Anular el ${tipo} de DNI ${p.dni}? Queda registrado en eventos.`)) {
+      input.checked = true;
+      input.disabled = false;
+      return;
+    }
+    r = await api(`/api/admin/asistencias/taller?dni=${encodeURIComponent(p.dni)}&taller_id=${tallerId}&tipo=${tipo}`, { method: 'DELETE' });
+  }
+  input.disabled = false;
+  if (!r.ok) {
+    input.checked = !marcado;
+    mostrarMensaje(el('mensajeAsistencias'), r.data.error || 'No se pudo actualizar la asistencia.', 'error');
+    return;
+  }
+  p[tipo] = marcado ? { registrado_en: new Date().toISOString(), usuario: '' } : null;
+  input.title = '';
+  actualizarResumenPlanilla();
+  mostrarMensaje(el('mensajeAsistencias'), `${tipo === 'ingreso' ? 'Ingreso' : 'Egreso'} ${marcado ? 'registrado' : 'anulado'} ✓`, 'ok');
 }
 
 async function buscarAsistencia() {

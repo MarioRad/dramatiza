@@ -1706,3 +1706,39 @@ body.dark .modal-gforms .modal-cuerpo { background: #0f172a; }
 @media (max-width: 640px) {
   .auspiciante-item img { width: 100%; max-width: 150px; height: 125px; }
 }
+
+/* ── Planilla de asistencia por taller (admin) ─────────────────────── */
+#tablaPlanillaAsistencia .check-asistencia {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+  accent-color: var(--color-primario);
+}
+#tablaPlanillaAsistencia .check-asistencia:disabled { cursor: wait; opacity: 0.6; }
+#tablaPlanillaAsistencia .col-firma { display: none; }
+
+@media print {
+  .sidebar, .sidebar-overlay, .app-topbar, .sub-tabs, .filtros-barra, #mensajeAsistencias, #vistaLogin { display: none !important; }
+  .contenedor-panel { padding: 0; max-width: none; }
+  body, body.dark { background: #fff; color: #111; }
+  .tarjeta, body.dark .tarjeta { background: #fff; border-color: #999; box-shadow: none; }
+  .tab-contenido .ayuda { display: none !important; }
+  #planillaResumen.ayuda { display: block !important; margin-bottom: 0.6rem; color: #111; }
+  .tabla-envoltura, body.dark .tabla-envoltura { border: none; box-shadow: none; overflow: visible; background: #fff; }
+  #tablaPlanillaAsistencia .col-firma { display: table-cell; }
+  #tablaPlanillaAsistencia th, #tablaPlanillaAsistencia td { border-color: #666; color: #111; }
+  #tablaPlanillaAsistencia th { position: static; background: #fff; color: #333; }
+  tbody tr:nth-child(even), body.dark tbody tr:nth-child(even) { background: #fff; }
+  #tablaPlanillaAsistencia .check-asistencia {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0.95rem;
+    height: 0.95rem;
+    border: 1.5px solid #333;
+    border-radius: 2px;
+    background: #fff;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  #tablaPlanillaAsistencia .check-asistencia:checked { background: #333; }
+}
