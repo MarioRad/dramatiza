@@ -1279,6 +1279,179 @@ app.put('/api/admin/inscripciones/:id', requireAuth, requirePermiso('perm_inscri
   }
 });
 
+// ── Carga masiva: mover un grupo de inscriptos de un taller a otro ──────
+// Usado al evento cuando se abren cupos y los asistentes cambian de taller.
+app.post('/api/admin/inscripciones/mover', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const desde = Number(body.desde);
+    const hacia = Number(body.hacia);
+    const dnis = [...new Set((Array.isArray(body.dnis) ? body.dnis : [])
+      .map((d) => String(d).replace(/\D/g, ''))
+      .filter((d) => /^\d{7,8}$/.test(d)))];
+    if (!Number.isInteger(desde) || desde <= 0 || !Number.isInteger(hacia) || hacia <= 0) {
+      throw new db.HttpError(400, 'Talleres origen/destino inválidos.');
+    }
+    if (desde === hacia) throw new db.HttpError(400, 'El taller origen y destino no pueden ser el mismo.');
+    if (!dnis.length) throw new db.HttpError(400, 'No se indicaron DNIs.');
+    if (dnis.length > 300) throw new db.HttpError(400, 'Máximo 300 DNIs por operación.');
+    const [origen, destino] = await Promise.all([db.obtenerTaller(desde), db.obtenerTaller(hacia)]);
+    if (!origen) throw new db.HttpError(404, 'Taller origen no encontrado.');
+    if (!destino) throw new db.HttpError(404, 'Taller destino no encontrado.');
+
+    // Las parejas (talleres de 2 días) se quitan/agregan completas
+    const quitar = await db.expandirParejas([desde]);
+    const agregar = await db.expandirParejas([hacia]);
+
+    const filasOrigen = await db.query(
+      `SELECT DISTINCT dni FROM inscripciones
+        WHERE taller_id IN (${quitar.map(() => '?').join(',')})
+          AND dni IN (${dnis.map(() => '?').join(',')})`,
+      [...quitar, ...dnis]
+    );
+    const mover = [...new Set(filasOrigen.map((f) => String(f.dni)))];
+    const noInscriptos = dnis.filter((d) => !mover.includes(d));
+    if (!mover.length) throw new db.HttpError(400, 'Ninguno de los DNIs indicados está inscripto en el taller origen.');
+
+    // Preflight de cupos en cada parte destino (antes de tocar datos)
+    const faltantes = [];
+    for (const tid of agregar) {
+      const t = await db.queryOne('SELECT id, nombre, cupo FROM talleres WHERE id = ?', [tid]);
+      if (!t) throw new db.HttpError(400, 'El taller destino no existe.');
+      const yaAqui = await db.query(
+        `SELECT DISTINCT dni FROM inscripciones WHERE taller_id = ? AND dni IN (${mover.map(() => '?').join(',')})`,
+        [tid, ...mover]
+      );
+      const yaSet = new Set(yaAqui.map((r) => String(r.dni)));
+      const necesitan = mover.filter((d) => !yaSet.has(d));
+      const conteo = await db.queryOne('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [tid]);
+      const libres = Number(t.cupo) - Number(conteo.n);
+      if (necesitan.length > libres) {
+        faltantes.push(`"${t.nombre}": ${Math.max(libres, 0)} lugar(es) libre(s) para ${necesitan.length} persona(s)`);
+      }
+    }
+    if (faltantes.length) throw new db.HttpError(409, `Sin cupos suficientes — ${faltantes.join(' · ')}.`);
+
+    const movidos = [];
+    const omitidos = [];
+    const errores = [];
+    for (const dni of mover) {
+      try {
+        const actuales = (await db.query('SELECT taller_id FROM inscripciones WHERE dni = ?', [dni])).map((r) => Number(r.taller_id));
+        const quitados = new Set(quitar);
+        const setNuevos = new Set([...actuales.filter((id) => !quitados.has(id)), ...agregar]);
+        const nuevos = [...setNuevos];
+        const sinCambios = actuales.length === nuevos.length && actuales.every((id) => setNuevos.has(id));
+        if (sinCambios) { omitidos.push(dni); continue; }
+        await db.reemplazarTalleresInscripcion(dni, nuevos);
+        await regenerarAcreditacion(dni).catch(() => {});
+        movidos.push(dni);
+      } catch (e) {
+        errores.push({ dni, error: e.message || 'Error al reasignar.' });
+      }
+    }
+    await db.registrarEvento(
+      'inscripciones_movidas',
+      `${movidos.length} inscripción(es) movidas de "${origen.nombre}" a "${destino.nombre}"${errores.length ? `, ${errores.length} con error` : ''}${noInscriptos.length ? `, ${noInscriptos.length} no inscriptos en origen` : ''}`,
+      req.sesion.usuario
+    ).catch(() => {});
+    res.json({ ok: true, movidos: movidos.length, omitidos, no_inscriptos: noInscriptos, errores });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── Carga masiva: alta de asistentes nuevos en un taller ────────────────
+app.post('/api/admin/inscripciones/alta-masiva', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const taller_id = Number(body.taller_id);
+    const crudas = Array.isArray(body.personas) ? body.personas : [];
+    if (!Number.isInteger(taller_id) || taller_id <= 0) throw new db.HttpError(400, 'Taller inválido.');
+    if (!crudas.length) throw new db.HttpError(400, 'No se indicaron personas.');
+    if (crudas.length > 300) throw new db.HttpError(400, 'Máximo 300 personas por operación.');
+    const destino = await db.obtenerTaller(taller_id);
+    if (!destino) throw new db.HttpError(404, 'Taller no encontrado.');
+
+    // Dedupe por DNI (primera aparición gana)
+    const vistos = new Set();
+    const lista = [];
+    for (const p of crudas) {
+      const dni = String((p || {}).dni || '').replace(/\D/g, '');
+      if (vistos.has(dni)) continue;
+      vistos.add(dni);
+      lista.push({
+        dni,
+        nombre: String(p.nombre || '').trim(),
+        apellido: String(p.apellido || '').trim(),
+        email: String(p.email || '').trim(),
+        telefono: String(p.telefono || '').trim(),
+        alimentacion: String(p.alimentacion || 'sin_restriccion').trim() || 'sin_restriccion',
+      });
+    }
+    const invalidos = lista.filter((p) => !/^\d{7,8}$/.test(p.dni) || (!p.nombre && !p.apellido));
+    if (invalidos.length) throw new db.HttpError(400, `${invalidos.length} fila(s) con DNI o nombre/apellido inválido.`);
+
+    const partes = await db.expandirParejas([taller_id]);
+    const faltantes = [];
+    for (const tid of partes) {
+      const t = await db.queryOne('SELECT id, nombre, cupo FROM talleres WHERE id = ?', [tid]);
+      if (!t) throw new db.HttpError(400, 'El taller destino no existe.');
+      const yaAqui = await db.query(
+        `SELECT DISTINCT dni FROM inscripciones WHERE taller_id = ? AND dni IN (${lista.map(() => '?').join(',')})`,
+        [tid, ...lista.map((p) => p.dni)]
+      );
+      const yaSet = new Set(yaAqui.map((r) => String(r.dni)));
+      const necesitan = lista.filter((p) => !yaSet.has(p.dni)).length;
+      const conteo = await db.queryOne('SELECT COUNT(*) AS n FROM inscripciones WHERE taller_id = ?', [tid]);
+      const libres = Number(t.cupo) - Number(conteo.n);
+      if (necesitan > libres) faltantes.push(`"${t.nombre}": ${Math.max(libres, 0)} libre(s) para ${necesitan}`);
+    }
+    if (faltantes.length) throw new db.HttpError(409, `Sin cupos suficientes — ${faltantes.join(' · ')}.`);
+
+    const creadas = [];
+    const actualizadas = [];
+    const yaEstaban = [];
+    const errores = [];
+    for (const p of lista) {
+      try {
+        const actuales = (await db.query('SELECT taller_id FROM inscripciones WHERE dni = ?', [p.dni])).map((r) => Number(r.taller_id));
+        if (actuales.length) {
+          const setActuales = new Set(actuales);
+          const faltan = partes.filter((id) => !setActuales.has(id));
+          if (!faltan.length) { yaEstaban.push(p.dni); continue; }
+          await db.reemplazarTalleresInscripcion(p.dni, [...actuales, ...faltan]);
+          actualizadas.push(p.dni);
+        } else {
+          const enEncuentro = Boolean(await db.queryOne('SELECT dni FROM encuentro_inscripciones WHERE dni = ? AND oculto = FALSE LIMIT 1', [p.dni]));
+          await db.crearInscripcion({
+            nombre: p.nombre,
+            apellido: p.apellido,
+            dni: p.dni,
+            email: p.email,
+            telefono: p.telefono,
+            alimentacion: p.alimentacion,
+            tallerIds: [taller_id],
+            enEncuentro,
+          });
+          creadas.push(p.dni);
+        }
+        await regenerarAcreditacion(p.dni).catch(() => {});
+      } catch (e) {
+        errores.push({ dni: p.dni, error: e.message || 'Error al crear la inscripción.' });
+      }
+    }
+    await db.registrarEvento(
+      'inscripciones_alta_masiva',
+      `Alta masiva en "${destino.nombre}": ${creadas.length} creada(s), ${actualizadas.length} actualizada(s), ${yaEstaban.length} ya inscripta(s)${errores.length ? `, ${errores.length} con error` : ''}`,
+      req.sesion.usuario
+    ).catch(() => {});
+    res.json({ ok: true, creadas: creadas.length, actualizadas: actualizadas.length, ya_estaban: yaEstaban.length, errores });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.delete('/api/admin/inscripciones/:id', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -2370,94 +2543,147 @@ app.get('/api/admin/asistencias/buscar', requireAuth, requirePermiso('perm_acred
   }
 });
 
-// Planilla por taller: lista de talleres para el selector (con conteo de inscriptos)
+// Planilla por taller: lista de talleres para el selector (con conteo de inscriptos).
+// Los talleres de 2 días (pareja_id) se unifican en una sola entrada lógica con sus sesiones.
 app.get('/api/admin/asistencias/planilla/talleres', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     const filas = await db.query(
-      `SELECT t.id, t.nombre, t.fecha, t.hora, t.lugar,
+      `SELECT t.id, t.nombre, t.fecha, t.hora, t.lugar, t.pareja_id,
               (SELECT COUNT(DISTINCT i.dni) FROM inscripciones i WHERE i.taller_id = t.id) AS inscriptos
          FROM talleres t
         ORDER BY COALESCE(t.fecha, ''), COALESCE(t.hora, ''), t.nombre`
     );
+    const entradas = new Map();
+    const nombrePorId = new Map();
+    for (const f of filas) {
+      nombrePorId.set(Number(f.id), f.nombre || '');
+      const logicoId = f.pareja_id ? Number(f.pareja_id) : Number(f.id);
+      if (!entradas.has(logicoId)) entradas.set(logicoId, { id: logicoId, nombre: '', lugar: '', inscriptos: 0, sesiones: [] });
+      const e = entradas.get(logicoId);
+      if (!f.pareja_id) e.nombre = f.nombre || '';
+      e.sesiones.push({
+        taller_id: Number(f.id),
+        fecha: f.fecha || '',
+        hora: f.hora || '',
+        es_dos_dias: Boolean(f.pareja_id),
+      });
+      e.inscriptos = Math.max(e.inscriptos, Number(f.inscriptos || 0));
+      if (f.lugar && !e.lugar) e.lugar = f.lugar;
+    }
+    for (const e of entradas.values()) {
+      if (!e.nombre) {
+        const principal = e.sesiones.find((s) => !s.es_dos_dias);
+        e.nombre = (principal && nombrePorId.get(principal.taller_id)) || e.sesiones.map((s) => nombrePorId.get(s.taller_id)).find(Boolean) || '';
+      }
+    }
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.json(filas.map((f) => ({
-      id: Number(f.id),
-      nombre: f.nombre || '',
-      fecha: f.fecha || '',
-      hora: f.hora || '',
-      lugar: f.lugar || '',
-      inscriptos: Number(f.inscriptos || 0),
+    res.json([...entradas.values()].map((e) => ({
+      id: e.id,
+      nombre: e.nombre,
+      lugar: e.lugar,
+      inscriptos: e.inscriptos,
+      dos_dias: e.sesiones.length > 1,
+      sesiones: e.sesiones,
     })));
   } catch (e) {
     next(e);
   }
 });
 
-// Planilla de asistencia de un taller: inscriptos + marcas ingreso/egreso (vista tipo planilla papel)
+// Planilla de asistencia de un taller: inscriptos + marcas ingreso/egreso (vista tipo planilla papel).
+// Si el taller tiene 2° parte (pareja_id), devuelve una sola planilla unificada con columnas por día.
 app.get('/api/admin/asistencias/planilla', requireAuth, requirePermiso('perm_acreditacion'), async (req, res, next) => {
   try {
     const taller_id = Number(req.query.taller_id);
     if (!Number.isInteger(taller_id) || taller_id <= 0) throw new db.HttpError(400, 'Taller inválido.');
-    const taller = await db.obtenerTaller(taller_id);
-    if (!taller) throw new db.HttpError(404, 'Taller no encontrado.');
+    const base = await db.queryOne('SELECT id, pareja_id FROM talleres WHERE id = ?', [taller_id]);
+    if (!base) throw new db.HttpError(404, 'Taller no encontrado.');
+    const logicoId = base.pareja_id ? Number(base.pareja_id) : Number(base.id);
+    const partes = await db.query(
+      `SELECT id, nombre, fecha, hora, lugar, disertante, pareja_id
+         FROM talleres
+        WHERE id = ? OR pareja_id = ?
+        ORDER BY COALESCE(fecha, ''), COALESCE(hora, '')`,
+      [logicoId, logicoId]
+    );
+    const ids = partes.map((p) => Number(p.id));
+    const enIds = ids.map(() => '?').join(',');
     const [participantes, marcas] = await Promise.all([
       db.query(
         `SELECT dni, MIN(apellido) AS apellido, MIN(nombre) AS nombre, MIN(alimentacion) AS alimentacion
            FROM inscripciones
-          WHERE taller_id = ?
+          WHERE taller_id IN (${enIds})
           GROUP BY dni
           ORDER BY MIN(apellido), MIN(nombre)`,
-        [taller_id]
+        ids
       ),
       db.query(
-        `SELECT dni, tipo, MAX(registrado_en) AS registrado_en, MAX(usuario) AS usuario
+        `SELECT dni, taller_id, tipo, MAX(registrado_en) AS registrado_en, MAX(usuario) AS usuario
            FROM taller_asistencias
-          WHERE taller_id = ?
-          GROUP BY dni, tipo`,
-        [taller_id]
+          WHERE taller_id IN (${enIds})
+          GROUP BY dni, taller_id, tipo`,
+        ids
       ).catch(() => []),
     ]);
-    const marcaDe = (dni, tipo) => marcas.find((m) => String(m.dni) === String(dni) && m.tipo === tipo) || null;
+    const sesiones = partes.map((p) => ({
+      taller_id: Number(p.id),
+      fecha: p.fecha || '',
+      hora: p.hora || '',
+      nombre: p.nombre || '',
+    }));
+    const marcasPorDni = new Map();
+    for (const m of marcas) {
+      const dni = String(m.dni);
+      if (!marcasPorDni.has(dni)) marcasPorDni.set(dni, {});
+      const porTaller = marcasPorDni.get(dni);
+      porTaller[Number(m.taller_id)] = porTaller[Number(m.taller_id)] || { ingreso: null, egreso: null };
+      porTaller[Number(m.taller_id)][m.tipo] = m;
+    }
+    const marcasDe = (dni) => marcasPorDni.get(String(dni)) || {};
     const filas = participantes.map((p, i) => ({
       n: i + 1,
       dni: String(p.dni || ''),
       apellido: p.apellido || '',
       nombre: p.nombre || '',
       alimentacion: p.alimentacion || '',
-      ingreso: marcaDe(p.dni, 'ingreso'),
-      egreso: marcaDe(p.dni, 'egreso'),
+      marcas: marcasDe(p.dni),
       no_inscripto: false,
     }));
     // Marcas de DNIs sin inscripción visible en el taller (p. ej. desde la app móvil)
-    for (const m of marcas) {
-      if (!filas.some((f) => f.dni === String(m.dni))) {
+    for (const dni of marcasPorDni.keys()) {
+      if (!filas.some((f) => f.dni === dni)) {
         filas.push({
           n: filas.length + 1,
-          dni: String(m.dni),
+          dni,
           apellido: '',
           nombre: '',
           alimentacion: '',
-          ingreso: marcaDe(m.dni, 'ingreso'),
-          egreso: marcaDe(m.dni, 'egreso'),
+          marcas: marcasDe(dni),
           no_inscripto: true,
         });
       }
     }
+    const principal = partes.find((p) => !p.pareja_id) || partes[0];
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({
       taller: {
-        id: Number(taller.id),
-        nombre: taller.nombre || '',
-        fecha: taller.fecha || '',
-        hora: taller.hora || '',
-        lugar: taller.lugar || '',
-        disertante: taller.disertante || '',
+        id: logicoId,
+        nombre: principal.nombre || '',
+        fecha: principal.fecha || '',
+        hora: principal.hora || '',
+        lugar: principal.lugar || '',
+        disertante: principal.disertante || '',
+        dos_dias: sesiones.length > 1,
       },
+      sesiones,
       participantes: filas,
       resumen: {
         total: filas.length,
-        ingresos: filas.filter((f) => f.ingreso).length,
-        egresos: filas.filter((f) => f.egreso).length,
+        por_sesion: sesiones.map((s) => ({
+          taller_id: s.taller_id,
+          ingresos: filas.filter((f) => f.marcas[s.taller_id] && f.marcas[s.taller_id].ingreso).length,
+          egresos: filas.filter((f) => f.marcas[s.taller_id] && f.marcas[s.taller_id].egreso).length,
+        })),
       },
     });
   } catch (e) {

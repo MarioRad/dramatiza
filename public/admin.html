@@ -169,6 +169,7 @@
               <button type="button" class="sub-tab activo" data-sub="talleres">Inscripciones a talleres</button>
               <button type="button" class="sub-tab" data-sub="asistentes">Asistentes</button>
               <button type="button" class="sub-tab" data-sub="encuentro">Importadas del encuentro</button>
+              <button type="button" class="sub-tab" data-sub="masivas">⚡ Acciones masivas</button>
             </div>
 
             <div id="subInscripcionesTalleres">
@@ -326,6 +327,55 @@
                   </thead>
                   <tbody></tbody>
                 </table>
+              </div>
+            </div>
+
+            <div id="subInscripcionesMasivas" hidden>
+              <h3>Acciones masivas</h3>
+              <p class="ayuda">Para aplicar cambios del evento de una sola vez, sin reasignar uno por uno: mové un grupo de inscriptos de un taller a otro (p. ej. cuando se abrió el cupo y cambió de taller), o dad de alta en bloque a asistentes nuevos. Se validan cupos y superposición de horarios antes de aplicar, las parejas de 2 días se manejan completas, y cada operación queda registrada en Eventos.</p>
+              <div id="mensajeMasivas" class="mensaje" role="alert"></div>
+
+              <div class="gforms-card">
+                <div class="gforms-card-titulo">1 · Mover inscriptos de un taller a otro</div>
+                <div class="filtros-barra">
+                  <div class="campo">
+                    <label for="moverDesde">Desde (origen)</label>
+                    <select id="moverDesde"></select>
+                  </div>
+                  <div class="campo">
+                    <label for="moverHacia">Hacia (destino)</label>
+                    <select id="moverHacia"></select>
+                  </div>
+                  <div class="campo" style="align-self:flex-end;">
+                    <button id="botonCargarOrigen" class="boton boton-secundario boton-chico" type="button">Cargar inscriptos</button>
+                  </div>
+                </div>
+                <p class="ayuda" id="moverInfoOrigen" style="margin-bottom:0.5rem;"></p>
+                <div id="moverListado"></div>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:0.8rem;flex-wrap:wrap;">
+                  <button id="botonMoverSeleccion" class="boton" type="button" disabled>Mover seleccionados (0)</button>
+                  <span class="ayuda" id="moverCupoDestino"></span>
+                </div>
+              </div>
+
+              <div class="gforms-card">
+                <div class="gforms-card-titulo">2 · Alta masiva de asistentes nuevos</div>
+                <div class="filtros-barra">
+                  <div class="campo">
+                    <label for="altaTaller">Taller destino</label>
+                    <select id="altaTaller"></select>
+                  </div>
+                </div>
+                <div class="campo">
+                  <label for="altaTexto">Personas — una por línea: <code>DNI, Apellido, Nombre</code> (también acepta columnas copiadas de Excel/CSV)</label>
+                  <textarea id="altaTexto" rows="7" spellcheck="false" placeholder="30123456, Pérez, María&#10;27877091, Gómez, Juan" style="width:100%;font-family:ui-monospace,monospace;font-size:0.9rem;"></textarea>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:0.6rem;flex-wrap:wrap;">
+                  <button id="botonPrevisualizarAlta" class="boton boton-secundario" type="button">Previsualizar</button>
+                  <button id="botonConfirmarAlta" class="boton" type="button" disabled>Dar de alta (0)</button>
+                  <span class="ayuda" id="altaResumen"></span>
+                </div>
+                <div id="altaPreview" style="margin-top:0.6rem;"></div>
               </div>
             </div>
           </div>
@@ -631,7 +681,7 @@
 
           <div id="vistaAsistencias" class="tab-contenido" hidden>
             <h3>Asistencias</h3>
-            <p class="ayuda">Marcá ingresos/egresos por taller y entregas de menú con un click, o corregí registros erróneos (se guarda quién anuló). Sin restricción de horario: si el servicio no está activo se avisa pero se permite igual. La planilla por taller permite tildar la asistencia de todos los inscriptos en una sola pantalla, ideal para controlar contra la planilla papel.</p>
+            <p class="ayuda">Marcá ingresos/egresos por taller y entregas de menú con un click, o corregí registros erróneos (se guarda quién anuló). Sin restricción de horario: si el servicio no está activo se avisa pero se permite igual. La planilla por taller permite tildar la asistencia de todos los inscriptos en una sola pantalla, ideal para controlar contra la planilla papel. Los talleres de 2 días aparecen una sola vez en el selector y se muestran unificados: una fila por persona con columnas de ingreso/egreso por cada día.</p>
             <div id="mensajeAsistencias" class="mensaje" role="alert"></div>
             <div class="sub-tabs" id="subTabsAsistencias">
               <button type="button" class="sub-tab activo" data-sub="planilla">📋 Planilla por taller</button>
