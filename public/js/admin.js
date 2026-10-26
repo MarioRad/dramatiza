@@ -190,6 +190,9 @@ function formatearFecha(valor) {
 function mostrarLogin() {
   vistaLogin.hidden = false;
   vistaPanel.hidden = true;
+  // Al salir del sistema (logout o sesión vencida) se cierra la ficha y se
+  // limpia ?ficha= de la URL, para que al volver a entrar no quede predeterminada.
+  cerrarFichaAsistente();
   miSesion = null;
   const sb = el('sidebar');
   const ov = el('sidebarOverlay');
@@ -245,6 +248,8 @@ function detenerPollingAcreditaciones() {
 function cambiarVista(vista) {
   vistaActiva = vista;
   detenerPollingAcreditaciones();
+  // Cambiar de módulo: si no hay ficha abierta, la URL no debe conservar ?ficha=.
+  if (!fichaDniActual) quitarParamFicha();
   for (const tab of document.querySelectorAll('.tab')) {
     tab.classList.toggle('activo', tab.dataset.vista === vista);
   }
@@ -1740,7 +1745,29 @@ function cerrarFichaAsistente(){
   if(modalFicha){ modalFicha.hidden=true; modalFicha.setAttribute('aria-hidden','true'); }
   fichaDniActual=null;
   fichaDataActual=null;
+  // La URL no debe conservar ?ficha= con la ficha cerrada: si queda, al recargar,
+  // al volver a entrar o al cambiar de módulo se reabriría sola.
+  quitarParamFicha();
 }
+
+// Quita solo el parámetro ?ficha= conservando el resto de la URL.
+function quitarParamFicha(){
+  if(!location.search || location.search.indexOf('ficha=') === -1) return;
+  const params = new URLSearchParams(location.search);
+  params.delete('ficha');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? `?${query}` : '') + location.hash);
+}
+
+// Link compartido (admin.html?ficha=DNI): se captura el DNI y se limpia la URL
+// apenas arranca la página, para que no quede "predeterminada" en el navegador.
+// La ficha se abre después del login y el parámetro solo existe mientras está abierta.
+let fichaPendienteLink = null;
+(function capturarFichaDelLink(){
+  const dni = new URLSearchParams(location.search).get('ficha');
+  if(dni && /^\d{7,8}$/.test(String(dni).replace(/\D/g,''))) fichaPendienteLink = String(dni).replace(/\D/g,'');
+  quitarParamFicha();
+})();
 el('botonCerrarFicha')?.addEventListener('click', cerrarFichaAsistente);
 modalFicha?.addEventListener('click', (e)=>{ if(e.target===modalFicha) cerrarFichaAsistente(); });
 el('botonFichaEditar')?.addEventListener('click', ()=>{
@@ -2029,9 +2056,14 @@ async function renderFicha(f){
 }
 
 function checkFichaQuery(){
+  // Con la ficha abierta el parámetro cumple su rol (recargar vuelve a abrirla):
+  // no se toca ni se reabre.
+  if(fichaDniActual) return;
   const params = new URLSearchParams(location.search);
-  const dni = params.get('ficha');
+  const dni = fichaPendienteLink || params.get('ficha');
+  fichaPendienteLink = null;
   if(dni && /^\d{7,8}$/.test(String(dni).replace(/\D/g,''))){
+    quitarParamFicha();
     // asegurar que el panel de asistentes esté visible (dramatiza-1 agrupa en sub-pestañas)
     if (typeof activarSubTabInscripcion === 'function') activarSubTabInscripcion('asistentes');
     setTimeout(()=> abrirFichaAsistente(dni), 600);
