@@ -387,6 +387,7 @@
             <div class="sub-tabs" id="subTabsPagos">
               <button type="button" class="sub-tab activo" data-sub="plan">1 · Plan de cuotas del evento</button>
               <button type="button" class="sub-tab" data-sub="asignar">2 · Asignar plan a un asistente</button>
+              <button type="button" class="sub-tab" data-sub="devoluciones">3 · Devoluciones</button>
             </div>
 
             <div id="subPagosPlan">
@@ -444,9 +445,53 @@
               </div>
             </div>
 
-            <div class="pagos-seccion">
+            <div id="subPagosDevoluciones" hidden>
+              <div class="pagos-seccion">
+                <div class="pagos-seccion-cabecera"><h4>3 · Devoluciones a talleristas y ponentes</h4></div>
+                <p class="ayuda">Se listan los pagos de quienes figuran como <strong>tallerista</strong> (se devuelve el 100% de lo pagado) o <strong>ponente</strong> (se devuelve el 50%). Hacé clic en el estado para marcarlo como devuelto o volverlo a "a devolver".</p>
+                <div id="mensajeDevoluciones" class="mensaje" role="alert"></div>
+                <div class="filtros-barra">
+                  <div class="campo">
+                    <label for="filtroDevolucionDni">Buscar por DNI o apellido</label>
+                    <input type="text" id="filtroDevolucionDni" placeholder="Ej: 30123456 o Pérez">
+                  </div>
+                  <div class="campo">
+                    <label for="filtroDevolucionTipo">Tipo</label>
+                    <select id="filtroDevolucionTipo">
+                      <option value="">Todos</option>
+                      <option value="tallerista">Tallerista (devuelve 100%)</option>
+                      <option value="ponente">Ponente (devuelve 50%)</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="ayuda" id="resumenDevoluciones"></p>
+                <div class="tabla-envoltura">
+                  <table id="tablaDevoluciones">
+                    <thead>
+                      <tr>
+                        <th>DNI</th>
+                        <th>Apellido y nombre</th>
+                        <th>Monto</th>
+                        <th>Tipo</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                    <tfoot>
+                      <tr>
+                        <th colspan="2">Total a devolver</th>
+                        <th id="totalDevolucion" class="celda-total">—</th>
+                        <th colspan="2"></th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="pagos-seccion" id="pagosSeccionAsistentes">
               <div class="pagos-seccion-cabecera" style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:0.4rem;">
-                <h4 style="margin:0;">3 · Asistentes y cuotas</h4>
+                <h4 style="margin:0;">4 · Asistentes y cuotas</h4>
                 <button type="button" class="boton boton-secundario boton-chico" id="botonExportarPagos" title="Descargar XLSX con todos los asistentes y sus pagos (respeta el filtro si está activo)">Exportar Excel</button>
               </div>
               <p class="ayuda" id="resumenPagos"></p>
@@ -1516,6 +1561,6 @@
 
   <script src="/js/darkmode.js"></script>
   <script src="/js/programa.js?v=5"></script>
-  <script src="/js/admin.js?v=43"></script>
+  <script src="/js/admin.js?v=44"></script>
 </body>
 </html>

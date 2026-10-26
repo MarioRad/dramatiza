@@ -91,6 +91,9 @@ async function initPool() {
       await pool.query(`ALTER TABLE ponentes ADD COLUMN IF NOT EXISTS dni VARCHAR(20) NOT NULL DEFAULT ''`).catch(()=>{});
       // 013_ponentes_apellido: apellido separado (para imprimir "Apellido, Nombre" en el certificado)
       await pool.query(`ALTER TABLE ponentes ADD COLUMN IF NOT EXISTS apellido TEXT NOT NULL DEFAULT ''`).catch(()=>{});
+      // 014_devoluciones: devoluciones a talleristas (100%) y ponentes (50%)
+      await pool.query(`CREATE TABLE IF NOT EXISTS devoluciones (id SERIAL PRIMARY KEY, dni VARCHAR(20) NOT NULL, tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('tallerista','ponente')), monto_pagado NUMERIC(12,2) NOT NULL DEFAULT 0, monto_devolver NUMERIC(12,2) NOT NULL DEFAULT 0, estado VARCHAR(20) NOT NULL DEFAULT 'a_devolver' CHECK (estado IN ('a_devolver','devuelto')), devuelto_en TIMESTAMPTZ, registrado_por TEXT NOT NULL DEFAULT '', creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (dni))`).catch(()=>{});
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_devoluciones_dni ON devoluciones(dni)`).catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -2238,6 +2241,162 @@ async function eliminarComprobanteCuota(asistentePlanId, numeroCuota) {
   return true;
 }
 
+// ── Devoluciones a talleristas y ponentes ────────────────────────────
+// Tallerista (ponentes.tipo = 'taller') se devuelve el 100% de lo pagado;
+// ponente (ponencia/conversatorio) el 50%. El estado queda en la tabla devoluciones.
+
+function redondearMonto(v) {
+  return Math.round((Number(v) || 0) * 100) / 100;
+}
+
+function normalizarClave(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function nombreCompleto(apellido, nombre) {
+  const ape = String(apellido || '').trim();
+  const nom = String(nombre || '').trim();
+  if (ape && nom && !normalizarClave(nom).endsWith(normalizarClave(ape))) return `${ape}, ${nom}`;
+  return nom || ape || '—';
+}
+
+async function calcularDevoluciones() {
+  const [ponentes, pagosPorDni, inscripcionesPorDni, estados] = await Promise.all([
+    query(`SELECT id, trim(dni) AS dni, nombre, apellido, tipo FROM ponentes`),
+    query(`SELECT trim(a.dni) AS dni, SUM(pc.monto) AS total, COUNT(*) AS cuotas
+             FROM pagos_cuotas pc
+             JOIN asistente_planes a ON a.id = pc.asistente_plan_id
+            GROUP BY 1`),
+    query(`SELECT dni, MIN(nombre) AS nombre, MIN(apellido) AS apellido FROM inscripciones WHERE trim(dni) <> '' GROUP BY dni`),
+    query(`SELECT dni, estado, monto_pagado, monto_devolver, devuelto_en, registrado_por FROM devoluciones`)
+      // La auto-migración corre en background al iniciar: si la tabla todavía no existe,
+      // se listan todas las filas como "a devolver" (el próximo refresco ya la ve).
+      .catch(() => []),
+  ]);
+
+  const pagados = new Map();
+  for (const p of pagosPorDni) {
+    const dni = String(p.dni || '').trim();
+    if (!dni) continue;
+    pagados.set(dni, { total: Number(p.total) || 0, cuotas: Number(p.cuotas) || 0 });
+  }
+
+  // Personas sin DNI cargado en ponentes: se resuelve contra inscripciones por apellido,
+  // solo si el apellido corresponde a exactamente un DNI (si hay varios, queda ambiguo).
+  const dniPorApellido = new Map();
+  const inscPorDni = new Map();
+  for (const i of inscripcionesPorDni) {
+    const dni = String(i.dni || '').trim();
+    if (!dni) continue;
+    inscPorDni.set(dni, { nombre: i.nombre || '', apellido: i.apellido || '' });
+    const clave = normalizarClave(i.apellido);
+    if (!clave) continue;
+    if (!dniPorApellido.has(clave)) dniPorApellido.set(clave, new Set());
+    dniPorApellido.get(clave).add(dni);
+  }
+
+  const porDni = new Map();
+  for (const p of ponentes) {
+    let dni = String(p.dni || '').trim();
+    if (!dni) {
+      const candidatos = dniPorApellido.get(normalizarClave(p.apellido));
+      if (candidatos && candidatos.size === 1) dni = [...candidatos][0];
+    }
+    if (!dni || !pagados.has(dni)) continue;
+    let reg = porDni.get(dni);
+    if (!reg) {
+      reg = { dni, apellido: '', nombre: '', esTallerista: false };
+      porDni.set(dni, reg);
+    }
+    if (normalizarClave(p.tipo) === 'taller') reg.esTallerista = true;
+    if (!reg.apellido && String(p.apellido || '').trim()) reg.apellido = String(p.apellido).trim();
+    if (!reg.nombre && String(p.nombre || '').trim()) reg.nombre = String(p.nombre).trim();
+  }
+
+  const estadoPorDni = new Map(estados.map((e) => [String(e.dni || '').trim(), e]));
+
+  const filas = [];
+  for (const reg of porDni.values()) {
+    const pagado = pagados.get(reg.dni);
+    const tipo = reg.esTallerista ? 'tallerista' : 'ponente';
+    const factor = reg.esTallerista ? 1 : 0.5;
+    const montoPagado = redondearMonto(pagado.total);
+    const montoDevolver = redondearMonto(montoPagado * factor);
+    if (montoPagado <= 0) continue;
+    let apellido = reg.apellido;
+    let nombre = reg.nombre;
+    if ((!apellido || !nombre) && inscPorDni.has(reg.dni)) {
+      const insc = inscPorDni.get(reg.dni);
+      apellido = apellido || String(insc.apellido || '').trim();
+      nombre = nombre || String(insc.nombre || '').trim();
+    }
+    const est = estadoPorDni.get(reg.dni);
+    const estado = est && (est.estado === 'devuelto' || est.estado === 'a_devolver') ? est.estado : 'a_devolver';
+    filas.push({
+      dni: reg.dni,
+      apellido,
+      nombre,
+      nombreCompleto: nombreCompleto(apellido, nombre),
+      tipo,
+      esTallerista: tipo === 'tallerista',
+      montoPagado,
+      montoDevolver,
+      cuotasPagadas: pagado.cuotas,
+      estado,
+      devueltoEn: est && est.devuelto_en ? est.devuelto_en : null,
+      registradoPor: est ? est.registrado_por || '' : '',
+    });
+  }
+  filas.sort((a, b) =>
+    normalizarClave(a.apellido || a.nombreCompleto).localeCompare(normalizarClave(b.apellido || b.nombreCompleto), 'es') ||
+    normalizarClave(a.nombreCompleto).localeCompare(normalizarClave(b.nombreCompleto), 'es') ||
+    String(a.dni).localeCompare(String(b.dni))
+  );
+
+  const totalPendiente = redondearMonto(filas.filter((f) => f.estado === 'a_devolver').reduce((s, f) => s + f.montoDevolver, 0));
+  const totalDevuelto = redondearMonto(filas.filter((f) => f.estado === 'devuelto').reduce((s, f) => s + f.montoDevolver, 0));
+  return {
+    filas,
+    totalPendiente,
+    totalDevuelto,
+    totalGeneral: redondearMonto(totalPendiente + totalDevuelto),
+    totalPagado: redondearMonto(filas.reduce((s, f) => s + f.montoPagado, 0)),
+    cantidadPendientes: filas.filter((f) => f.estado === 'a_devolver').length,
+    cantidadDevueltas: filas.filter((f) => f.estado === 'devuelto').length,
+  };
+}
+
+async function listarDevoluciones() {
+  return calcularDevoluciones();
+}
+
+async function actualizarDevolucion(dni, estado, usuario) {
+  const dniLimpio = String(dni || '').replace(/\D/g, '');
+  if (!/^\d{7,8}$/.test(dniLimpio)) throw new HttpError(400, 'DNI inválido (7 u 8 dígitos).');
+  const estadoNorm = String(estado || '').trim().toLowerCase();
+  if (estadoNorm !== 'devuelto' && estadoNorm !== 'a_devolver') {
+    throw new HttpError(400, "Estado inválido. Debe ser 'devuelto' o 'a_devolver'.");
+  }
+  const datos = await calcularDevoluciones();
+  const fila = datos.filas.find((f) => String(f.dni) === dniLimpio);
+  if (!fila) throw new HttpError(404, 'No hay una devolución pendiente para ese DNI.');
+  const esDevuelto = estadoNorm === 'devuelto';
+  await mutation(
+    `INSERT INTO devoluciones (dni, tipo, monto_pagado, monto_devolver, estado, devuelto_en, registrado_por)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (dni) DO UPDATE SET tipo = EXCLUDED.tipo,
+                                     monto_pagado = EXCLUDED.monto_pagado,
+                                     monto_devolver = EXCLUDED.monto_devolver,
+                                     estado = EXCLUDED.estado,
+                                     devuelto_en = EXCLUDED.devuelto_en,
+                                     registrado_por = EXCLUDED.registrado_por`,
+    [dniLimpio, fila.tipo, fila.montoPagado, fila.montoDevolver, estadoNorm,
+     esDevuelto ? new Date().toISOString() : null,
+     esDevuelto ? String(usuario || '') : '']
+  );
+  return { dni: dniLimpio, tipo: fila.tipo, montoDevolver: fila.montoDevolver, estado: estadoNorm };
+}
+
 // ── Notificaciones ──────────────────────────────────────────────────
 
 const EPOCH_FECHA_SQL = "round(extract(epoch from creado_en AT TIME ZONE current_setting('TimeZone')))";
@@ -2748,6 +2907,8 @@ module.exports = {
   eliminarAsistentePlan,
   actualizarComprobanteCuota,
   eliminarComprobanteCuota,
+  listarDevoluciones,
+  actualizarDevolucion,
   listarNotificaciones,
   listarNotificacionesActivas,
   contarNotificacionesSinLeer,

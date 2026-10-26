@@ -698,6 +698,9 @@ function activarSubTabPagos(sub) {
   }
   el('subPagosPlan').hidden = sub !== 'plan';
   el('subPagosAsignar').hidden = sub !== 'asignar';
+  el('subPagosDevoluciones').hidden = sub !== 'devoluciones';
+  el('pagosSeccionAsistentes').hidden = sub === 'devoluciones';
+  if (sub === 'devoluciones') cargarDevoluciones();
 }
 
 document.querySelectorAll('#subTabsPagos .sub-tab').forEach((btn) => {
@@ -5290,6 +5293,161 @@ el('botonExportarPagos')?.addEventListener('click', async () => {
     btn.textContent = textoOriginal;
   }
 });
+
+// ── Devoluciones a talleristas (100%) y ponentes (50%) ──────────────
+const mensajeDevoluciones = el('mensajeDevoluciones');
+const tablaDevoluciones = el('tablaDevoluciones');
+const filtroDevolucionDni = el('filtroDevolucionDni');
+const filtroDevolucionTipo = el('filtroDevolucionTipo');
+const resumenDevoluciones = el('resumenDevoluciones');
+const totalDevolucion = el('totalDevolucion');
+
+let devolucionesDatos = { filas: [] };
+
+// admin.js define formatearMoneda dos veces y la vigente (la del dashboard) ya
+// incluye el signo "$": este helper evita el doble "$" con cualquiera de las dos.
+function textoMontoDevolucion(valor) {
+  const texto = formatearMoneda(valor);
+  return texto.startsWith('$') ? texto : `$${texto}`;
+}
+
+async function cargarDevoluciones() {
+  const res = await api('/api/admin/pagos/devoluciones');
+  if (!res.ok) {
+    mostrarMensaje(mensajeDevoluciones, res.data.error || 'No se pudieron cargar las devoluciones.', 'error');
+    return;
+  }
+  devolucionesDatos = res.data || { filas: [] };
+  mostrarMensaje(mensajeDevoluciones, '', '');
+  renderDevoluciones();
+}
+
+function filasDevolucionesVisibles() {
+  const q = String(filtroDevolucionDni?.value || '').trim().toLowerCase();
+  const tipo = String(filtroDevolucionTipo?.value || '');
+  return (devolucionesDatos.filas || []).filter((f) => {
+    if (tipo && f.tipo !== tipo) return false;
+    if (!q) return true;
+    return String(f.dni).toLowerCase().includes(q)
+      || String(f.apellido || '').toLowerCase().includes(q)
+      || String(f.nombre || '').toLowerCase().includes(q)
+      || String(f.nombreCompleto || '').toLowerCase().includes(q);
+  });
+}
+
+function renderDevoluciones() {
+  const tbody = tablaDevoluciones.querySelector('tbody');
+  tbody.innerHTML = '';
+  const filas = filasDevolucionesVisibles();
+
+  if (filas.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = 'No hay pagos de talleristas ni ponentes para mostrar.';
+    td.style.color = 'var(--color-texto-suave)';
+    td.style.textAlign = 'center';
+    td.style.padding = '0.9rem';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  let pendiente = 0;
+  let devuelto = 0;
+  let pagado = 0;
+  for (const f of filas) {
+    const monto = Number(f.montoDevolver) || 0;
+    pagado += Number(f.montoPagado) || 0;
+    if (f.estado === 'devuelto') devuelto += monto;
+    else pendiente += monto;
+
+    const tr = document.createElement('tr');
+    const tdDni = document.createElement('td');
+    tdDni.className = 'celda-dni';
+    tdDni.textContent = f.dni;
+
+    const tdNombre = document.createElement('td');
+    tdNombre.style.fontWeight = '600';
+    tdNombre.style.textAlign = 'left';
+    const nombreLinea = document.createElement('div');
+    nombreLinea.textContent = f.nombreCompleto || '—';
+    tdNombre.appendChild(nombreLinea);
+    const pagadoLinea = document.createElement('div');
+    pagadoLinea.textContent = `Pagado: ${textoMontoDevolucion(f.montoPagado)} · ${f.cuotasPagadas || 0} cuota(s)`;
+    pagadoLinea.style.fontWeight = '400';
+    pagadoLinea.style.fontSize = '0.75rem';
+    pagadoLinea.style.color = 'var(--color-texto-suave)';
+    tdNombre.appendChild(pagadoLinea);
+
+    const tdMonto = document.createElement('td');
+    tdMonto.style.textAlign = 'right';
+    tdMonto.style.fontWeight = '700';
+    tdMonto.textContent = textoMontoDevolucion(monto);
+    const factorLinea = document.createElement('div');
+    factorLinea.textContent = f.tipo === 'tallerista' ? '100% de lo pagado' : '50% de lo pagado';
+    factorLinea.style.fontWeight = '400';
+    factorLinea.style.fontSize = '0.72rem';
+    factorLinea.style.color = 'var(--color-texto-suave)';
+    tdMonto.appendChild(factorLinea);
+
+    const tdTipo = document.createElement('td');
+    tdTipo.style.textAlign = 'center';
+    const badge = document.createElement('span');
+    badge.className = f.tipo === 'tallerista' ? 'badge badge-tallerista' : 'badge badge-estandar';
+    badge.textContent = f.tipo === 'tallerista' ? 'Tallerista' : 'Ponente';
+    badge.title = f.tipo === 'tallerista' ? 'Se devuelve el 100% de lo pagado' : 'Se devuelve el 50% de lo pagado';
+    tdTipo.appendChild(badge);
+
+    const tdEstado = document.createElement('td');
+    tdEstado.style.textAlign = 'center';
+    const esDevuelto = f.estado === 'devuelto';
+    const btnEstado = document.createElement('button');
+    btnEstado.type = 'button';
+    btnEstado.className = `estado-devolucion ${esDevuelto ? 'estado-devuelto' : 'estado-pendiente'}`;
+    btnEstado.textContent = esDevuelto ? '✓' : '✗';
+    btnEstado.title = esDevuelto
+      ? `Devuelto${f.devueltoEn ? ` el ${formatearFechaTope(f.devueltoEn)}` : ''}${f.registradoPor ? ` por ${f.registradoPor}` : ''}. Clic para volver a "a devolver".`
+      : 'A devolver — clic para marcar como devuelto';
+    btnEstado.addEventListener('click', async () => {
+      btnEstado.disabled = true;
+      const nuevoEstado = esDevuelto ? 'a_devolver' : 'devuelto';
+      const res = await api('/api/admin/pagos/devoluciones', {
+        method: 'PUT',
+        body: JSON.stringify({ dni: f.dni, estado: nuevoEstado }),
+      });
+      if (!res.ok) {
+        mostrarMensaje(mensajeDevoluciones, res.data.error || 'No se pudo actualizar la devolución.', 'error');
+      } else {
+        mostrarMensaje(mensajeDevoluciones, nuevoEstado === 'devuelto'
+          ? `Devolución marcada como devuelta (${textoMontoDevolucion(monto)}).`
+          : 'Devolución vuelta a "a devolver".', 'ok');
+        await cargarDevoluciones();
+      }
+      btnEstado.disabled = false;
+    });
+    tdEstado.appendChild(btnEstado);
+    if (f.registradoPor) {
+      const detalle = document.createElement('div');
+      detalle.textContent = f.registradoPor;
+      detalle.style.fontSize = '0.7rem';
+      detalle.style.color = 'var(--color-texto-suave)';
+      tdEstado.appendChild(detalle);
+    }
+
+    tr.append(tdDni, tdNombre, tdMonto, tdTipo, tdEstado);
+    tbody.appendChild(tr);
+  }
+
+  if (totalDevolucion) totalDevolucion.textContent = textoMontoDevolucion(pendiente);
+  if (resumenDevoluciones) {
+    resumenDevoluciones.textContent = filas.length
+      ? `${filas.length} persona(s) · A devolver: ${textoMontoDevolucion(pendiente)} · Devuelto: ${textoMontoDevolucion(devuelto)} · Total general: ${textoMontoDevolucion(pendiente + devuelto)} · Pagado: ${textoMontoDevolucion(pagado)}`
+      : 'Sin resultados.';
+  }
+}
+
+filtroDevolucionDni?.addEventListener('input', renderDevoluciones);
+filtroDevolucionTipo?.addEventListener('change', renderDevoluciones);
 
 // ── Notificaciones a la app móvil ──────────────────────────────────
 const mensajeNotificaciones = el('mensajeNotificaciones');

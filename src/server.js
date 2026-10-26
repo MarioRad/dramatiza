@@ -3024,6 +3024,27 @@ app.get('/api/admin/pagos/export/xlsx', requireAuth, requirePermiso('perm_inscri
   }
 });
 
+// ── Devoluciones a talleristas (100%) y ponentes (50%) ──────────────
+app.get('/api/admin/pagos/devoluciones', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    res.json(await db.listarDevoluciones());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put('/api/admin/pagos/devoluciones', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const resultado = await db.actualizarDevolucion(String(body.dni || ''), String(body.estado || ''), req.sesion.usuario);
+    const accion = resultado.estado === 'devuelto' ? 'marcada como devuelta' : 'marcada como a devolver';
+    await db.registrarEvento('devolucion_actualizada', `Devolución ${accion}: DNI ${resultado.dni} · ${resultado.tipo} · $${resultado.montoDevolver}`, req.sesion.usuario).catch(() => {});
+    res.json({ ok: true, ...resultado });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post('/api/admin/pagos/asignar', requireAuth, requirePermiso('perm_inscripciones'), async (req, res, next) => {
   try {
     const body = req.body || {};
