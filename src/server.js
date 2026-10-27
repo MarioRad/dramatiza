@@ -4415,10 +4415,9 @@ async function obtenerFirmasConfig() {
 }
 
 // ── Certificados ─────────────────────────────────────────────────────
-// CERT_REQUIERE_ASISTENCIA=true vuelve a exigir ingreso+egreso por taller
-// para los certificados de asistente. Por defecto (encuentro sin registro
-// sistemático de asistencias) la elegibilidad es por inscripción.
-const CERT_REQUIERE_ASISTENCIA = String(process.env.CERT_REQUIERE_ASISTENCIA || '').toLowerCase() === 'true';
+// Los certificados de asistente exigen control de asistencia: la lista de
+// elegibles solo incluye DNIs con al menos 1 marca en taller_asistencias y
+// la emisión individual valida ingreso+egreso en todos sus talleres.
 
 // Agrupa partes de un mismo taller lógico (principal + 2° parte vía pareja_id)
 // en una sola entrada para el certificado, usando el nombre del principal
@@ -4480,25 +4479,13 @@ app.get('/api/admin/certificados', requireAuth, async (req, res, next) => {
 app.get('/api/admin/certificados/elegibles', requireAuth, async (req, res, next) => {
   try {
     const asistentes = await db.listarAsistentes();
-    // El encuentro terminó sin registro sistemático de asistencias (ingreso/egreso):
-    // la elegibilidad es por inscripción a talleres. Para volver a exigir el
-    // control de asistencia, poner CERT_REQUIERE_ASISTENCIA=true en el entorno.
-    if (!CERT_REQUIERE_ASISTENCIA) {
-      return res.json(asistentes.map((a) => ({
-        dni: a.dni,
-        nombre: a.nombre,
-        apellido: a.apellido,
-        email: a.email,
-        talleres_nombres: a.talleres_nombres,
-        talleres_ids: a.talleres_ids,
-        cantidad_talleres: Number(a.cantidad_talleres),
-        elegible: Number(a.cantidad_talleres) > 0,
-        asistencias: [],
-        motivo: Number(a.cantidad_talleres) > 0 ? '' : 'Sin inscripciones a talleres',
-      })));
-    }
+    // Solo aparecen quienes tienen al menos 1 asistencia cargada en
+    // taller_asistencias. La elegibilidad exige ingreso+egreso en todos
+    // sus talleres inscriptos.
+    const marcas = await db.obtenerMarcasAsistenciaPorDni();
+    const conAsistencia = asistentes.filter((a) => marcas.has(String(a.dni || '').trim()));
     const out = [];
-    for (const a of asistentes) {
+    for (const a of conAsistencia) {
       try {
         const ver = await db.verificarElegibilidadAsistente(a.dni);
         out.push({
@@ -4566,7 +4553,7 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       const u = await db.buscarUsuario(sesion.usuario);
       if (!u || !u.perm_certificados) return res.status(403).json({error:'Sin permiso de certificados'});
     }
-    const { tipo, dni, ponenteId, ponente_id, forzar } = req.body||{};
+    const { tipo, dni, ponenteId, ponente_id } = req.body||{};
     const tipoNorm = String(tipo||'').trim().toLowerCase();
     if (!['asistente','ponente','tallerista'].includes(tipoNorm)) return res.status(400).json({error:'tipo debe ser asistente, ponente o tallerista'});
     let nombre='', apellido='', email='', detalle={}, talleresIds='', dniNorm='', ponId=null;
@@ -4653,17 +4640,19 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       let talleresParaCert;
       let tallerDictado = false;
       let esTalleristaFlag = false;
-      if (CERT_REQUIERE_ASISTENCIA) {
+      if (tipoNorm==='asistente') {
+        // Asistente: exige ingreso+egreso (control de asistencia) en todos sus talleres.
+        // El certificado solo incluye los talleres con asistencia completa.
         const ver = await db.verificarElegibilidadAsistente(dniNorm);
-        if (tipoNorm==='asistente' && !ver.elegible && !forzar) {
+        if (!ver.elegible) {
           const falt = ver.asistencias.filter(a=>!a.completo).map(a=>a.taller).join(', ');
           return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
         }
-        const talleresCompletos = ver.asistencias.filter(a=>a.completo);
-        const crudos = (tipoNorm==='asistente' && !forzar) ? talleresCompletos : ver.asistencias.map(a=>({ taller: a.taller, fecha:a.fecha, hora:a.hora, taller_id:a.taller_id, completo:a.completo }));
+        const crudos = ver.asistencias.filter(a=>a.completo);
         talleresParaCert = await agruparTalleresCertificado(crudos);
       } else {
-        // Sin control de asistencia: el certificado incluye todos los talleres inscriptos
+        // Tallerista por DNI: sin exigir asistencia (es quien registra la de otros);
+        // se listan los talleres inscriptos por si no figura como dictado.
         // (principal + 2° parte colapsados en una sola entrada con el nombre completo)
         const crudos = inscripciones.map(i => ({ taller: i.taller, fecha: i.fecha||'', hora: i.hora||'', taller_id: Number(i.taller_id), completo: true }));
         talleresParaCert = await agruparTalleresCertificado(crudos);

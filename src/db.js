@@ -2552,6 +2552,22 @@ async function verificarElegibilidadAsistente(dni) {
   }
   return { elegible: todasOk && asistencias.length>0, inscripciones, asistencias };
 }
+async function obtenerMarcasAsistenciaPorDni() {
+  let filas = [];
+  try {
+    filas = await query('SELECT dni, COUNT(*) AS marcas FROM taller_asistencias GROUP BY dni');
+  } catch (e) {
+    if (e.code === '42P01') return new Map();
+    throw e;
+  }
+  const mapa = new Map();
+  for (const f of filas) {
+    const dni = String(f.dni || '').trim();
+    if (!dni) continue;
+    mapa.set(dni, Number(f.marcas) || 0);
+  }
+  return mapa;
+}
 
 // ── Auspiciantes ("Nos Acompañan") ─────────────────────────────────────
 
@@ -2924,6 +2940,7 @@ module.exports = {
   crearCertificado,
   eliminarCertificado,
   verificarElegibilidadAsistente,
+  obtenerMarcasAsistenciaPorDni,
   expandirParejas,
   obtenerFichaAsistente,
   listarAuspiciantes,
