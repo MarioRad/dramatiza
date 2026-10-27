@@ -4488,6 +4488,7 @@ app.get('/api/admin/certificados/elegibles', requireAuth, async (req, res, next)
     for (const a of conAsistencia) {
       try {
         const ver = await db.verificarElegibilidadAsistente(a.dni);
+        const faltantes = ver.faltantes || [];
         out.push({
           dni: a.dni,
           nombre: a.nombre,
@@ -4498,7 +4499,8 @@ app.get('/api/admin/certificados/elegibles', requireAuth, async (req, res, next)
           cantidad_talleres: Number(a.cantidad_talleres),
           elegible: ver.elegible,
           asistencias: ver.asistencias,
-          motivo: ver.motivo || '',
+          faltantes,
+          motivo: ver.motivo || (faltantes.length ? `Falta asistencia en: ${faltantes.join(', ')}` : ''),
         });
       } catch(e){
         out.push({ dni:a.dni, nombre:a.nombre, apellido:a.apellido, email:a.email, elegible:false, motivo:e.message, asistencias:[] });
@@ -4641,12 +4643,13 @@ app.post('/api/admin/certificados/generar', requireAuth, async (req, res, next) 
       let tallerDictado = false;
       let esTalleristaFlag = false;
       if (tipoNorm==='asistente') {
-        // Asistente: exige ingreso+egreso (control de asistencia) en todos sus talleres.
-        // El certificado solo incluye los talleres con asistencia completa.
+        // Asistente: exige ingreso+egreso (control de asistencia) en todos sus
+        // talleres lógicos. En talleres de 2 partes basta asistir a 1 de las
+        // partes; el certificado solo incluye las partes asistidas.
         const ver = await db.verificarElegibilidadAsistente(dniNorm);
         if (!ver.elegible) {
-          const falt = ver.asistencias.filter(a=>!a.completo).map(a=>a.taller).join(', ');
-          return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo}`, elegible:false, asistencias: ver.asistencias });
+          const falt = (ver.faltantes || []).join(', ');
+          return res.status(409).json({ error:`El asistente no cumple con el control de asistencia (ingreso+egreso). Faltantes: ${falt||ver.motivo||'talleres sin asistencia completa'}`, elegible:false, asistencias: ver.asistencias, faltantes: ver.faltantes || [] });
         }
         const crudos = ver.asistencias.filter(a=>a.completo);
         talleresParaCert = await agruparTalleresCertificado(crudos);
@@ -4811,8 +4814,17 @@ app.post('/api/admin/certificados/:codigo/enviar', requireAuth, async (req, res,
       codigo: cert.codigo, tipo: cert.tipo, nombre: cert.nombre, apellido: cert.apellido,
       email, telefono, detalle, pdfBuffer: doc.pdf, verificarUrl,
     });
+    // Registrar envío en la columna de control (email real, simulado o WhatsApp)
+    let enviosEmail = Number(cert.envios_email) || 0;
+    let ultimoEnvioEn = cert.ultimo_envio_en || '';
+    if (envio.emailEnviado || envio.simulado || envio.whatsappEnviado) {
+      try {
+        const reg = await db.registrarEnvioCertificado(codigo);
+        if (reg) { enviosEmail = reg.envios_email; ultimoEnvioEn = reg.ultimo_envio_en; }
+      } catch (_) {}
+    }
     await db.registrarEvento('certificado_enviado', `Certificado ${codigo} enviado a ${email}${telefono ? ` (WhatsApp ${telefono})` : ''} por ${sesion.usuario}${envio.simulado ? ' [SIMULADO: SMTP no configurado]' : ''}`, sesion.usuario).catch(() => {});
-    res.json({ ok: true, codigo, email, telefono: telefono || '', ...envio });
+    res.json({ ok: true, codigo, email, telefono: telefono || '', envios_email: enviosEmail, ultimo_envio_en: ultimoEnvioEn, ...envio });
   } catch (e) { next(e); }
 });
 

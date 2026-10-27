@@ -58,7 +58,7 @@ async function initPool() {
       await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perm_certificados BOOLEAN NOT NULL DEFAULT TRUE');
       try { await pool.query(`DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='usuarios_rol_check') THEN ALTER TABLE usuarios DROP CONSTRAINT usuarios_rol_check; END IF; EXCEPTION WHEN others THEN NULL; END $$;`); } catch(_){}
       await pool.query(`ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK (rol IN ('admin','superior','menu','operador'))`).catch(()=>{});
-      await pool.query(`CREATE TABLE IF NOT EXISTS certificados (id SERIAL PRIMARY KEY, codigo VARCHAR(30) NOT NULL UNIQUE, tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('asistente','ponente','tallerista')), dni VARCHAR(20), ponente_id INTEGER REFERENCES ponentes(id) ON DELETE SET NULL, nombre TEXT NOT NULL, apellido TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', detalle JSONB, talleres_ids TEXT NOT NULL DEFAULT '', qr_data TEXT, hash_firma TEXT NOT NULL DEFAULT '', emitido_por TEXT NOT NULL DEFAULT '', creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS certificados (id SERIAL PRIMARY KEY, codigo VARCHAR(30) NOT NULL UNIQUE, tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('asistente','ponente','tallerista')), dni VARCHAR(20), ponente_id INTEGER REFERENCES ponentes(id) ON DELETE SET NULL, nombre TEXT NOT NULL, apellido TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', detalle JSONB, talleres_ids TEXT NOT NULL DEFAULT '', qr_data TEXT, hash_firma TEXT NOT NULL DEFAULT '', emitido_por TEXT NOT NULL DEFAULT '', envios_email INTEGER NOT NULL DEFAULT 0, ultimo_envio_en TIMESTAMPTZ, creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
       await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_certificados_codigo ON certificados(codigo)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_certificados_dni ON certificados(dni)');
       await pool.query('CREATE TABLE IF NOT EXISTS taller_asistencias (id SERIAL PRIMARY KEY, dni TEXT NOT NULL, taller_id INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE, bloque_id INTEGER REFERENCES programa_bloques(id) ON DELETE SET NULL, tipo TEXT NOT NULL CHECK (tipo IN (\'ingreso\',\'egreso\')), usuario TEXT, registrado_en TIMESTAMPTZ NOT NULL DEFAULT NOW())').catch(()=>{});
@@ -94,6 +94,9 @@ async function initPool() {
       // 014_devoluciones: devoluciones a talleristas (100%) y ponentes (50%)
       await pool.query(`CREATE TABLE IF NOT EXISTS devoluciones (id SERIAL PRIMARY KEY, dni VARCHAR(20) NOT NULL, tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('tallerista','ponente')), monto_pagado NUMERIC(12,2) NOT NULL DEFAULT 0, monto_devolver NUMERIC(12,2) NOT NULL DEFAULT 0, estado VARCHAR(20) NOT NULL DEFAULT 'a_devolver' CHECK (estado IN ('a_devolver','devuelto')), devuelto_en TIMESTAMPTZ, registrado_por TEXT NOT NULL DEFAULT '', creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (dni))`).catch(()=>{});
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_devoluciones_dni ON devoluciones(dni)`).catch(()=>{});
+      // 015_certificados_envios: control de envíos de certificado por email
+      await pool.query('ALTER TABLE certificados ADD COLUMN IF NOT EXISTS envios_email INTEGER NOT NULL DEFAULT 0').catch(()=>{});
+      await pool.query('ALTER TABLE certificados ADD COLUMN IF NOT EXISTS ultimo_envio_en TIMESTAMPTZ').catch(()=>{});
       // Migrar datos existentes si las tablas estaban vacías
       try { await pool.query(`INSERT INTO taller_ponentes (taller_id, ponente_id, orden) SELECT id, ponente_id, 0 FROM talleres WHERE ponente_id IS NOT NULL ON CONFLICT (taller_id, ponente_id) DO NOTHING`); } catch(_){}
     } catch (e) {
@@ -2509,17 +2512,17 @@ async function eliminarNotificacion(id) {
 // ── Certificados ────────────────────────────────────────────────────────
 async function listarCertificados() {
   try {
-    return await query('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados ORDER BY creado_en DESC, id DESC');
+    return await query('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, envios_email, ultimo_envio_en, creado_en FROM certificados ORDER BY creado_en DESC, id DESC');
   } catch (e) {
     if (e.code === '42P01') return [];
     throw e;
   }
 }
 async function buscarCertificadoPorCodigo(codigo) {
-  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados WHERE codigo = ?', [codigo]);
+  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, envios_email, ultimo_envio_en, creado_en FROM certificados WHERE codigo = ?', [codigo]);
 }
 async function buscarCertificadoPorId(id) {
-  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, creado_en FROM certificados WHERE id = ?', [id]);
+  return queryOne('SELECT id, codigo, tipo, dni, ponente_id, nombre, apellido, email, detalle, talleres_ids, qr_data, hash_firma, emitido_por, envios_email, ultimo_envio_en, creado_en FROM certificados WHERE id = ?', [id]);
 }
 async function crearCertificado({ codigo, tipo, dni = null, ponenteId = null, nombre, apellido, email = '', detalle = {}, talleresIds = '', qrData = '', hashFirma = '', emitidoPor = '' }) {
   const filas = await query(
@@ -2533,24 +2536,40 @@ async function eliminarCertificado(id) {
   if (!res.filasAfectadas) throw new HttpError(404, 'Certificado no encontrado.');
   return true;
 }
+async function registrarEnvioCertificado(codigo) {
+  const filas = await query(
+    'UPDATE certificados SET envios_email = COALESCE(envios_email, 0) + 1, ultimo_envio_en = NOW() WHERE codigo = ? RETURNING envios_email, ultimo_envio_en',
+    [codigo]
+  );
+  if (!filas.length) return null;
+  return { envios_email: Number(filas[0].envios_email) || 0, ultimo_envio_en: filas[0].ultimo_envio_en };
+}
 async function verificarElegibilidadAsistente(dni) {
   const inscripciones = await query(
-    `SELECT i.taller_id, t.nombre, t.fecha, t.hora FROM inscripciones i JOIN talleres t ON t.id=i.taller_id WHERE i.dni=? ORDER BY t.fecha, t.hora`,
+    `SELECT i.taller_id, t.nombre, t.fecha, t.hora, COALESCE(t.pareja_id, t.id) AS main_id FROM inscripciones i JOIN talleres t ON t.id=i.taller_id WHERE i.dni=? ORDER BY t.fecha, t.hora`,
     [dni]
   );
-  if (inscripciones.length === 0) return { elegible: false, motivo: 'Sin inscripciones a talleres', inscripciones: [], asistencias: [] };
+  if (inscripciones.length === 0) return { elegible: false, motivo: 'Sin inscripciones a talleres', inscripciones: [], asistencias: [], faltantes: [] };
   const asistencias = [];
-  let todasOk = true;
+  const grupos = new Map(); // mainId (taller lógico) -> { nombre, completo }
   for (const ins of inscripciones) {
     let rows = [];
     try { rows = await query('SELECT tipo FROM taller_asistencias WHERE dni=? AND taller_id=?', [dni, ins.taller_id]); } catch (e) { if (e.code !== '42P01') throw e; }
     const tieneIngreso = rows.some(r=> r.tipo==='ingreso');
     const tieneEgreso = rows.some(r=> r.tipo==='egreso');
     const ok = tieneIngreso && tieneEgreso;
-    if (!ok) todasOk = false;
     asistencias.push({ taller_id: Number(ins.taller_id), taller: ins.nombre, fecha: ins.fecha||'', hora: ins.hora||'', tieneIngreso, tieneEgreso, completo: ok });
+    // Taller lógico: partes de 2 días unidas por pareja_id. Basta con asistir
+    // a 1 de las partes para que el taller compute completo.
+    const mainId = Number(ins.main_id) || Number(ins.taller_id);
+    if (!grupos.has(mainId)) grupos.set(mainId, { nombre: String(ins.nombre||''), completo: false });
+    const g = grupos.get(mainId);
+    if (Number(ins.taller_id) === mainId) g.nombre = String(ins.nombre||g.nombre);
+    if (ok) g.completo = true;
   }
-  return { elegible: todasOk && asistencias.length>0, inscripciones, asistencias };
+  const faltantes = [...grupos.values()].filter(g=>!g.completo).map(g=>g.nombre);
+  const elegible = faltantes.length === 0 && grupos.size > 0;
+  return { elegible, inscripciones, asistencias, faltantes };
 }
 async function obtenerMarcasAsistenciaPorDni() {
   let filas = [];
@@ -2940,6 +2959,7 @@ module.exports = {
   crearCertificado,
   eliminarCertificado,
   verificarElegibilidadAsistente,
+  registrarEnvioCertificado,
   obtenerMarcasAsistenciaPorDni,
   expandirParejas,
   obtenerFichaAsistente,

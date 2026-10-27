@@ -6227,8 +6227,9 @@ async function cargarCertEmitidos(){
   certEmitidos=r.data||[];
   const tbody=document.querySelector('#tablaCertEmitidos tbody'); if(!tbody) return;
   tbody.innerHTML='';
-  if(resumen) resumen.textContent=`Emitidos: ${certEmitidos.length}`;
-  if(certEmitidos.length===0){ const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=9;td.textContent='Aún no se emitieron certificados.';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return; }
+  const enviados = certEmitidos.filter(c=>Number(c.envios_email)>0).length;
+  if(resumen) resumen.textContent=`Emitidos: ${certEmitidos.length} · Enviados: ${enviados}`;
+  if(certEmitidos.length===0){ const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=10;td.textContent='Aún no se emitieron certificados.';td.style.color='var(--color-texto-suave)';tr.appendChild(td);tbody.appendChild(tr);return; }
   for(const c of certEmitidos){
     const tr=document.createElement('tr');
     const tdCodigo=document.createElement('td');tdCodigo.textContent=c.codigo;tdCodigo.style.fontFamily='monospace';tdCodigo.style.fontWeight='700';
@@ -6244,6 +6245,14 @@ async function cargarCertEmitidos(){
     const tdQR=document.createElement('td');const aQR=document.createElement('a');aQR.href=`/api/admin/certificados/${encodeURIComponent(c.codigo)}/qr.png`;aQR.target='_blank';aQR.textContent='QR';aQR.className='boton boton-chico';tdQR.appendChild(aQR);
     const tdHash=document.createElement('td');tdHash.textContent=(c.hash_firma||'').slice(0,16)+'…';tdHash.title=c.hash_firma||'';tdHash.style.fontFamily='monospace';tdHash.style.fontSize='0.72rem';
     const tdEmitido=document.createElement('td');tdEmitido.textContent=c.creado_en? formatearFecha(c.creado_en):'—';tdEmitido.style.fontSize='0.78rem';tdEmitido.title=String(c.creado_en||'');
+    const tdEnvio=document.createElement('td');tdEnvio.style.fontSize='0.78rem';tdEnvio.style.whiteSpace='nowrap';
+    const nEnvios=Number(c.envios_email)||0;
+    if(nEnvios>0){
+      tdEnvio.textContent=`✓ ${nEnvios}`;
+      tdEnvio.className='encuentro-si';
+      const fUlt=c.ultimo_envio_en? formatearFecha(c.ultimo_envio_en):'';
+      tdEnvio.title=`${nEnvios} envío${nEnvios===1?'':'s'}${fUlt?` · último: ${fUlt}`:''}${c.email?` · ${c.email}`:''}`;
+    } else { tdEnvio.textContent='—';tdEnvio.style.color='var(--color-texto-suave)'; }
     const tdAcc=document.createElement('td');const cont=document.createElement('div');cont.className='acciones-fila';
     const aPdf=document.createElement('a');aPdf.href=`/api/admin/certificados/${encodeURIComponent(c.codigo)}/pdf`;aPdf.target='_blank';aPdf.textContent='Ver PDF';aPdf.className='boton boton-chico';
     const btnVerif=document.createElement('button');btnVerif.type='button';btnVerif.className='boton boton-secundario boton-chico';btnVerif.textContent='Verificar';btnVerif.addEventListener('click', async()=>{
@@ -6274,12 +6283,13 @@ async function cargarCertEmitidos(){
         if (rr.data.emailEnviado) partes.push(`email a ${rr.data.email}`);
         if (rr.data.whatsappEnviado) partes.push('WhatsApp');
         if (rr.data.simulado) partes.push('[SIMULADO: SMTP no configurado, registrado en log]');
-        mostrarMensaje(el('mensajeCertificados'), `Certificado ${c.codigo} enviado${partes.length ? ': ' + partes.join(' + ') : ''}`, 'ok');
+        mostrarMensaje(el('mensajeCertificados'), `Certificado ${c.codigo} enviado${partes.length ? ': ' + partes.join(' + ') : ''}${rr.data.envios_email?` (envío n° ${rr.data.envios_email})`:''}`, 'ok');
+        await cargarCertEmitidos();
       }
       btnEnviar.disabled=false;
     });
     cont.append(aPdf, btnVerif, btnEnviar, btnDel); tdAcc.appendChild(cont);
-    tr.append(tdCodigo,tdTipo,tdNombre,tdDni,tdDetalle,tdQR,tdHash,tdEmitido,tdAcc); tbody.appendChild(tr);
+    tr.append(tdCodigo,tdTipo,tdNombre,tdDni,tdDetalle,tdQR,tdHash,tdEmitido,tdEnvio,tdAcc); tbody.appendChild(tr);
   }
 }
 
